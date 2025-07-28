@@ -1,6 +1,7 @@
 const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { sendForgotPasswordEmail } = require("../../services/emailService");
 
 // Allowed roles
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
@@ -169,7 +170,9 @@ exports.forgotPassword = async (req, res, next) => {
 
     await user.save();
 
-    const resetUrl = `${process.env.CORS_ORIGIN}/reset?token=${resetToken}`;
+     const resetUrl = `${process.env.CORS_ORIGIN}/reset-password?token=${resetToken}`;
+
+    await sendForgotPasswordEmail(user, resetToken);
 
     res.status(200).json({
       message: "Password reset link generated.",
