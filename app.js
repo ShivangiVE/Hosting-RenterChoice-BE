@@ -3,6 +3,7 @@ const cors = require("cors");
 const path = require("path");
 
 const adminRoutes = require("./src/routes/admin");
+const officeAdminRoutes = require("./src/routes/officeAdminRoutes");
 const authRoutes = require("./src/routes/externalUsers/auth");
 const internalAuthRoutes = require("./src/routes/internalUsers/auth");
 const uploadRoutes = require("./src/routes/profileUploadRoutes");
@@ -15,7 +16,6 @@ app.use(express.json());
 // Serve /uploads folder statically
 app.use("/uploads", express.static("uploads"));
 
-
 app.get("/", (req, res) => {
   res.send("API is working ✅");
 });
@@ -23,6 +23,7 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/internalauth", internalAuthRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/officeAdmin", officeAdminRoutes);
 app.use("/api/upload", uploadRoutes);
 
 app.use(errorHandler);

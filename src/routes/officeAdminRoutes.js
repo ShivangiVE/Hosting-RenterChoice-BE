@@ -16,7 +16,7 @@ router.use(protect, authorize("Admin", "OfficeAdmin"));
 router.post("/internal-users", createInternalUser);
 
 // Get all internal users
-router.get("/internal-users", getInternalUsers);
+router.get("/team-users", getInternalUsers);
 
 // Delete internal user
 router.delete("/internal-users/:id", deleteInternalUser);
