@@ -42,9 +42,15 @@ exports.createInternalUser = async (req, res) => {
 
 // OfficeAdmin can list all team users
 exports.getInternalUsers = async (req, res) => {
-  const users = await User.find({ role: { $in: INTERNAL_ROLES } }).select(
-    "-password"
-  );
+  const filter = {
+    role: { $in: INTERNAL_ROLES },
+  };
+
+  if (req.query.createdBy) {
+    filter.createdBy = req.query.createdBy;
+  }
+
+  const users = await User.find(filter).select("-password");
   res.json(users);
 };
 
