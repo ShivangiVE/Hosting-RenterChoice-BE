@@ -21,7 +21,13 @@ const userSchema = new mongoose.Schema(
       },
     },
 
-    email: { type: String, required: true, unique: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
     password: { type: String, required: true },
     accountNumber: { type: String }, // Optional for Owners/Tenants/Vendors
     companyName: { type: String }, // Only for Vendor

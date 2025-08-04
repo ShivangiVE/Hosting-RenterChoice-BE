@@ -26,7 +26,7 @@ exports.loginInternal = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user || !INTERNAL_ROLES.includes(user.role)) {
       res.status(401);
       throw new Error("Invalid credentials");

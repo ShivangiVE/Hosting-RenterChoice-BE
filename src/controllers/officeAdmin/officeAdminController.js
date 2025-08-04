@@ -19,7 +19,7 @@ exports.createInternalUser = async (req, res) => {
       .json({ message: "Invalid role for internal creation" });
   }
 
-  const existing = await User.findOne({ email });
+  const existing = await User.findOne({ email: email.toLowerCase().trim() });
   if (existing) {
     return res.status(400).json({ message: "User already exists" });
   }
