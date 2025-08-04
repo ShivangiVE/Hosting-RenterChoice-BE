@@ -70,7 +70,7 @@ exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
       res.status(400);
       throw new Error("Invalid credentials");
@@ -170,7 +170,7 @@ exports.forgotPassword = async (req, res, next) => {
 
     await user.save();
 
-     const resetUrl = `${process.env.CORS_ORIGIN}/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.CORS_ORIGIN}/reset-password?token=${resetToken}`;
 
     await sendForgotPasswordEmail(user, resetToken);
 
