@@ -17,7 +17,7 @@ app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
 app.get("/", (req, res) => {
-  res.send("API is working ✅");
+  res.send("API is working");
 });
 
 app.use("/api/auth", authRoutes);

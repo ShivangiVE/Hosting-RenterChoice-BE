@@ -57,8 +57,9 @@ const userSchema = new mongoose.Schema(
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // who created this user
     managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // optional: who manages this external user
-    resetPasswordToken: { type: String },
-    resetPasswordExpires: { type: Date },
+    // resetPasswordToken: { type: String },
+    resetPasswordOTP: { type: String }, // 4-digit code
+    resetPasswordExpires: { type: Date }, // OTP expiration time
   },
   { timestamps: true }
 );

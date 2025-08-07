@@ -30,34 +30,60 @@ const sendEmail = async (to, subject, text, html) => {
 };
 
 // Forgot password email
-const sendForgotPasswordEmail = async (user, token) => {
-  const resetUrl = `${process.env.CORS_ORIGIN}/reset-password?token=${token}`;
-  const subject = "Reset Your Password";
+// const sendForgotPasswordEmail = async (user, token) => {
+//   const resetUrl = `${process.env.CORS_ORIGIN}/reset-password?token=${token}`;
+//   const subject = "Reset Your Password";
 
+//   const text = `
+//     Hi ${user.preferredName || user.firstName || "User"},
+
+//     You requested to reset your password. Click the link below:
+//     ${resetUrl}
+
+//     If you didn’t request this, you can ignore this email.
+//   `;
+
+//   const html = `
+//     <p>Hi ${user.preferredName || user.firstName || "User"},</p>
+//     <p>You requested to reset your password.</p>
+//     <p>
+//       <a href="${resetUrl}" style="color: white; background: #007bff; padding: 10px 15px; border-radius: 4px; text-decoration: none;">
+//         Reset Password
+//       </a>
+//     </p>
+//     <p>If you didn’t request this, you can safely ignore this email.</p>
+//   `;
+
+//   await sendEmail(user.email, subject, text, html);
+// };
+
+// Send OTP email
+const sendForgotPasswordOTPEmail = async (email, otp) => {
+  const subject = "Password Reset Verification Code";
   const text = `
-    Hi ${user.preferredName || user.firstName || "User"},
-    
-    You requested to reset your password. Click the link below:
-    ${resetUrl}
-    
-    If you didn’t request this, you can ignore this email.
+Hi,
+
+We received a request to reset your password. Please use the following One-Time Password (OTP) to proceed:
+
+OTP Code: ${otp}
+
+This code will expire in 10 minutes.
+
+If you did not request a password reset, please ignore this message or contact support.
   `;
 
   const html = `
-    <p>Hi ${user.preferredName || user.firstName || "User"},</p>
-    <p>You requested to reset your password.</p>
-    <p>
-      <a href="${resetUrl}" style="color: white; background: #007bff; padding: 10px 15px; border-radius: 4px; text-decoration: none;">
-        Reset Password
-      </a>
-    </p>
-    <p>If you didn’t request this, you can safely ignore this email.</p>
+    <p>Hi,</p>
+    <p>We received a request to reset your password. Please use the following One-Time Password (OTP) to proceed:</p>
+    <h2 style="letter-spacing: 2px;">${otp}</h2>
+    <p><strong>This code will expire in 10 minutes.</strong></p>
+    <p>If you did not request this, you can safely ignore this message or contact support.</p>
   `;
 
-  await sendEmail(user.email, subject, text, html);
+  await sendEmail(email, subject, text, html);
 };
 
 module.exports = {
   sendEmail,
-  sendForgotPasswordEmail,
+  sendForgotPasswordOTPEmail,
 };

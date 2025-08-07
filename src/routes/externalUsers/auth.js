@@ -9,6 +9,7 @@ const {
   changePassword,
   forgotPassword,
   resetPassword,
+  verifyOtp,
 } = require("../../controllers/externlusers/authController");
 const {
   registerValidator,
@@ -22,6 +23,7 @@ router.post("/login", loginValidator, validate, login);
 
 // Forgot / Reset
 router.post("/forgot", forgotPassword);
+router.post("/verify-otp", verifyOtp);
 router.post("/reset", resetPassword);
 
 // Protected routes
