@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const User = require("../../models/User");
+const { sendSuccess, sendError } = require("../../utils/response");
 
 const INTERNAL_ROLES = [
   "Admin",
@@ -21,78 +22,74 @@ const generateToken = (user) => {
   });
 };
 
-//Login
+// Login
 exports.loginInternal = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user || !INTERNAL_ROLES.includes(user.role)) {
-      res.status(401);
-      throw new Error("Invalid credentials");
+      return sendError(res, "Invalid credentials", 401);
     }
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
-      res.status(401);
-      throw new Error("Invalid credentials");
+      return sendError(res, "Invalid credentials", 401);
     }
 
-    res.status(200).json({
+    const userData = {
       _id: user._id,
       preferredName: user.preferredName,
       profileImage: user.profileImage,
       email: user.email,
       role: user.role,
       token: generateToken(user),
-    });
+    };
+
+    return sendSuccess(res, `You are logged in as ${user.role}`, userData);
   } catch (err) {
     next(err);
   }
 };
 
-//Change Password (logged-in)
+// Change Password (logged-in)
 exports.changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
     const user = await User.findById(req.user.id).select("+password");
     if (!user) {
-      res.status(404);
-      throw new Error("User not found");
+      return sendError(res, "User not found", 404);
     }
 
     const isMatch = await user.matchPassword(currentPassword);
     if (!isMatch) {
-      res.status(400);
-      throw new Error("Current password is incorrect");
+      return sendError(res, "Current password is incorrect", 400);
     }
 
     user.password = newPassword;
     await user.save();
 
-    res.json({ message: "Password updated successfully" });
+    return sendSuccess(res, "Password updated successfully");
   } catch (err) {
     next(err);
   }
 };
 
-//Update Profile
+// Update Profile
 exports.updateProfile = async (req, res, next) => {
   try {
     const { preferredName, email } = req.body;
     const user = await User.findById(req.user.id);
 
     if (!user) {
-      res.status(404);
-      throw new Error("User not found");
+      return sendError(res, "User not found", 404);
     }
 
     if (email && email !== user.email) {
       const emailTaken = await User.findOne({ email });
       if (emailTaken) {
-        res.status(400);
-        throw new Error("Email already in use");
+        return sendError(res, "Email already in use", 400);
       }
       user.email = email;
     }
@@ -103,29 +100,27 @@ exports.updateProfile = async (req, res, next) => {
 
     await user.save();
 
-    res.json({
-      message: "Profile updated",
-      user: {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
-    });
+    const updatedData = {
+      _id: user._id,
+      preferredName: user.preferredName,
+      email: user.email,
+      role: user.role,
+    };
+
+    return sendSuccess(res, "Profile updated", updatedData);
   } catch (err) {
     next(err);
   }
 };
 
-//Forgot Password
+// Forgot Password
 exports.forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
 
     if (!user || !INTERNAL_ROLES.includes(user.role)) {
-      res.status(404);
-      throw new Error("No internal account found with that email");
+      return sendError(res, "No internal account found with that email", 404);
     }
 
     const resetToken = crypto.randomBytes(20).toString("hex");
@@ -141,16 +136,13 @@ exports.forgotPassword = async (req, res, next) => {
 
     const resetUrl = `${process.env.CORS_ORIGIN}/reset?token=${resetToken}`;
 
-    res.status(200).json({
-      message: "Reset link generated",
-      resetUrl,
-    });
+    return sendSuccess(res, "Reset link generated", { resetUrl });
   } catch (err) {
     next(err);
   }
 };
 
-//Reset Password (from token)
+// Reset Password (from token)
 exports.resetPassword = async (req, res, next) => {
   try {
     const { token, password } = req.body;
@@ -163,8 +155,7 @@ exports.resetPassword = async (req, res, next) => {
     });
 
     if (!user || !INTERNAL_ROLES.includes(user.role)) {
-      res.status(400);
-      throw new Error("Invalid or expired reset token");
+      return sendError(res, "Invalid or expired reset token", 400);
     }
 
     user.password = password;
@@ -173,7 +164,7 @@ exports.resetPassword = async (req, res, next) => {
 
     await user.save();
 
-    res.json({ message: "Password has been reset successfully" });
+    return sendSuccess(res, "Password has been reset successfully");
   } catch (err) {
     next(err);
   }

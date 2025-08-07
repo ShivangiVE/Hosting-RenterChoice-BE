@@ -1,4 +1,5 @@
 const User = require("../../models/User");
+const { sendSuccess, sendError } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 
 const INTERNAL_ROLES = [
@@ -13,65 +14,87 @@ const INTERNAL_ROLES = [
 
 // Admin creates OfficeAdmin
 exports.createOfficeAdmin = async (req, res) => {
-  const { preferredName, email, password, role } = req.body;
+  try {
+    const { preferredName, email, password, role } = req.body;
 
-  if (role !== "OfficeAdmin") {
-    return res.status(400).json({ message: "Role must be OfficeAdmin only" });
+    if (role !== "OfficeAdmin") {
+      return sendError(res, "Role must be OfficeAdmin only", 400);
+    }
+
+    const exists = await User.findOne({ email: email.toLowerCase().trim() });
+    if (exists) {
+      return sendError(res, "User already exists", 409);
+    }
+
+    const user = await User.create({
+      preferredName,
+      email,
+      password,
+      role,
+      createdBy: req.user.id,
+    });
+
+    return sendSuccess(
+      res,
+      "Office admin created successfully",
+      {
+        _id: user._id,
+        preferredName: user.preferredName,
+        email: user.email,
+        role: user.role,
+      },
+      201
+    );
+  } catch (err) {
+    return sendError(res, "Failed to create office admin", 500);
   }
-
-  const exists = await User.findOne({ email: email.toLowerCase().trim() });
-  if (exists) {
-    return res.status(400).json({ message: "User already exists" });
-  }
-
-  const user = await User.create({
-    preferredName,
-    email,
-    password,
-    role,
-    createdBy: req.user.id,
-  });
-
-  res.status(201).json({
-    _id: user._id,
-    preferredName: user.preferredName,
-    email: user.email,
-    role: user.role,
-  });
 };
 
 // Admin creates Internal Users too
 exports.createInternalUser = async (req, res) => {
-  const { preferredName, email, password, role } = req.body;
+  try {
+    const { preferredName, email, password, role } = req.body;
 
-  if (!INTERNAL_ROLES.includes(role)) {
-    return res.status(400).json({ message: "Invalid internal role" });
+    if (!INTERNAL_ROLES.includes(role)) {
+      return sendError(res, "Invalid internal role", 400);
+    }
+
+    const exists = await User.findOne({ email: email.toLowerCase().trim() });
+    if (exists) {
+      return sendError(res, "User already exists", 409);
+    }
+
+    const user = await User.create({
+      preferredName,
+      email,
+      password,
+      role,
+    });
+
+    return sendSuccess(
+      res,
+      "Internal user created successfully",
+      {
+        _id: user._id,
+        preferredName: user.preferredName,
+        email: user.email,
+        role: user.role,
+      },
+      201
+    );
+  } catch (err) {
+    return sendError(res, "Failed to create internal user", 500);
   }
-
-  const exists = await User.findOne({ email: email.toLowerCase().trim() });
-  if (exists) {
-    return res.status(400).json({ message: "User already exists" });
-  }
-
-  const user = await User.create({
-    preferredName,
-    email,
-    password,
-    role,
-  });
-
-  res.status(201).json({
-    _id: user._id,
-    preferredName: user.preferredName,
-    email: user.email,
-    role: user.role,
-  });
 };
 
 // Get All Users
 exports.getAllUsers = async (req, res) => {
-  const users = await User.find().select("-password");
-  res.json(users);
+  try {
+    const users = await User.find().select("-password");
+    return sendSuccess(res, "Users retrieved successfully", { users });
+  } catch (err) {
+    return sendError(res, "Failed to retrieve users", 500);
+  }
 };
 
 // Get all Office Admin
@@ -80,17 +103,17 @@ exports.getOfficeAdmins = async (req, res) => {
     const officeAdmins = await User.find({ role: "OfficeAdmin" }).select(
       "preferredName email"
     );
-    res.status(200).json(officeAdmins);
+    return sendSuccess(res, "Office admins retrieved successfully", {
+      officeAdmins,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Failed to fetch Office Admins" });
+    return sendError(res, "Failed to fetch office admins", 500);
   }
 };
 
 // Get Users as per office admin team
 exports.getTeamsGroupedByOfficeAdmin = async (req, res) => {
   try {
-    // Find all office admins
     const officeAdmins = await User.find({ role: "OfficeAdmin" }).select(
       "_id preferredName email"
     );
@@ -113,32 +136,25 @@ exports.getTeamsGroupedByOfficeAdmin = async (req, res) => {
       });
     }
 
-    res.json(result);
+    return sendSuccess(res, "Teams grouped successfully", { teams: result });
   } catch (error) {
-    console.error("Failed to group teams:", error);
-    res.status(500).json({ message: "Server error grouping teams" });
+    return sendError(res, "Failed to group teams", 500);
   }
 };
 
-
-//Logged in as office Admin
 // Impersonate an OfficeAdmin
 exports.impersonateOfficeAdmin = async (req, res) => {
   try {
     const { officeAdminId } = req.params;
 
-    // Ensure target user exists and is an OfficeAdmin
     const targetUser = await User.findById(officeAdminId);
     if (!targetUser || targetUser.role !== "OfficeAdmin") {
-      return res.status(404).json({ message: "Office Admin not found" });
+      return sendError(res, "Office admin not found", 404);
     }
 
-    // Only Admin can impersonate — this is enforced in the route using authorize("Admin")
-
-    // Issue token for the OfficeAdmin
     const token = generateToken(targetUser);
 
-    res.status(200).json({
+    return sendSuccess(res, "Impersonation successful", {
       token,
       user: {
         _id: targetUser._id,
@@ -148,23 +164,34 @@ exports.impersonateOfficeAdmin = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Impersonation error:", error);
-    res.status(500).json({ message: "Impersonation failed" });
+    return sendError(res, "Impersonation failed", 500);
   }
 };
 
-
 exports.deleteUser = async (req, res) => {
-  await User.findByIdAndDelete(req.params.id);
-  res.json({ message: "User deleted" });
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    return sendSuccess(res, "User deleted successfully");
+  } catch (err) {
+    return sendError(res, "Failed to delete user", 500);
+  }
 };
 
 exports.updateUserRole = async (req, res) => {
-  const { role } = req.body;
-  const user = await User.findByIdAndUpdate(
-    req.params.id,
-    { role },
-    { new: true }
-  ).select("-password");
-  res.json(user);
+  try {
+    const { role } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { role },
+      { new: true }
+    ).select("-password");
+
+    if (!user) {
+      return sendError(res, "User not found", 404);
+    }
+
+    return sendSuccess(res, "User role updated successfully", { user });
+  } catch (err) {
+    return sendError(res, "Failed to update user role", 500);
+  }
 };

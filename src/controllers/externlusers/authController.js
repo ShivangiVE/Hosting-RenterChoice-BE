@@ -1,7 +1,12 @@
 const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const { sendForgotPasswordEmail } = require("../../services/emailService");
+
+const {
+  sendForgotPasswordEmail,
+  sendForgotPasswordOTPEmail,
+} = require("../../services/emailService");
+const { sendError, sendSuccess } = require("../../utils/response");
 
 // Allowed roles
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
@@ -11,6 +16,9 @@ const generateToken = (user) => {
     expiresIn: "7d",
   });
 };
+
+// Generate 4-digit OTP
+const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 
 // External Register (Vendor, Owner, Tenant)
 exports.register = async (req, res, next) => {
@@ -26,19 +34,16 @@ exports.register = async (req, res, next) => {
     } = req.body;
 
     if (!EXTERNAL_ROLES.includes(role)) {
-      res.status(400);
-      throw new Error("Invalid role");
+      return sendError(res, "Invalid role. Allowed roles: Vendor, Owner, Tenant", 400);
     }
 
     if (!accountNumber) {
-      res.status(400);
-      throw new Error("Account Number is required for registration");
+      return sendError(res, "Account number is required for registration", 400);
     }
 
     const userExists = await User.findOne({ email });
     if (userExists) {
-      res.status(400);
-      throw new Error("User already exists");
+      return sendError(res, "Email already registered", 409);
     }
 
     const user = await User.create({
@@ -51,15 +56,14 @@ exports.register = async (req, res, next) => {
       role,
     });
 
-    res.status(201).json({
+    return sendSuccess(res, "Registration successful", {
       _id: user._id,
       accountNumber: user.accountNumber,
       preferredName: user.preferredName,
-
       email: user.email,
       role: user.role,
       token: generateToken(user),
-    });
+    }, 201);
   } catch (err) {
     next(err);
   }
@@ -70,19 +74,21 @@ exports.login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return sendError(res, "Email and password are required", 400);
+    }
+
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
-      res.status(400);
-      throw new Error("Invalid credentials");
+      return sendError(res, "Invalid credentials", 401);
     }
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
-      res.status(400);
-      throw new Error("Invalid credentials");
+      return sendError(res, "Invalid credentials", 401);
     }
 
-    res.status(200).json({
+    return sendSuccess(res, "Login successful", {
       _id: user._id,
       preferredName: user.preferredName,
       profileImage: user.profileImage,
@@ -101,6 +107,10 @@ exports.updateProfile = async (req, res, next) => {
     const { preferredName } = req.body;
     const userId = req.user.id;
 
+    if (!preferredName) {
+      return sendError(res, "Preferred name is required", 400);
+    }
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { preferredName },
@@ -108,12 +118,10 @@ exports.updateProfile = async (req, res, next) => {
     ).select("-password");
 
     if (!updatedUser) {
-      res.status(404);
-      throw new Error("User not found");
+      return sendError(res, "User not found", 404);
     }
 
-    res.status(200).json({
-      message: "Profile updated",
+    return sendSuccess(res, "Profile updated successfully", {
       user: updatedUser,
     });
   } catch (err) {
@@ -127,57 +135,79 @@ exports.changePassword = async (req, res, next) => {
     const userId = req.user.id;
     const { currentPassword, newPassword } = req.body;
 
+    if (!currentPassword || !newPassword) {
+      return sendError(res, "Current and new passwords are required", 400);
+    }
+
     const user = await User.findById(userId);
     if (!user) {
-      res.status(404);
-      throw new Error("User not found");
+      return sendError(res, "User not found", 404);
     }
 
     const isMatch = await user.matchPassword(currentPassword);
     if (!isMatch) {
-      res.status(400);
-      throw new Error("Current password is incorrect");
+      return sendError(res, "Current password is incorrect", 401);
     }
 
     user.password = newPassword;
     await user.save();
 
-    res.status(200).json({ message: "Password updated successfully" });
+    return sendSuccess(res, "Password updated successfully");
   } catch (err) {
     next(err);
   }
 };
 
-// Forgot Password
+// Forgot Password with OTP
 exports.forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      res.status(404);
-      throw new Error("No account with that email found.");
+    if (!email) {
+      return sendError(res, "Email is required", 400);
     }
 
-    const resetToken = crypto.randomBytes(20).toString("hex");
-    const hashedToken = crypto
-      .createHash("sha256")
-      .update(resetToken)
-      .digest("hex");
+    const user = await User.findOne({ email });
+    if (!user) {
+      return sendError(res, "No account found with this email", 404);
+    }
 
-    user.resetPasswordToken = hashedToken;
-    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
-
+    const otp = generateOTP();
+    user.resetPasswordOTP = otp;
+    user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    const resetUrl = `${process.env.CORS_ORIGIN}/reset-password?token=${resetToken}`;
+    await sendForgotPasswordOTPEmail(user.email, otp);
 
-    await sendForgotPasswordEmail(user, resetToken);
+    return sendSuccess(res, "OTP has been sent to your email");
+  } catch (err) {
+    return sendError(res, "Failed to process forgot password request", 500);
+  }
+};
 
-    res.status(200).json({
-      message: "Password reset link generated.",
-      resetUrl,
-    });
+// Verify OTP Only (without resetting password)
+exports.verifyOtp = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return sendError(res, "Email and OTP are required", 400);
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return sendError(res, "User not found", 404);
+    }
+
+    if (user.resetPasswordOTP !== otp) {
+      return sendError(res, "Invalid OTP", 400);
+    }
+
+    if (user.resetPasswordExpires < Date.now()) {
+      return sendError(res, "OTP has expired", 400);
+    }
+
+    return sendSuccess(res, "OTP verified successfully");
   } catch (err) {
     next(err);
   }
@@ -186,27 +216,31 @@ exports.forgotPassword = async (req, res, next) => {
 // Reset Password
 exports.resetPassword = async (req, res, next) => {
   try {
-    const { token, password } = req.body;
+    const { email, otp, password } = req.body;
 
-    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+    if (!email || !otp || !password) {
+      return sendError(res, "Email, OTP, and new password are required", 400);
+    }
 
-    const user = await User.findOne({
-      resetPasswordToken: hashedToken,
-      resetPasswordExpires: { $gt: Date.now() },
-    });
-
+    const user = await User.findOne({ email });
     if (!user) {
-      res.status(400);
-      throw new Error("Invalid or expired reset token.");
+      return sendError(res, "User not found", 404);
+    }
+
+    if (user.resetPasswordOTP !== otp) {
+      return sendError(res, "Invalid OTP", 400);
+    }
+
+    if (user.resetPasswordExpires < Date.now()) {
+      return sendError(res, "OTP has expired", 400);
     }
 
     user.password = password;
-    user.resetPasswordToken = undefined;
+    user.resetPasswordOTP = undefined;
     user.resetPasswordExpires = undefined;
-
     await user.save();
 
-    res.status(200).json({ message: "Password has been reset." });
+    return sendSuccess(res, "Password reset successfully");
   } catch (err) {
     next(err);
   }
