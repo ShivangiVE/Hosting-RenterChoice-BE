@@ -1,0 +1,179 @@
+const Building = require("../../models/Building");
+const FormTemplate = require("../../models/FormTemplate");
+const Portfolio = require("../../models/Portfolio");
+const { sendSuccess, sendError } = require("../../utils/response");
+
+/**
+ * validateAgainstTemplate(template, formData)
+ * - template.fields is array of field definitions
+ * - formData is incoming request body (object)
+ */
+const validateAgainstTemplate = (template, formData) => {
+  const errors = [];
+
+  template.fields.forEach((field) => {
+    const val = formData[field.name];
+
+    // required check
+    const isEmpty = (v) =>
+      v === undefined ||
+      v === null ||
+      (typeof v === "string" && v.trim() === "") ||
+      (Array.isArray(v) && v.length === 0);
+
+    if (field.required && isEmpty(val)) {
+      errors.push(`"${field.label}" is required`);
+      return;
+    }
+
+    // skip further checks if empty
+    if (isEmpty(val)) return;
+
+    switch (field.type) {
+      case "number":
+        if (isNaN(Number(val)))
+          errors.push(`"${field.label}" must be a number`);
+        break;
+      case "email":
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(val)))
+          errors.push(`"${field.label}" must be a valid email`);
+        break;
+      case "select":
+      case "radio":
+        if (!field.options.includes(val))
+          errors.push(`"${field.label}" has an invalid selection`);
+        break;
+      case "checkbox":
+        // If options present -> expect array of selected options
+        if (field.options && field.options.length > 0) {
+          if (!Array.isArray(val)) {
+            errors.push(`"${field.label}" should be an array`);
+          } else {
+            const invalid = val.filter((v) => !field.options.includes(v));
+            if (invalid.length)
+              errors.push(`"${field.label}" contains invalid options`);
+          }
+        } else {
+          // if no options, expect boolean
+          if (typeof val !== "boolean")
+            errors.push(`"${field.label}" must be true/false`);
+        }
+        break;
+      // file handled client-side (upload to /api/uploads first) -> stored URL string
+      default:
+        break;
+    }
+  });
+
+  return errors;
+};
+
+async function saveSubmission(formType, formData, userId) {
+  if (formType === "building") {
+    return Building.create({ formData, createdBy: userId });
+  }
+  if (formType === "portfolio") {
+    return Portfolio.create({ formData, createdBy: userId });
+  }
+  throw new Error("Unsupported form type");
+}
+
+exports.createBuilding = async (req, res) => {
+  try {
+    const template = await FormTemplate.findOne({
+      formType: "building",
+      isActive: true,
+    });
+    if (!template)
+      return sendError(res, "Building form template not found", 404);
+
+    const formData = req.body;
+    const errors = validateAgainstTemplate(template, formData);
+    if (errors.length) return sendError(res, errors.join(", "), 400);
+
+    const doc = await saveSubmission("building", formData, req.user._id);
+    return sendSuccess(res, "Building created", { building: doc }, 201);
+  } catch (err) {
+    return sendError(res, err.message || "Failed to create building", 500);
+  }
+};
+
+exports.createPortfolio = async (req, res) => {
+  try {
+    const template = await FormTemplate.findOne({
+      formType: "portfolio",
+      isActive: true,
+    });
+    if (!template)
+      return sendError(res, "Portfolio form template not found", 404);
+
+    const formData = req.body;
+    const errors = validateAgainstTemplate(template, formData);
+    if (errors.length) return sendError(res, errors.join(", "), 400);
+
+    const doc = await saveSubmission("portfolio", formData, req.user._id);
+    return sendSuccess(res, "Portfolio created", { portfolio: doc }, 201);
+  } catch (err) {
+    return sendError(res, err.message || "Failed to create portfolio", 500);
+  }
+};
+
+exports.getBuildingDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Fetch building submission
+    const building = await Building.findById(id).populate(
+      "createdBy",
+      "preferredName email"
+    );
+    if (!building) return sendError(res, "Building not found", 404);
+
+    // Fetch corresponding form template
+    const template = await FormTemplate.findOne({
+      formType: "building",
+      isActive: true,
+    });
+
+    return sendSuccess(res, "Building details fetched", {
+      building,
+      template,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch building details",
+      500
+    );
+  }
+};
+
+exports.getPortfolioDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Fetch portfolio submission
+    const portfolio = await Portfolio.findById(id).populate(
+      "createdBy",
+      "preferredName email"
+    );
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    // Fetch corresponding form template
+    const template = await FormTemplate.findOne({
+      formType: "portfolio",
+      isActive: true,
+    });
+
+    return sendSuccess(res, "Portfolio details fetched", {
+      portfolio,
+      template,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch portfolio details",
+      500
+    );
+  }
+};

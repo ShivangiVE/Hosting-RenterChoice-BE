@@ -34,7 +34,11 @@ exports.register = async (req, res, next) => {
     } = req.body;
 
     if (!EXTERNAL_ROLES.includes(role)) {
-      return sendError(res, "Invalid role. Allowed roles: Vendor, Owner, Tenant", 400);
+      return sendError(
+        res,
+        "Invalid role. Allowed roles: Vendor, Owner, Tenant",
+        400
+      );
     }
 
     if (!accountNumber) {
@@ -56,14 +60,19 @@ exports.register = async (req, res, next) => {
       role,
     });
 
-    return sendSuccess(res, "Registration successful", {
-      _id: user._id,
-      accountNumber: user.accountNumber,
-      preferredName: user.preferredName,
-      email: user.email,
-      role: user.role,
-      token: generateToken(user),
-    }, 201);
+    return sendSuccess(
+      res,
+      "Registration successful",
+      {
+        _id: user._id,
+        accountNumber: user.accountNumber,
+        preferredName: user.preferredName,
+        email: user.email,
+        role: user.role,
+        token: generateToken(user),
+      },
+      201
+    );
   } catch (err) {
     next(err);
   }
