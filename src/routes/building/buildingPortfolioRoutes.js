@@ -6,10 +6,15 @@ const {
   createPortfolio,
   getBuildingDetails,
   getPortfolioDetails,
+  getAllBuildings,
+  getAllPortfolios,
+  updateBuilding,
+  deleteBuilding,
 } = require("../../controllers/building/buildingPortfolioController");
 
 // internal roles allowed to submit
 const INTERNAL_ROLES = [
+  "Admin",
   "OfficeAdmin",
   "AccountsTeam",
   "RepairsTeam",
@@ -30,5 +35,23 @@ router.post(
 // get Routes
 router.get("/building/:id", protect, getBuildingDetails);
 router.get("/portfolio/:id", protect, getPortfolioDetails);
+
+router.get("/buildings", protect, getAllBuildings);
+router.get("/portfolios", protect, getAllPortfolios);
+
+// Update & Delete Building
+router.put(
+  "/building/:id",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  updateBuilding
+);
+
+router.delete(
+  "/building/:id",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  deleteBuilding
+);
 
 module.exports = router;
