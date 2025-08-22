@@ -10,6 +10,7 @@ const {
   getAllPortfolios,
   updateBuilding,
   deleteBuilding,
+  bulkUpdateBuildings,
 } = require("../../controllers/building/buildingPortfolioController");
 
 // internal roles allowed to submit
@@ -46,6 +47,15 @@ router.put(
   authorize(...INTERNAL_ROLES),
   updateBuilding
 );
+
+
+router.put(
+  "/buildings/bulk-update",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  bulkUpdateBuildings
+);
+
 
 router.delete(
   "/building/:id",

@@ -316,6 +316,73 @@ exports.updateBuilding = async (req, res) => {
   }
 };
 
+// Bulk update buildings
+exports.bulkUpdateBuildings = async (req, res) => {
+  try {
+    const updates = req.body.updates;
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return sendError(res, "No building updates provided", 400);
+    }
+
+    const results = [];
+
+    for (const update of updates) {
+      const { id, ...formData } = update;
+
+      const building = await Building.findById(id);
+      if (!building) {
+        results.push({ id, success: false, message: "Building not found" });
+        continue;
+      }
+
+      // fetch template once per building (kept here, since template may differ by type)
+      const template = await FormTemplate.findOne({
+        formType: "building",
+        isActive: true,
+      });
+      if (!template) {
+        results.push({ id, success: false, message: "Template not found" });
+        continue;
+      }
+      const mergedData = {
+        ...(building.formData?.toObject?.() || building.formData),
+        ...formData,
+      };
+
+      // validate merged data
+      const errors = validateAgainstTemplate(template, mergedData);
+      if (errors.length) {
+        results.push({ id, success: false, message: errors.join(", ") });
+        continue;
+      }
+
+      // Apply updates to top-level fields
+      if (formData.buildingAbbreviation !== undefined) {
+        building.buildingAbbreviation = formData.buildingAbbreviation;
+      }
+      if (formData.portfolio !== undefined) {
+        building.portfolio = formData.portfolio;
+      }
+
+      // Save merged formData
+      building.formData = mergedData;
+
+      await building.save();
+
+      results.push({ id, success: true, building });
+    }
+
+    return sendSuccess(res, "Bulk update completed", { results });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to bulk update buildings",
+      500
+    );
+  }
+};
+
 exports.deleteBuilding = async (req, res) => {
   try {
     const { id } = req.params;
