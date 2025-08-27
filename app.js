@@ -5,12 +5,15 @@ const path = require("path");
 const adminRoutes = require("./src/routes/admin");
 const officeAdminRoutes = require("./src/routes/officeAdminRoutes");
 const authRoutes = require("./src/routes/externalUsers/auth");
+const externalUsers = require("./src/routes/externalUsers/externalUsersRoutes");
 const internalAuthRoutes = require("./src/routes/internalUsers/auth");
 const uploadRoutes = require("./src/routes/profileUploadRoutes");
 const errorHandler = require("./src/middleware/errorHandler");
 const formTemplateRoutes = require("./src/routes/formTemplateRoutes/formTemplateRoutes");
 const buildingPortfolioRoutes = require("./src/routes/building/buildingPortfolioRoutes");
 const formUploadRoutes = require("./src/routes/uploadRoutes/uploadRoutes");
+const workOrderRoutes = require("./src/routes/workOrderRoutes/workOrderRoutes");
+const repairCategories = require("./src/routes/workOrderRoutes/repairCategoriesRoutes");
 
 const app = express();
 app.use(cors());
@@ -24,6 +27,7 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/externalUsers", externalUsers);
 app.use("/api/internalauth", internalAuthRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/officeAdmin", officeAdminRoutes);
@@ -31,6 +35,8 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/forms/templates", formTemplateRoutes);
 app.use("/api/forms/uploads", formUploadRoutes);
 app.use("/api/submissions", buildingPortfolioRoutes);
+app.use("/api/work-orders", workOrderRoutes);
+app.use("/api/categories", repairCategories);
 
 app.use(errorHandler);
 
