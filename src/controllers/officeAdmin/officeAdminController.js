@@ -1,7 +1,6 @@
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 
-
 const INTERNAL_ROLES = [
   "AccountsTeam",
   "RepairsTeam",
@@ -33,12 +32,17 @@ exports.createInternalUser = async (req, res) => {
       createdBy: req.user._id,
     });
 
-    return sendSuccess(res, "Internal user created successfully", {
-      _id: newUser._id,
-      preferredName: newUser.preferredName,
-      email: newUser.email,
-      role: newUser.role,
-    }, 201);
+    return sendSuccess(
+      res,
+      "Internal user created successfully",
+      {
+        _id: newUser._id,
+        preferredName: newUser.preferredName,
+        email: newUser.email,
+        role: newUser.role,
+      },
+      201
+    );
   } catch (err) {
     return sendError(res, "Failed to create internal user", 500);
   }
@@ -91,7 +95,9 @@ exports.updateInternalUserRole = async (req, res) => {
       return sendError(res, "User not found", 404);
     }
 
-    return sendSuccess(res, "Internal user role updated successfully", { user: updated });
+    return sendSuccess(res, "Internal user role updated successfully", {
+      user: updated,
+    });
   } catch (err) {
     return sendError(res, "Failed to update internal user role", 500);
   }

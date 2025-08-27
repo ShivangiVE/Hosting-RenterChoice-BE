@@ -1,11 +1,11 @@
 const mongoose = require("mongoose");
 const buildingSchema = new mongoose.Schema(
   {
-    buildingAbbreviation: { 
-      type: String, 
-      required: function() {
-        return this.formData.buildingType === 'multi_family';
-      } 
+    buildingAbbreviation: {
+      type: String,
+      required: function () {
+        return this.formData.buildingType === "multi_family";
+      },
     },
     portfolio: {
       type: mongoose.Schema.Types.ObjectId,
