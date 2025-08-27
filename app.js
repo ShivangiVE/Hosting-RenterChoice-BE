@@ -14,6 +14,7 @@ const buildingPortfolioRoutes = require("./src/routes/building/buildingPortfolio
 const formUploadRoutes = require("./src/routes/uploadRoutes/uploadRoutes");
 const workOrderRoutes = require("./src/routes/workOrderRoutes/workOrderRoutes");
 const repairCategories = require("./src/routes/workOrderRoutes/repairCategoriesRoutes");
+const internalUsers = require("./src/routes/internalUsers/internalUserRoutes");
 
 const app = express();
 app.use(cors());
@@ -29,6 +30,7 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/externalUsers", externalUsers);
 app.use("/api/internalauth", internalAuthRoutes);
+app.use("/api/internalUsers", internalUsers);
 app.use("/api/admin", adminRoutes);
 app.use("/api/officeAdmin", officeAdminRoutes);
 app.use("/api/upload", uploadRoutes);

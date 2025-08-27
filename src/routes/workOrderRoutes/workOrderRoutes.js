@@ -11,6 +11,7 @@ const {
   getServiceAgreements,
   getNextCounterValue,
 } = require("../../controllers/workOrder/workOrderController");
+const upload = require("../../middleware/repairUpload");
 const router = express.Router();
 
 const ALLOWED_ROLES = [
@@ -29,6 +30,7 @@ router.post(
   "/work-order",
   protect,
   authorize(...ALLOWED_ROLES),
+  upload.workOrderUpload.single("file"),
   createWorkOrder
 );
 router.post(
@@ -41,6 +43,7 @@ router.post(
   "/service-agreement",
   protect,
   authorize(...ALLOWED_ROLES),
+  upload.serviceAgreementUpload.single("file"),
   createServiceAgreement
 );
 

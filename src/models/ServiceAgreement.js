@@ -12,6 +12,7 @@ const serviceAgreementSchema = new mongoose.Schema(
     description: { type: String, required: true },
     initialDueDate: { type: Date },
     recurringSchedule: { type: String },
+    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     fileUrl: { type: String },
     status: {
       type: String,

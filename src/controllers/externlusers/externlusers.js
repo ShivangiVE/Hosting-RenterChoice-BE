@@ -1,8 +1,6 @@
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 
-
-
 // Get all vendors
 exports.getVendors = async (req, res) => {
   try {
