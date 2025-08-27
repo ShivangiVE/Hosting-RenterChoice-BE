@@ -47,8 +47,12 @@ exports.createWorkOrder = async (req, res) => {
       vendor,
       keyIssued,
       dueDate,
-      fileUrl,
     } = req.body;
+
+    // If a file was uploaded, build a public URL
+    const fileUrl = req.file
+      ? `/uploads/workOrders/${req.file.filename}`
+      : null;
 
     // Generate work order number
     const sequence = await getNextSequence("workOrder");
@@ -131,8 +135,12 @@ exports.createServiceAgreement = async (req, res) => {
       description,
       initialDueDate,
       recurringSchedule,
-      fileUrl,
+      vendor,
     } = req.body;
+
+    const fileUrl = req.file
+      ? `/uploads/workOrders/${req.file.filename}`
+      : null;
 
     // Generate service agreement number
     const sequence = await getNextSequence("serviceAgreement");
@@ -147,6 +155,7 @@ exports.createServiceAgreement = async (req, res) => {
       description,
       initialDueDate,
       recurringSchedule,
+      vendor: vendor || null,
       fileUrl,
       createdBy: req.user._id,
     });
