@@ -211,7 +211,7 @@ exports.getInspectionRequests = async (req, res) => {
       })
       .populate("assignedTo", "preferredName email")
       .populate("createdBy", "preferredName email")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: 1 });
 
     return sendSuccess(res, "Inspection requests fetched successfully", {
       inspectionRequests,
@@ -229,9 +229,17 @@ exports.getInspectionRequests = async (req, res) => {
 exports.getServiceAgreements = async (req, res) => {
   try {
     const serviceAgreements = await ServiceAgreement.find()
-      .populate("building", "buildingAbbreviation formData.address")
+      .populate({
+        path: "building",
+        select: "buildingAbbreviation formData.address portfolio",
+        populate: {
+          path: "portfolio",
+          select: "portfolioAbbreviation formData.name",
+        },
+      })
+      .populate("vendor", "companyName technicianName")
       .populate("createdBy", "preferredName email")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: 1 });
 
     return sendSuccess(res, "Service agreements fetched successfully", {
       serviceAgreements,
