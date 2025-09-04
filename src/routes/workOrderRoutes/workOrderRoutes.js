@@ -1,17 +1,24 @@
 const express = require("express");
 const { protect, authorize } = require("../../middleware/authMiddleware");
+const upload = require("../../middleware/repairUpload");
 const {
   createWorkOrder,
   getWorkOrders,
   getWorkOrder,
+  updateWorkOrder,
   updateWorkOrderStatus,
+  deleteWorkOrder,
   createInspectionRequest,
-  createServiceAgreement,
   getInspectionRequests,
+  updateInspectionRequest,
+  deleteInspectionRequest,
+  createServiceAgreement,
   getServiceAgreements,
+  updateServiceAgreement,
+  deleteServiceAgreement,
   getNextCounterValue,
 } = require("../../controllers/workOrder/workOrderController");
-const upload = require("../../middleware/repairUpload");
+
 const router = express.Router();
 
 const ALLOWED_ROLES = [
@@ -25,45 +32,91 @@ const ALLOWED_ROLES = [
   "InspectionClerk",
 ];
 
-// Create routes
+// ========================= Work Orders =========================
 router.post(
-  "/work-order",
+  "/work-orders",
   protect,
   authorize(...ALLOWED_ROLES),
   upload.workOrderUpload.single("file"),
   createWorkOrder
 );
+
+router.get("/work-orders", protect, getWorkOrders);
+router.get("/work-orders/:id", protect, getWorkOrder);
+
+router.put(
+  "/work-orders/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  upload.workOrderUpload.single("file"),
+  updateWorkOrder
+);
+
+router.put(
+  "/work-orders/:id/status",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  updateWorkOrderStatus
+);
+
+router.delete(
+  "/work-orders/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  deleteWorkOrder
+);
+
+// ========================= Inspection Requests =========================
 router.post(
-  "/inspection-request",
+  "/inspection-requests",
   protect,
   authorize(...ALLOWED_ROLES),
   createInspectionRequest
 );
+
+router.get("/inspection-requests", protect, getInspectionRequests);
+
+router.put(
+  "/inspection-requests/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  updateInspectionRequest
+);
+
+router.delete(
+  "/inspection-requests/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  deleteInspectionRequest
+);
+
+// ========================= Service Agreements =========================
 router.post(
-  "/service-agreement",
+  "/service-agreements",
   protect,
   authorize(...ALLOWED_ROLES),
   upload.serviceAgreementUpload.single("file"),
   createServiceAgreement
 );
 
-// Counter
-router.get("/counter/:type", protect, getNextCounterValue);
-
-// Get all routes
-router.get("/work-orders", protect, getWorkOrders);
-router.get("/inspection-requests", protect, getInspectionRequests);
 router.get("/service-agreements", protect, getServiceAgreements);
 
-// Get single work order
-router.get("/work-order/:id", protect, getWorkOrder);
-
-// Update work order status
 router.put(
-  "/work-order/:id/status",
+  "/service-agreements/:id",
   protect,
   authorize(...ALLOWED_ROLES),
-  updateWorkOrderStatus
+  upload.serviceAgreementUpload.single("file"),
+  updateServiceAgreement
 );
+
+router.delete(
+  "/service-agreements/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  deleteServiceAgreement
+);
+
+// ========================= Counter =========================
+router.get("/counter/:type", protect, getNextCounterValue);
 
 module.exports = router;
