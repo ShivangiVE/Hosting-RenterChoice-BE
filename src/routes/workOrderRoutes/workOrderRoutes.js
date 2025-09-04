@@ -34,7 +34,7 @@ const ALLOWED_ROLES = [
 
 // ========================= Work Orders =========================
 router.post(
-  "/work-orders",
+  "/work-order",
   protect,
   authorize(...ALLOWED_ROLES),
   upload.workOrderUpload.single("file"),
@@ -68,7 +68,7 @@ router.delete(
 
 // ========================= Inspection Requests =========================
 router.post(
-  "/inspection-requests",
+  "/inspection-request",
   protect,
   authorize(...ALLOWED_ROLES),
   createInspectionRequest
@@ -92,7 +92,7 @@ router.delete(
 
 // ========================= Service Agreements =========================
 router.post(
-  "/service-agreements",
+  "/service-agreement",
   protect,
   authorize(...ALLOWED_ROLES),
   upload.serviceAgreementUpload.single("file"),
