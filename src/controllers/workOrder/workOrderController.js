@@ -82,6 +82,85 @@ exports.createWorkOrder = async (req, res) => {
   }
 };
 
+// Get all work orders
+exports.getWorkOrders = async (req, res) => {
+  try {
+    const workOrders = await WorkOrder.find()
+      .populate({
+        path: "building",
+        select: "buildingAbbreviation formData.address portfolio",
+        populate: {
+          path: "portfolio",
+          select: "portfolioAbbreviation formData.name",
+        },
+      })
+      .populate("vendor", "companyName technicianName")
+      .populate("createdBy", "preferredName email")
+      .sort({ createdAt: 1 });
+
+    return sendSuccess(res, "Work orders fetched successfully", { workOrders });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch work orders", 500);
+  }
+};
+
+// Get single work order
+exports.getWorkOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const workOrder = await WorkOrder.findById(id)
+      .populate("building", "buildingAbbreviation formData")
+      .populate("vendor", "companyName technicianName email")
+      .populate("createdBy", "preferredName email")
+      .populate("assignedTo", "preferredName email");
+
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    return sendSuccess(res, "Work order fetched successfully", { workOrder });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch work order", 500);
+  }
+};
+
+// Update Work Order
+exports.updateWorkOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const updateData = { ...req.body };
+
+    // Handle new file upload (if provided)
+    if (req.file) {
+      updateData.fileUrl = `/uploads/workOrders/${req.file.filename}`;
+    }
+
+    const workOrder = await WorkOrder.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    return sendSuccess(res, "Work order updated successfully", { workOrder });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to update work order", 500);
+  }
+};
+
+// Delete Work Order
+exports.deleteWorkOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const workOrder = await WorkOrder.findByIdAndDelete(id);
+
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    return sendSuccess(res, "Work order deleted successfully", { workOrder });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to delete work order", 500);
+  }
+};
+
 // Create Inspection Request
 exports.createInspectionRequest = async (req, res) => {
   try {
@@ -121,6 +200,82 @@ exports.createInspectionRequest = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to create inspection request",
+      500
+    );
+  }
+};
+
+// Get all inspection requests
+exports.getInspectionRequests = async (req, res) => {
+  try {
+    const inspectionRequests = await InspectionRequest.find()
+      .populate({
+        path: "building",
+        select: "buildingAbbreviation formData.address portfolio",
+        populate: {
+          path: "portfolio",
+          select: "portfolioAbbreviation formData.name",
+        },
+      })
+      .populate("assignedTo", "preferredName email")
+      .populate("createdBy", "preferredName email")
+      .sort({ createdAt: 1 });
+
+    return sendSuccess(res, "Inspection requests fetched successfully", {
+      inspectionRequests,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch inspection requests",
+      500
+    );
+  }
+};
+
+// Update Inspection Request
+exports.updateInspectionRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = { ...req.body };
+
+    const inspectionRequest = await InspectionRequest.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!inspectionRequest)
+      return sendError(res, "Inspection request not found", 404);
+
+    return sendSuccess(res, "Inspection request updated successfully", {
+      inspectionRequest,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to update inspection request",
+      500
+    );
+  }
+};
+
+// Delete Inspection Request
+exports.deleteInspectionRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const inspectionRequest = await InspectionRequest.findByIdAndDelete(id);
+
+    if (!inspectionRequest)
+      return sendError(res, "Inspection request not found", 404);
+
+    return sendSuccess(res, "Inspection request deleted successfully", {
+      inspectionRequest,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to delete inspection request",
       500
     );
   }
@@ -175,56 +330,6 @@ exports.createServiceAgreement = async (req, res) => {
   }
 };
 
-// Get all work orders
-exports.getWorkOrders = async (req, res) => {
-  try {
-    const workOrders = await WorkOrder.find()
-      .populate({
-        path: "building",
-        select: "buildingAbbreviation formData.address portfolio",
-        populate: {
-          path: "portfolio",
-          select: "portfolioAbbreviation formData.name",
-        },
-      })
-      .populate("vendor", "companyName technicianName")
-      .populate("createdBy", "preferredName email")
-      .sort({ createdAt: 1 });
-
-    return sendSuccess(res, "Work orders fetched successfully", { workOrders });
-  } catch (err) {
-    return sendError(res, err.message || "Failed to fetch work orders", 500);
-  }
-};
-
-// Get all inspection requests
-exports.getInspectionRequests = async (req, res) => {
-  try {
-    const inspectionRequests = await InspectionRequest.find()
-      .populate({
-        path: "building",
-        select: "buildingAbbreviation formData.address portfolio",
-        populate: {
-          path: "portfolio",
-          select: "portfolioAbbreviation formData.name",
-        },
-      })
-      .populate("assignedTo", "preferredName email")
-      .populate("createdBy", "preferredName email")
-      .sort({ createdAt: 1 });
-
-    return sendSuccess(res, "Inspection requests fetched successfully", {
-      inspectionRequests,
-    });
-  } catch (err) {
-    return sendError(
-      res,
-      err.message || "Failed to fetch inspection requests",
-      500
-    );
-  }
-};
-
 // Get all service agreements
 exports.getServiceAgreements = async (req, res) => {
   try {
@@ -253,21 +358,56 @@ exports.getServiceAgreements = async (req, res) => {
   }
 };
 
-// Get single work order
-exports.getWorkOrder = async (req, res) => {
+// Update Service Agreement
+exports.updateServiceAgreement = async (req, res) => {
   try {
     const { id } = req.params;
-    const workOrder = await WorkOrder.findById(id)
-      .populate("building", "buildingAbbreviation formData")
-      .populate("vendor", "companyName technicianName email")
-      .populate("createdBy", "preferredName email")
-      .populate("assignedTo", "preferredName email");
+    const updateData = { ...req.body };
 
-    if (!workOrder) return sendError(res, "Work order not found", 404);
+    // Handle file replacement (if uploaded)
+    if (req.file) {
+      updateData.fileUrl = `/uploads/workOrders/${req.file.filename}`;
+    }
 
-    return sendSuccess(res, "Work order fetched successfully", { workOrder });
+    const serviceAgreement = await ServiceAgreement.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!serviceAgreement)
+      return sendError(res, "Service agreement not found", 404);
+
+    return sendSuccess(res, "Service agreement updated successfully", {
+      serviceAgreement,
+    });
   } catch (err) {
-    return sendError(res, err.message || "Failed to fetch work order", 500);
+    return sendError(
+      res,
+      err.message || "Failed to update service agreement",
+      500
+    );
+  }
+};
+
+// Delete Service Agreement
+exports.deleteServiceAgreement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const serviceAgreement = await ServiceAgreement.findByIdAndDelete(id);
+
+    if (!serviceAgreement)
+      return sendError(res, "Service agreement not found", 404);
+
+    return sendSuccess(res, "Service agreement deleted successfully", {
+      serviceAgreement,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to delete service agreement",
+      500
+    );
   }
 };
 

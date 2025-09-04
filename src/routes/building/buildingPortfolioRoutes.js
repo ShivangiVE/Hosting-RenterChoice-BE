@@ -13,7 +13,7 @@ const {
   bulkUpdateBuildings,
 } = require("../../controllers/building/buildingPortfolioController");
 
-// internal roles allowed to submit
+// Internal roles allowed
 const INTERNAL_ROLES = [
   "Admin",
   "OfficeAdmin",
@@ -25,22 +25,12 @@ const INTERNAL_ROLES = [
   "InspectionClerk",
 ];
 
+// ========================= Buildings =========================
 router.post("/building", protect, authorize(...INTERNAL_ROLES), createBuilding);
-router.post(
-  "/portfolio",
-  protect,
-  authorize(...INTERNAL_ROLES),
-  createPortfolio
-);
-
-// get Routes
-router.get("/building/:id", protect, getBuildingDetails);
-router.get("/portfolio/:id", protect, getPortfolioDetails);
 
 router.get("/buildings", protect, getAllBuildings);
-router.get("/portfolios", protect, getAllPortfolios);
+router.get("/building/:id", protect, getBuildingDetails);
 
-// Update & Delete Building
 router.put(
   "/building/:id",
   protect,
@@ -48,7 +38,7 @@ router.put(
   updateBuilding
 );
 
-
+// Bulk update buildings
 router.put(
   "/buildings/bulk-update",
   protect,
@@ -56,12 +46,22 @@ router.put(
   bulkUpdateBuildings
 );
 
-
 router.delete(
   "/building/:id",
   protect,
   authorize(...INTERNAL_ROLES),
   deleteBuilding
 );
+
+// ========================= Portfolios =========================
+router.post(
+  "/portfolio",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  createPortfolio
+);
+
+router.get("/portfolios", protect, getAllPortfolios);
+router.get("/portfolio/:id", protect, getPortfolioDetails);
 
 module.exports = router;
