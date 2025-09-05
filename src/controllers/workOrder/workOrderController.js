@@ -85,7 +85,45 @@ exports.createWorkOrder = async (req, res) => {
 // Get all work orders
 exports.getWorkOrders = async (req, res) => {
   try {
-    const workOrders = await WorkOrder.find()
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const { status, category, vendor, building, portfolio, tenancy, search } =
+      req.query;
+
+    let filter = {};
+
+    if (status && status !== "All") {
+      filter.status = status;
+    }
+
+    if (category && category !== "All") {
+      filter.category = category; // FE must send categoryId
+    }
+
+    if (vendor && vendor !== "All") {
+      filter.vendor = vendor; // FE must send vendorId
+    }
+
+    if (building && building !== "All") {
+      filter.building = building; // FE must send buildingId
+    }
+
+    if (portfolio && portfolio !== "All") {
+      filter["building.portfolio"] = portfolio; // FE must send portfolioId
+    }
+
+    if (tenancy && tenancy !== "All") {
+      filter.tenant = tenancy; // FE must send tenancyId/string
+    }
+
+    if (search) {
+      const regex = new RegExp(search, "i");
+      filter.$or = [{ workOrderNumber: regex }, { description: regex }];
+    }
+
+    const workOrders = await WorkOrder.find(filter)
       .populate({
         path: "building",
         select: "buildingAbbreviation formData.address portfolio",
@@ -95,10 +133,22 @@ exports.getWorkOrders = async (req, res) => {
         },
       })
       .populate("vendor", "companyName technicianName")
+      .populate("category", "name")
       .populate("createdBy", "preferredName email")
-      .sort({ createdAt: 1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
-    return sendSuccess(res, "Work orders fetched successfully", { workOrders });
+    const total = await WorkOrder.countDocuments(filter);
+
+    return sendSuccess(res, "Work orders fetched successfully", {
+      workOrders,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total,
+      },
+    });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch work orders", 500);
   }
@@ -208,7 +258,51 @@ exports.createInspectionRequest = async (req, res) => {
 // Get all inspection requests
 exports.getInspectionRequests = async (req, res) => {
   try {
-    const inspectionRequests = await InspectionRequest.find()
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const { status, type, user, building, portfolio, dueDate, search } =
+      req.query;
+
+    let filter = {};
+
+    if (status && status !== "All") {
+      filter.status = status;
+    }
+
+    if (type && type !== "All") {
+      filter.inspectionType = type;
+    }
+
+    if (user && user !== "All") {
+      filter["assignedTo.preferredName"] = new RegExp(user, "i");
+    }
+
+    if (building && building !== "All") {
+      filter["building.formData.address"] = new RegExp(building, "i");
+    }
+
+    if (portfolio && portfolio !== "All") {
+      filter["building.portfolio.formData.name"] = new RegExp(portfolio, "i");
+    }
+
+    if (dueDate && dueDate !== "All") {
+      filter.dueDate = new Date(dueDate);
+    }
+
+    if (search) {
+      const regex = new RegExp(".*" + search + ".*", "i");
+      filter.$or = [
+        { inspectionNumber: regex },
+        { inspectionType: regex },
+        { status: regex },
+        { "assignedTo.preferredName": regex },
+        { "building.formData.address": regex },
+      ];
+    }
+
+    const inspectionRequests = await InspectionRequest.find(filter)
       .populate({
         path: "building",
         select: "buildingAbbreviation formData.address portfolio",
@@ -219,10 +313,19 @@ exports.getInspectionRequests = async (req, res) => {
       })
       .populate("assignedTo", "preferredName email")
       .populate("createdBy", "preferredName email")
-      .sort({ createdAt: 1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await InspectionRequest.countDocuments(filter);
 
     return sendSuccess(res, "Inspection requests fetched successfully", {
       inspectionRequests,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total,
+      },
     });
   } catch (err) {
     return sendError(
@@ -344,7 +447,7 @@ exports.getServiceAgreements = async (req, res) => {
       })
       .populate("vendor", "companyName technicianName")
       .populate("createdBy", "preferredName email")
-      .sort({ createdAt: 1 });
+      .sort({ createdAt: -1 });
 
     return sendSuccess(res, "Service agreements fetched successfully", {
       serviceAgreements,
