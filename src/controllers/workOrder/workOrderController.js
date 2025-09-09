@@ -1,5 +1,7 @@
+const Building = require("../../models/Building");
 const InspectionRequest = require("../../models/InspectionRequest");
 const ServiceAgreement = require("../../models/ServiceAgreement");
+const User = require("../../models/User");
 const WorkOrder = require("../../models/WorkOrder");
 const Counter = require("../../utils/Counter");
 const { sendSuccess, sendError } = require("../../utils/response");
@@ -51,9 +53,8 @@ exports.createWorkOrder = async (req, res) => {
 
     // If a file was uploaded, build a public URL
     const fileUrl = req.file
-      ? `/uploads/workOrders/${req.file.filename}`
+      ? `/uploads/Repair/workOrders/${req.file.filename}`
       : null;
-
     // Generate work order number
     const sequence = await getNextSequence("workOrder");
     const workOrderNumber = `WO #${sequence.toString().padStart(4, "0")}`;
@@ -120,7 +121,21 @@ exports.getWorkOrders = async (req, res) => {
 
     if (search) {
       const regex = new RegExp(search, "i");
-      filter.$or = [{ workOrderNumber: regex }, { description: regex }];
+
+      // Find buildings that match the search
+      const buildingIds = await Building.find({
+        $or: [
+          { "formData.address": regex },
+          { "formData.fullAddress": regex },
+          { buildingAbbreviation: regex },
+        ],
+      }).distinct("_id");
+
+      filter.$or = [
+        { workOrderNumber: regex },
+        { description: regex },
+        { building: { $in: buildingIds } },
+      ];
     }
 
     const workOrders = await WorkOrder.find(filter)
@@ -159,8 +174,16 @@ exports.getWorkOrder = async (req, res) => {
   try {
     const { id } = req.params;
     const workOrder = await WorkOrder.findById(id)
-      .populate("building", "buildingAbbreviation formData")
+      .populate({
+        path: "building",
+        select: "buildingAbbreviation formData.address portfolio",
+        populate: {
+          path: "portfolio",
+          select: "portfolioAbbreviation formData.name",
+        },
+      })
       .populate("vendor", "companyName technicianName email")
+      .populate("category", "name")
       .populate("createdBy", "preferredName email")
       .populate("assignedTo", "preferredName email");
 
@@ -181,7 +204,7 @@ exports.updateWorkOrder = async (req, res) => {
 
     // Handle new file upload (if provided)
     if (req.file) {
-      updateData.fileUrl = `/uploads/workOrders/${req.file.filename}`;
+      updateData.fileUrl = `/uploads/Repair/workOrders/${req.file.filename}`;
     }
 
     const workOrder = await WorkOrder.findByIdAndUpdate(id, updateData, {
@@ -267,38 +290,56 @@ exports.getInspectionRequests = async (req, res) => {
 
     let filter = {};
 
+    // Status filter
     if (status && status !== "All") {
       filter.status = status;
     }
 
+    // Type filter
     if (type && type !== "All") {
       filter.inspectionType = type;
     }
 
     if (user && user !== "All") {
-      filter["assignedTo.preferredName"] = new RegExp(user, "i");
+      const matchedUsers = await User.find({
+        preferredName: new RegExp(user, "i"),
+      }).distinct("_id");
+      filter.assignedTo = { $in: matchedUsers };
     }
 
+    // Building filter
     if (building && building !== "All") {
       filter["building.formData.address"] = new RegExp(building, "i");
     }
 
+    // Portfolio filter
     if (portfolio && portfolio !== "All") {
       filter["building.portfolio.formData.name"] = new RegExp(portfolio, "i");
     }
 
+    // Due date filter
     if (dueDate && dueDate !== "All") {
       filter.dueDate = new Date(dueDate);
     }
 
-    if (search) {
-      const regex = new RegExp(".*" + search + ".*", "i");
+    // Global search
+    if (search && search.trim() !== "") {
+      const regex = new RegExp(search, "i");
+
+      const buildingIds = await Building.find({
+        $or: [
+          { "formData.address": regex },
+          { "formData.fullAddress": regex },
+          { buildingAbbreviation: regex },
+        ],
+      }).distinct("_id");
+
       filter.$or = [
         { inspectionNumber: regex },
         { inspectionType: regex },
         { status: regex },
         { "assignedTo.preferredName": regex },
-        { "building.formData.address": regex },
+        { building: { $in: buildingIds } },
       ];
     }
 
@@ -397,7 +438,7 @@ exports.createServiceAgreement = async (req, res) => {
     } = req.body;
 
     const fileUrl = req.file
-      ? `/uploads/workOrders/${req.file.filename}`
+      ? `/uploads/Repair/serviceAgreements/${req.file.filename}`
       : null;
 
     // Generate service agreement number
@@ -467,9 +508,13 @@ exports.updateServiceAgreement = async (req, res) => {
     const { id } = req.params;
     const updateData = { ...req.body };
 
+    if (req.body.removeExistingFile === "true") {
+      updateData.fileUrl = null;
+    }
+
     // Handle file replacement (if uploaded)
     if (req.file) {
-      updateData.fileUrl = `/uploads/workOrders/${req.file.filename}`;
+      updateData.fileUrl = `/uploads/Repair/serviceAgreements/${req.file.filename}`;
     }
 
     const serviceAgreement = await ServiceAgreement.findByIdAndUpdate(
