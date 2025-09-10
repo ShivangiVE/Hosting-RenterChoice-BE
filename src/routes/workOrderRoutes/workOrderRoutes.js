@@ -17,6 +17,8 @@ const {
   updateServiceAgreement,
   deleteServiceAgreement,
   getNextCounterValue,
+  closeWorkOrder,
+  closeInspectionRequest,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -59,6 +61,13 @@ router.put(
   updateWorkOrderStatus
 );
 
+router.put(
+  "/work-orders/:id/close",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  closeWorkOrder
+);
+
 router.delete(
   "/work-orders/:id",
   protect,
@@ -81,6 +90,13 @@ router.put(
   protect,
   authorize(...ALLOWED_ROLES),
   updateInspectionRequest
+);
+
+router.put(
+  "/inspection-requests/:id/close",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  closeInspectionRequest
 );
 
 router.delete(
