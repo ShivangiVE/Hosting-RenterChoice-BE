@@ -21,8 +21,8 @@ const workOrderSchema = new mongoose.Schema(
     fileUrl: { type: String },
     status: {
       type: String,
-      enum: ["pending", "inProgress", "completed", "cancelled"],
-      default: "pending",
+      enum: ["open", "closed"],
+      default: "open",
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -30,6 +30,8 @@ const workOrderSchema = new mongoose.Schema(
       required: true,
     },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    completeDate: { type: Date },
+    closingComments: { type: String },
   },
   { timestamps: true }
 );

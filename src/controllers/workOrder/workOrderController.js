@@ -59,6 +59,15 @@ exports.createWorkOrder = async (req, res) => {
     const sequence = await getNextSequence("workOrder");
     const workOrderNumber = `WO #${sequence.toString().padStart(4, "0")}`;
 
+    // Normalize status to lowercase
+    const normalizeStatus = (status) => {
+      if (!status) return "open";
+      const s = status.toLowerCase();
+      if (s === "open") return "open";
+      if (s === "closed") return "closed";
+      return "open"; // fallback
+    };
+
     const workOrder = await WorkOrder.create({
       workOrderNumber,
       workOrderType,
@@ -69,6 +78,7 @@ exports.createWorkOrder = async (req, res) => {
       keyIssued: keyIssued || false,
       dueDate,
       fileUrl,
+      status: normalizeStatus(req.body.status),
       createdBy: req.user._id,
     });
 
@@ -234,6 +244,38 @@ exports.deleteWorkOrder = async (req, res) => {
   }
 };
 
+// Close Work Order
+exports.closeWorkOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments } = req.body;
+
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Work order not found" });
+    }
+
+    workOrder.status = "closed";
+    workOrder.completeDate = new Date();
+    if (comments) {
+      workOrder.closingComments = comments;
+    }
+
+    await workOrder.save();
+
+    res.json({
+      success: true,
+      message: "Work order closed successfully",
+      data: workOrder,
+    });
+  } catch (error) {
+    console.error("Error closing work order:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 // Create Inspection Request
 exports.createInspectionRequest = async (req, res) => {
   try {
@@ -383,6 +425,11 @@ exports.updateInspectionRequest = async (req, res) => {
     const { id } = req.params;
     const updateData = { ...req.body };
 
+    // If scheduleDate is provided, mark status as scheduled
+    if (updateData.scheduleDate) {
+      updateData.status = "scheduled";
+    }
+
     const inspectionRequest = await InspectionRequest.findByIdAndUpdate(
       id,
       updateData,
@@ -401,6 +448,36 @@ exports.updateInspectionRequest = async (req, res) => {
       err.message || "Failed to update inspection request",
       500
     );
+  }
+};
+
+// Close Inspection Request
+exports.closeInspectionRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments } = req.body;
+
+    const inspectionRequest = await InspectionRequest.findById(id);
+    if (!inspectionRequest) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Inspection request not found" });
+    }
+
+    inspectionRequest.status = "completed";
+    inspectionRequest.completeDate = new Date();
+    if (comments) inspectionRequest.closingComments = comments;
+
+    await inspectionRequest.save();
+
+    return res.json({
+      success: true,
+      message: "Inspection request closed successfully",
+      data: inspectionRequest,
+    });
+  } catch (error) {
+    console.error("Error closing inspection request:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
