@@ -18,6 +18,7 @@ const buildingSchema = new mongoose.Schema(
       default: {
         address: "",
         fullAddress: "",
+        city: "",
         buildingType: "",
         unitType: "",
         floorNumber: "",
