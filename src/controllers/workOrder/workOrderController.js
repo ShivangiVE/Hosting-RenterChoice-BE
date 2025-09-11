@@ -100,8 +100,16 @@ exports.getWorkOrders = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { status, category, vendor, building, portfolio, tenancy, search } =
-      req.query;
+    const {
+      status,
+      category,
+      vendor,
+      building,
+      city,
+      portfolio,
+      tenancy,
+      search,
+    } = req.query;
 
     let filter = {};
 
@@ -127,6 +135,24 @@ exports.getWorkOrders = async (req, res) => {
 
     if (tenancy && tenancy !== "All") {
       filter.tenant = tenancy; // FE must send tenancyId/string
+    }
+
+    if (city && city !== "All") {
+      // Filter work orders whose building's city matches
+      const buildingIdsByCity = await Building.find({
+        "formData.city": new RegExp(city, "i"),
+      }).distinct("_id");
+
+      // Merge with existing building filter if needed
+      if (filter.building) {
+        filter.building = {
+          $in: buildingIdsByCity.filter(
+            (id) => id.toString() === filter.building.toString()
+          ),
+        };
+      } else {
+        filter.building = { $in: buildingIdsByCity };
+      }
     }
 
     if (search) {
@@ -327,47 +353,57 @@ exports.getInspectionRequests = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { status, type, user, building, portfolio, dueDate, search } =
+    const { status, type, user, building, city, portfolio, dueDate, search } =
       req.query;
 
     let filter = {};
 
-    // Status filter
-    if (status && status !== "All") {
-      filter.status = status;
+    // Filter by logged-in user
+    // Only show inspection requests assigned to this user
+    if (req.user && req.user.role === "InspectionClerk") {
+      filter.assignedTo = req.user._id;
     }
 
-    // Type filter
-    if (type && type !== "All") {
-      filter.inspectionType = type;
-    }
-
+    // Existing filters
+    if (status && status !== "All") filter.status = status;
+    if (type && type !== "All") filter.inspectionType = type;
     if (user && user !== "All") {
       const matchedUsers = await User.find({
         preferredName: new RegExp(user, "i"),
       }).distinct("_id");
       filter.assignedTo = { $in: matchedUsers };
     }
-
-    // Building filter
-    if (building && building !== "All") {
+    if (building && building !== "All")
       filter["building.formData.address"] = new RegExp(building, "i");
-    }
-
-    // Portfolio filter
-    if (portfolio && portfolio !== "All") {
+    if (portfolio && portfolio !== "All")
       filter["building.portfolio.formData.name"] = new RegExp(portfolio, "i");
-    }
+    if (dueDate && dueDate !== "All") filter.dueDate = new Date(dueDate);
 
-    // Due date filter
-    if (dueDate && dueDate !== "All") {
-      filter.dueDate = new Date(dueDate);
+    if (city && city !== "All") {
+      const buildingIdsByCity = await Building.find({
+        "formData.city": new RegExp(city, "i"),
+      }).distinct("_id");
+
+      if (filter["building.formData.address"]) {
+        // If filtering by address too, intersect buildingIds
+        const buildingIdsByAddress = await Building.find({
+          "formData.address": filter["building.formData.address"],
+        }).distinct("_id");
+
+        filter.building = {
+          $in: buildingIdsByCity.filter((id) =>
+            buildingIdsByAddress.includes(id)
+          ),
+        };
+        delete filter["building.formData.address"]; // remove previous address filter
+      } else {
+        filter.building = { $in: buildingIdsByCity };
+      }
     }
 
     // Global search
     if (search && search.trim() !== "") {
       const regex = new RegExp(search, "i");
-
       const buildingIds = await Building.find({
         $or: [
           { "formData.address": regex },
@@ -404,11 +440,7 @@ exports.getInspectionRequests = async (req, res) => {
 
     return sendSuccess(res, "Inspection requests fetched successfully", {
       inspectionRequests,
-      pagination: {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-      },
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
     });
   } catch (err) {
     return sendError(
@@ -551,10 +583,72 @@ exports.createServiceAgreement = async (req, res) => {
   }
 };
 
-// Get all service agreements
+// Get all service agreements with pagination, search, and filters
 exports.getServiceAgreements = async (req, res) => {
   try {
-    const serviceAgreements = await ServiceAgreement.find()
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const { dueDate, category, vendor, building, portfolio, vendorStatus, search } = req.query;
+
+    let filter = {};
+
+    // Filters
+    if (dueDate && dueDate !== "All") {
+      filter.initialDueDate = new Date(dueDate);
+    }
+
+    if (category && category !== "All") {
+      filter.category = category; // FE should send categoryId
+    }
+
+    if (vendor && vendor !== "All") {
+      filter.vendor = vendor; // FE should send vendorId
+    }
+
+    if (vendorStatus && vendorStatus !== "All") {
+      filter["vendor.status"] = vendorStatus; // assuming vendor has status field
+    }
+
+    if (building && building !== "All") {
+      filter.building = building; // FE should send buildingId
+    }
+
+    if (portfolio && portfolio !== "All") {
+      filter["building.portfolio"] = portfolio; // FE should send portfolioId
+    }
+
+    // Global search
+    if (search && search.trim() !== "") {
+      const regex = new RegExp(search, "i");
+
+      // Find buildings that match the search
+      const buildingIds = await Building.find({
+        $or: [
+          { "formData.address": regex },
+          { "formData.fullAddress": regex },
+          { buildingAbbreviation: regex },
+        ],
+      }).distinct("_id");
+
+      // Find vendors that match the search
+      const vendorIds = await User.find({
+        $or: [
+          { companyName: regex },
+          { technicianName: regex },
+        ],
+      }).distinct("_id");
+
+      filter.$or = [
+        { serviceAgreementNumber: regex },
+        { description: regex },
+        { building: { $in: buildingIds } },
+        { vendor: { $in: vendorIds } },
+      ];
+    }
+
+    const serviceAgreements = await ServiceAgreement.find(filter)
       .populate({
         path: "building",
         select: "buildingAbbreviation formData.address portfolio",
@@ -563,12 +657,22 @@ exports.getServiceAgreements = async (req, res) => {
           select: "portfolioAbbreviation formData.name",
         },
       })
-      .populate("vendor", "companyName technicianName")
+      .populate("vendor", "companyName technicianName status") // include vendor status
+      .populate("category", "name")
       .populate("createdBy", "preferredName email")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await ServiceAgreement.countDocuments(filter);
 
     return sendSuccess(res, "Service agreements fetched successfully", {
       serviceAgreements,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total,
+      },
     });
   } catch (err) {
     return sendError(
@@ -578,6 +682,7 @@ exports.getServiceAgreements = async (req, res) => {
     );
   }
 };
+
 
 // Update Service Agreement
 exports.updateServiceAgreement = async (req, res) => {
