@@ -19,6 +19,7 @@ const {
   getNextCounterValue,
   closeWorkOrder,
   closeInspectionRequest,
+  closeServiceAgreement,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -123,6 +124,13 @@ router.put(
   authorize(...ALLOWED_ROLES),
   upload.serviceAgreementUpload.single("file"),
   updateServiceAgreement
+);
+
+router.put(
+  "/service-agreements/:id/close",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  closeServiceAgreement
 );
 
 router.delete(

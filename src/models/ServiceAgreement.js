@@ -16,14 +16,16 @@ const serviceAgreementSchema = new mongoose.Schema(
     fileUrl: { type: String },
     status: {
       type: String,
-      enum: ["active", "inactive", "completed"],
-      default: "active",
+      enum: ["open", "closed"],
+      default: "open",
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
+    closingComments: { type: String },
+    closedAt: { type: Date },
   },
   { timestamps: true }
 );

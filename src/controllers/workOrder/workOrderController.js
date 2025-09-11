@@ -590,7 +590,15 @@ exports.getServiceAgreements = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { dueDate, category, vendor, building, portfolio, vendorStatus, search } = req.query;
+    const {
+      dueDate,
+      category,
+      vendor,
+      building,
+      portfolio,
+      vendorStatus,
+      search,
+    } = req.query;
 
     let filter = {};
 
@@ -634,10 +642,7 @@ exports.getServiceAgreements = async (req, res) => {
 
       // Find vendors that match the search
       const vendorIds = await User.find({
-        $or: [
-          { companyName: regex },
-          { technicianName: regex },
-        ],
+        $or: [{ companyName: regex }, { technicianName: regex }],
       }).distinct("_id");
 
       filter.$or = [
@@ -682,7 +687,6 @@ exports.getServiceAgreements = async (req, res) => {
     );
   }
 };
-
 
 // Update Service Agreement
 exports.updateServiceAgreement = async (req, res) => {
@@ -738,6 +742,38 @@ exports.deleteServiceAgreement = async (req, res) => {
       err.message || "Failed to delete service agreement",
       500
     );
+  }
+};
+
+// Close Service Agreement
+exports.closeServiceAgreement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments } = req.body;
+
+    const serviceAgreement = await ServiceAgreement.findById(id);
+    if (!serviceAgreement) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Service agreement not found" });
+    }
+
+    serviceAgreement.status = "closed";
+    serviceAgreement.closedAt = new Date();
+    if (comments) {
+      serviceAgreement.closingComments = comments;
+    }
+
+    await serviceAgreement.save();
+
+    res.json({
+      success: true,
+      message: "Service agreement closed successfully",
+      data: serviceAgreement,
+    });
+  } catch (error) {
+    console.error("Error closing service agreement:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
