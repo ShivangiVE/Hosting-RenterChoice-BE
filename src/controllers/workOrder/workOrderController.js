@@ -590,7 +590,15 @@ exports.getServiceAgreements = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { dueDate, category, vendor, building, portfolio, vendorStatus, search } = req.query;
+    const {
+      dueDate,
+      category,
+      vendor,
+      building,
+      portfolio,
+      vendorStatus,
+      search,
+    } = req.query;
 
     let filter = {};
 
@@ -634,10 +642,7 @@ exports.getServiceAgreements = async (req, res) => {
 
       // Find vendors that match the search
       const vendorIds = await User.find({
-        $or: [
-          { companyName: regex },
-          { technicianName: regex },
-        ],
+        $or: [{ companyName: regex }, { technicianName: regex }],
       }).distinct("_id");
 
       filter.$or = [
@@ -682,7 +687,6 @@ exports.getServiceAgreements = async (req, res) => {
     );
   }
 };
-
 
 // Update Service Agreement
 exports.updateServiceAgreement = async (req, res) => {

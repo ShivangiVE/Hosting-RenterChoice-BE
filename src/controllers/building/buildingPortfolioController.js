@@ -232,12 +232,18 @@ exports.getPortfolioDetails = async (req, res) => {
 
 exports.getAllBuildings = async (req, res) => {
   try {
-    const { portfolioId } = req.query;
+    const { portfolioId, onlyCities } = req.query;
 
     // Build query object
     const query = {};
     if (portfolioId && portfolioId !== "All") {
       query.portfolio = portfolioId;
+    }
+
+    if (onlyCities && onlyCities === "true") {
+      // Return only unique cities
+      const cities = await Building.distinct("formData.city", query);
+      return sendSuccess(res, "Cities fetched successfully", { cities });
     }
 
     const buildings = await Building.find(query)
