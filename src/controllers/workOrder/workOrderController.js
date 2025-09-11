@@ -745,6 +745,38 @@ exports.deleteServiceAgreement = async (req, res) => {
   }
 };
 
+// Close Service Agreement
+exports.closeServiceAgreement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments } = req.body;
+
+    const serviceAgreement = await ServiceAgreement.findById(id);
+    if (!serviceAgreement) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Service agreement not found" });
+    }
+
+    serviceAgreement.status = "closed";
+    serviceAgreement.closedAt = new Date();
+    if (comments) {
+      serviceAgreement.closingComments = comments;
+    }
+
+    await serviceAgreement.save();
+
+    res.json({
+      success: true,
+      message: "Service agreement closed successfully",
+      data: serviceAgreement,
+    });
+  } catch (error) {
+    console.error("Error closing service agreement:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 // Update work order status
 exports.updateWorkOrderStatus = async (req, res) => {
   try {
