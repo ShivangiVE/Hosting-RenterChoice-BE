@@ -14,6 +14,7 @@ const buildingPortfolioRoutes = require("./src/routes/building/buildingPortfolio
 const formUploadRoutes = require("./src/routes/uploadRoutes/uploadRoutes");
 const workOrderRoutes = require("./src/routes/workOrderRoutes/workOrderRoutes");
 const repairCategories = require("./src/routes/workOrderRoutes/repairCategoriesRoutes");
+const woDynamicStatusRoutes = require("./src/routes/workOrderRoutes/woDynamicStatusRoutes");
 const internalUsers = require("./src/routes/internalUsers/internalUserRoutes");
 
 const app = express();
@@ -39,6 +40,7 @@ app.use("/api/forms/uploads", formUploadRoutes);
 app.use("/api/submissions", buildingPortfolioRoutes);
 app.use("/api/work-orders", workOrderRoutes);
 app.use("/api/categories", repairCategories);
+app.use("/api/work-orders/dynamicstatuses", woDynamicStatusRoutes);
 
 app.use(errorHandler);
 

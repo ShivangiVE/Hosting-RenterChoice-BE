@@ -20,7 +20,7 @@ const inspectionRequestSchema = new mongoose.Schema(
     inspectionColour: { type: String },
     status: {
       type: String,
-      enum: ["pending", "scheduled", "completed"],
+      enum: ["pending", "scheduled", "completed", "closed"],
       default: "pending",
     },
     scheduleDate: { type: Date },
