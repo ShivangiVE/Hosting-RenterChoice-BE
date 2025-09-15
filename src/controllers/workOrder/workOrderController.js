@@ -125,56 +125,73 @@ exports.getWorkOrders = async (req, res) => {
 
     let filter = {};
 
-    if (dynamicStatus && dynamicStatus != "All") {
-      filter.dynamicStatus = dynamicStatus;
+    // Role-based filtering example (optional)
+    // if (req.user && req.user.role === "SomeRole") {
+    //   filter.createdBy = req.user._id;
+    // }
+
+    // Status filter
+    if (status && status !== "All") filter.status = status;
+
+    // Dynamic status filter by ID or name
+    if (dynamicStatus && dynamicStatus !== "All") {
+      const statusObj = await WODynamicStatus.findOne({
+        $or: [{ _id: dynamicStatus }, { name: new RegExp(dynamicStatus, "i") }],
+      });
+      if (statusObj) filter.dynamicStatus = statusObj._id;
     }
 
-    if (status && status !== "All") {
-      filter.status = status;
-    }
+    // Category filter
+    if (category && category !== "All") filter.category = category;
 
-    if (category && category !== "All") {
-      filter.category = category; // FE must send categoryId
-    }
+    // Vendor filter
+    if (vendor && vendor !== "All") filter.vendor = vendor;
 
-    if (vendor && vendor !== "All") {
-      filter.vendor = vendor; // FE must send vendorId
-    }
+    // Building filter
+    if (building && building !== "All") filter.building = building;
 
-    if (building && building !== "All") {
-      filter.building = building; // FE must send buildingId
-    }
-
+    // Portfolio filter (filter by building references)
     if (portfolio && portfolio !== "All") {
-      filter["building.portfolio"] = portfolio; // FE must send portfolioId
+      const buildingIdsByPortfolio = await Building.find({
+        portfolio: portfolio,
+      }).distinct("_id");
+
+      filter.building = filter.building
+        ? {
+            $in: buildingIdsByPortfolio.filter(
+              (id) => id.toString() === filter.building.toString()
+            ),
+          }
+        : { $in: buildingIdsByPortfolio };
     }
 
-    if (tenancy && tenancy !== "All") {
-      filter.tenant = tenancy; // FE must send tenancyId/string
-    }
-
+    // City filter
     if (city && city !== "All") {
-      // Filter work orders whose building's city matches
       const buildingIdsByCity = await Building.find({
         "formData.city": new RegExp(city, "i"),
       }).distinct("_id");
 
-      // Merge with existing building filter if needed
-      if (filter.building) {
-        filter.building = {
-          $in: buildingIdsByCity.filter(
-            (id) => id.toString() === filter.building.toString()
-          ),
-        };
+      if (filter.building && filter.building.$in) {
+        // intersect with existing building filter
+        filter.building.$in = filter.building.$in.filter((id) =>
+          buildingIdsByCity.includes(id)
+        );
+      } else if (filter.building) {
+        filter.building = buildingIdsByCity.includes(filter.building)
+          ? filter.building
+          : null;
       } else {
         filter.building = { $in: buildingIdsByCity };
       }
     }
 
-    if (search) {
+    // Tenancy filter
+    if (tenancy && tenancy !== "All") filter.tenant = tenancy;
+
+    // Global search
+    if (search && search.trim() !== "") {
       const regex = new RegExp(search, "i");
 
-      // Find buildings that match the search
       const buildingIds = await Building.find({
         $or: [
           { "formData.address": regex },
@@ -183,13 +200,19 @@ exports.getWorkOrders = async (req, res) => {
         ],
       }).distinct("_id");
 
-      filter.$or = [
+      const searchConditions = [
         { workOrderNumber: regex },
         { description: regex },
         { building: { $in: buildingIds } },
       ];
+
+      // Merge with existing $or if needed
+      filter.$or = filter.$or
+        ? filter.$or.concat(searchConditions)
+        : searchConditions;
     }
 
+    // Fetch work orders with pagination
     const workOrders = await WorkOrder.find(filter)
       .populate({
         path: "building",
@@ -211,11 +234,7 @@ exports.getWorkOrders = async (req, res) => {
 
     return sendSuccess(res, "Work orders fetched successfully", {
       workOrders,
-      pagination: {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-      },
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
     });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch work orders", 500);
