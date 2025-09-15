@@ -2,6 +2,7 @@ const Building = require("../../models/Building");
 const InspectionRequest = require("../../models/InspectionRequest");
 const ServiceAgreement = require("../../models/ServiceAgreement");
 const User = require("../../models/User");
+const WODynamicStatus = require("../../models/WODynamicStatus");
 const WorkOrder = require("../../models/WorkOrder");
 const Counter = require("../../utils/Counter");
 const { sendSuccess, sendError } = require("../../utils/response");
@@ -51,6 +52,15 @@ exports.createWorkOrder = async (req, res) => {
       dueDate,
     } = req.body;
 
+    const defaultStatus = await WODynamicStatus.findOne({ isDefault: true });
+    if (!defaultStatus) {
+      return sendError(
+        res,
+        "No default dynamic status set. Please configure one.",
+        400
+      );
+    }
+
     // If a file was uploaded, build a public URL
     const fileUrl = req.file
       ? `/uploads/Repair/workOrders/${req.file.filename}`
@@ -79,6 +89,7 @@ exports.createWorkOrder = async (req, res) => {
       dueDate,
       fileUrl,
       status: normalizeStatus(req.body.status),
+      dynamicStatus: defaultStatus._id,
       createdBy: req.user._id,
     });
 
@@ -102,6 +113,7 @@ exports.getWorkOrders = async (req, res) => {
 
     const {
       status,
+      dynamicStatus,
       category,
       vendor,
       building,
@@ -112,6 +124,10 @@ exports.getWorkOrders = async (req, res) => {
     } = req.query;
 
     let filter = {};
+
+    if (dynamicStatus && dynamicStatus != "All") {
+      filter.dynamicStatus = dynamicStatus;
+    }
 
     if (status && status !== "All") {
       filter.status = status;
@@ -186,6 +202,7 @@ exports.getWorkOrders = async (req, res) => {
       .populate("vendor", "companyName technicianName")
       .populate("category", "name")
       .populate("createdBy", "preferredName email")
+      .populate("dynamicStatus", "name description isDefault")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -221,6 +238,7 @@ exports.getWorkOrder = async (req, res) => {
       .populate("vendor", "companyName technicianName email")
       .populate("category", "name")
       .populate("createdBy", "preferredName email")
+      .populate("dynamicStatus", "name description isDefault")
       .populate("assignedTo", "preferredName email");
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
@@ -243,10 +261,19 @@ exports.updateWorkOrder = async (req, res) => {
       updateData.fileUrl = `/uploads/Repair/workOrders/${req.file.filename}`;
     }
 
+    if (updateData.dynamicStatus) {
+      const statusExists = await WODynamicStatus.findById(
+        updateData.dynamicStatus
+      );
+      if (!statusExists) {
+        return sendError(res, "Invalid dynamic status", 400);
+      }
+    }
+
     const workOrder = await WorkOrder.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
-    });
+    }).populate("dynamicStatus", "name description");
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
@@ -267,6 +294,31 @@ exports.deleteWorkOrder = async (req, res) => {
     return sendSuccess(res, "Work order deleted successfully", { workOrder });
   } catch (err) {
     return sendError(res, err.message || "Failed to delete work order", 500);
+  }
+};
+
+// Bulk Delete Work Orders
+exports.bulkDeleteWorkOrders = async (req, res) => {
+  try {
+    // console.log("Request body:", req.body);
+    const { ids } = req.body; // array of workOrder IDs
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No work order IDs provided" });
+    }
+
+    const result = await WorkOrder.deleteMany({ _id: { $in: ids } });
+
+    return res.json({
+      success: true,
+      message: `${result.deletedCount} work orders deleted successfully`,
+    });
+  } catch (err) {
+    console.error("Bulk delete error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to delete work orders" });
   }
 };
 
@@ -299,6 +351,41 @@ exports.closeWorkOrder = async (req, res) => {
   } catch (error) {
     console.error("Error closing work order:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// Bulk Close Work Orders
+exports.bulkCloseWorkOrders = async (req, res) => {
+  try {
+    const { ids, comments } = req.body; // array of work order IDs + optional comments
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No work order IDs provided",
+      });
+    }
+
+    const result = await WorkOrder.updateMany(
+      { _id: { $in: ids } },
+      {
+        $set: {
+          status: "closed",
+          completeDate: new Date(),
+          ...(comments ? { closingComments: comments } : {}),
+        },
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: `${result.modifiedCount} work orders closed successfully`,
+    });
+  } catch (error) {
+    console.error("Bulk close work order error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to close work orders",
+    });
   }
 };
 
@@ -395,7 +482,7 @@ exports.getInspectionRequests = async (req, res) => {
             buildingIdsByAddress.includes(id)
           ),
         };
-        delete filter["building.formData.address"]; // remove previous address filter
+        delete filter["building.formData.address"];
       } else {
         filter.building = { $in: buildingIdsByCity };
       }
@@ -496,7 +583,7 @@ exports.closeInspectionRequest = async (req, res) => {
         .json({ success: false, message: "Inspection request not found" });
     }
 
-    inspectionRequest.status = "completed";
+    inspectionRequest.status = "closed";
     inspectionRequest.completeDate = new Date();
     if (comments) inspectionRequest.closingComments = comments;
 
@@ -510,6 +597,41 @@ exports.closeInspectionRequest = async (req, res) => {
   } catch (error) {
     console.error("Error closing inspection request:", error);
     return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// Bulk Close Inspection Requests
+exports.bulkCloseInspectionRequests = async (req, res) => {
+  try {
+    const { ids, comments } = req.body; // array of inspection request IDs + optional comments
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No inspection request IDs provided",
+      });
+    }
+
+    const result = await InspectionRequest.updateMany(
+      { _id: { $in: ids } },
+      {
+        $set: {
+          status: "closed",
+          completeDate: new Date(),
+          ...(comments ? { closingComments: comments } : {}),
+        },
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: `${result.modifiedCount} inspection requests closed successfully`,
+    });
+  } catch (error) {
+    console.error("Bulk close inspection request error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to close inspection requests",
+    });
   }
 };
 
@@ -531,6 +653,32 @@ exports.deleteInspectionRequest = async (req, res) => {
       err.message || "Failed to delete inspection request",
       500
     );
+  }
+};
+
+// Bulk Delete Inspection Requests
+exports.bulkDeleteInspectionRequests = async (req, res) => {
+  try {
+    const { ids } = req.body; // array of inspection request IDs
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No inspection request IDs provided",
+      });
+    }
+
+    const result = await InspectionRequest.deleteMany({ _id: { $in: ids } });
+
+    return res.json({
+      success: true,
+      message: `${result.deletedCount} inspection requests deleted successfully`,
+    });
+  } catch (err) {
+    console.error("Bulk delete inspection error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete inspection requests",
+    });
   }
 };
 
@@ -583,7 +731,7 @@ exports.createServiceAgreement = async (req, res) => {
   }
 };
 
-// Get all service agreements with pagination, search, and filters
+// Get all service agreements
 exports.getServiceAgreements = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -602,36 +750,47 @@ exports.getServiceAgreements = async (req, res) => {
 
     let filter = {};
 
-    // Filters
+    //  Due Date
     if (dueDate && dueDate !== "All") {
       filter.initialDueDate = new Date(dueDate);
     }
 
+    //  Category
     if (category && category !== "All") {
-      filter.category = category; // FE should send categoryId
+      filter.category = category; // expecting categoryId
     }
 
+    //  Vendor
     if (vendor && vendor !== "All") {
-      filter.vendor = vendor; // FE should send vendorId
+      filter.vendor = vendor; // expecting vendorId
     }
 
+    //  Vendor Status (via User collection lookup)
     if (vendorStatus && vendorStatus !== "All") {
-      filter["vendor.status"] = vendorStatus; // assuming vendor has status field
+      const vendorIds = await User.find({ status: vendorStatus }).distinct(
+        "_id"
+      );
+      filter.vendor = { $in: vendorIds };
     }
 
+    // Building
     if (building && building !== "All") {
-      filter.building = building; // FE should send buildingId
+      filter.building = building; // expecting buildingId
     }
 
+    // Portfolio (via Building lookup)
     if (portfolio && portfolio !== "All") {
-      filter["building.portfolio"] = portfolio; // FE should send portfolioId
+      const buildingIds = await Building.find({
+        portfolio: portfolio,
+      }).distinct("_id");
+      filter.building = { $in: buildingIds };
     }
 
-    // Global search
+    // Global Search
     if (search && search.trim() !== "") {
       const regex = new RegExp(search, "i");
 
-      // Find buildings that match the search
+      // Find buildings that match search
       const buildingIds = await Building.find({
         $or: [
           { "formData.address": regex },
@@ -640,7 +799,7 @@ exports.getServiceAgreements = async (req, res) => {
         ],
       }).distinct("_id");
 
-      // Find vendors that match the search
+      // Find vendors that match search
       const vendorIds = await User.find({
         $or: [{ companyName: regex }, { technicianName: regex }],
       }).distinct("_id");
@@ -653,6 +812,7 @@ exports.getServiceAgreements = async (req, res) => {
       ];
     }
 
+    // Query with population
     const serviceAgreements = await ServiceAgreement.find(filter)
       .populate({
         path: "building",
@@ -662,7 +822,7 @@ exports.getServiceAgreements = async (req, res) => {
           select: "portfolioAbbreviation formData.name",
         },
       })
-      .populate("vendor", "companyName technicianName status") // include vendor status
+      .populate("vendor", "companyName technicianName status")
       .populate("category", "name")
       .populate("createdBy", "preferredName email")
       .sort({ createdAt: -1 })
@@ -745,6 +905,30 @@ exports.deleteServiceAgreement = async (req, res) => {
   }
 };
 
+// Bulk Delete Service Agreements
+exports.bulkDeleteServiceAgreements = async (req, res) => {
+  try {
+    const { ids } = req.body; // array of service agreement IDs
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No service agreement IDs provided" });
+    }
+
+    const result = await ServiceAgreement.deleteMany({ _id: { $in: ids } });
+
+    return res.json({
+      success: true,
+      message: `${result.deletedCount} service agreements deleted successfully`,
+    });
+  } catch (err) {
+    console.error("Bulk delete service agreement error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to delete service agreements" });
+  }
+};
+
 // Close Service Agreement
 exports.closeServiceAgreement = async (req, res) => {
   try {
@@ -774,6 +958,41 @@ exports.closeServiceAgreement = async (req, res) => {
   } catch (error) {
     console.error("Error closing service agreement:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// Bulk Close Service Agreements
+exports.bulkCloseServiceAgreements = async (req, res) => {
+  try {
+    const { ids, comments } = req.body; // array of service agreement IDs + optional comments
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No service agreement IDs provided",
+      });
+    }
+
+    const result = await ServiceAgreement.updateMany(
+      { _id: { $in: ids } },
+      {
+        $set: {
+          status: "closed",
+          closedAt: new Date(),
+          ...(comments ? { closingComments: comments } : {}),
+        },
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: `${result.modifiedCount} service agreements closed successfully`,
+    });
+  } catch (error) {
+    console.error("Bulk close service agreement error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to close service agreements",
+    });
   }
 };
 

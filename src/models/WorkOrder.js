@@ -24,6 +24,10 @@ const workOrderSchema = new mongoose.Schema(
       enum: ["open", "closed"],
       default: "open",
     },
+    dynamicStatus: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WODynamicStatus",
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

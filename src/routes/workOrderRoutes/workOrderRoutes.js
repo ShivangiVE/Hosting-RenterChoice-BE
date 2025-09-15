@@ -20,6 +20,12 @@ const {
   closeWorkOrder,
   closeInspectionRequest,
   closeServiceAgreement,
+  bulkDeleteWorkOrders,
+  bulkDeleteInspectionRequests,
+  bulkDeleteServiceAgreements,
+  bulkCloseWorkOrders,
+  bulkCloseInspectionRequests,
+  bulkCloseServiceAgreements,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -69,11 +75,26 @@ router.put(
   closeWorkOrder
 );
 
+// Bulk Close Work Orders
+router.post(
+  "/work-orders/bulk-close",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  bulkCloseWorkOrders
+);
+
 router.delete(
   "/work-orders/:id",
   protect,
   authorize(...ALLOWED_ROLES),
   deleteWorkOrder
+);
+
+router.post(
+  "/work-orders/bulk-delete",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  bulkDeleteWorkOrders
 );
 
 // ========================= Inspection Requests =========================
@@ -100,11 +121,26 @@ router.put(
   closeInspectionRequest
 );
 
+// Bulk Close Inspection Requests
+router.post(
+  "/inspection-requests/bulk-close",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  bulkCloseInspectionRequests
+);
+
 router.delete(
   "/inspection-requests/:id",
   protect,
   authorize(...ALLOWED_ROLES),
   deleteInspectionRequest
+);
+
+router.post(
+  "/inspection-requests/bulk-delete",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  bulkDeleteInspectionRequests
 );
 
 // ========================= Service Agreements =========================
@@ -133,11 +169,26 @@ router.put(
   closeServiceAgreement
 );
 
+// Bulk Close Service Agreements
+router.post(
+  "/service-agreements/bulk-close",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  bulkCloseServiceAgreements
+);
+
 router.delete(
   "/service-agreements/:id",
   protect,
   authorize(...ALLOWED_ROLES),
   deleteServiceAgreement
+);
+
+router.post(
+  "/service-agreements/bulk-delete",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  bulkDeleteServiceAgreements
 );
 
 // ========================= Counter =========================
