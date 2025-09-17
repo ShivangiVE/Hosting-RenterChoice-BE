@@ -216,7 +216,8 @@ exports.getWorkOrders = async (req, res) => {
     const workOrders = await WorkOrder.find(filter)
       .populate({
         path: "building",
-        select: "buildingAbbreviation formData.address portfolio",
+        select:
+          "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio",
         populate: {
           path: "portfolio",
           select: "portfolioAbbreviation formData.name",
@@ -530,7 +531,8 @@ exports.getInspectionRequests = async (req, res) => {
     const inspectionRequests = await InspectionRequest.find(filter)
       .populate({
         path: "building",
-        select: "buildingAbbreviation formData.address portfolio",
+        select:
+          "buildingAbbreviation formData.address formData.city formData.address formData.fullAddress portfolio",
         populate: {
           path: "portfolio",
           select: "portfolioAbbreviation formData.name",
@@ -835,7 +837,8 @@ exports.getServiceAgreements = async (req, res) => {
     const serviceAgreements = await ServiceAgreement.find(filter)
       .populate({
         path: "building",
-        select: "buildingAbbreviation formData.address portfolio",
+        select:
+          "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio",
         populate: {
           path: "portfolio",
           select: "portfolioAbbreviation formData.name",
