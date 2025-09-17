@@ -22,9 +22,13 @@ const createStorage = (folderName) => {
   });
 };
 
-// File filter (optional but safer)
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = ["image/jpeg", "image/png", "application/pdf", "video/mp4"];
+  const allowedTypes = [
+    "image/jpeg",
+    "image/png",
+    "application/pdf",
+    "video/mp4",
+  ];
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
@@ -39,8 +43,23 @@ const workOrderUpload = multer({
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB max
 });
 
+// Service Agreement Uploads
 const serviceAgreementUpload = multer({
   storage: createStorage("serviceAgreements"),
+  fileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+// Task Uploads
+const taskUpload = multer({
+  storage: createStorage("tasks"),
+  fileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+// ToDo Upload
+const todoUpload = multer({
+  storage: createStorage("todos"),
   fileFilter,
   limits: { fileSize: 20 * 1024 * 1024 },
 });
@@ -48,4 +67,6 @@ const serviceAgreementUpload = multer({
 module.exports = {
   workOrderUpload,
   serviceAgreementUpload,
+  taskUpload,
+  todoUpload,
 };

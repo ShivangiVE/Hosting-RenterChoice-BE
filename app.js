@@ -13,6 +13,8 @@ const formTemplateRoutes = require("./src/routes/formTemplateRoutes/formTemplate
 const buildingPortfolioRoutes = require("./src/routes/building/buildingPortfolioRoutes");
 const formUploadRoutes = require("./src/routes/uploadRoutes/uploadRoutes");
 const workOrderRoutes = require("./src/routes/workOrderRoutes/workOrderRoutes");
+const taskRoutes = require("./src/routes/taskRoutes/taskRoutes");
+const todosRoutes = require("./src/routes/taskRoutes/todoRoutes");
 const repairCategories = require("./src/routes/workOrderRoutes/repairCategoriesRoutes");
 const woDynamicStatusRoutes = require("./src/routes/workOrderRoutes/woDynamicStatusRoutes");
 const internalUsers = require("./src/routes/internalUsers/internalUserRoutes");
@@ -39,6 +41,8 @@ app.use("/api/forms/templates", formTemplateRoutes);
 app.use("/api/forms/uploads", formUploadRoutes);
 app.use("/api/submissions", buildingPortfolioRoutes);
 app.use("/api/work-orders", workOrderRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/todos", todosRoutes);
 app.use("/api/categories", repairCategories);
 app.use("/api/work-orders/dynamicstatuses", woDynamicStatusRoutes);
 
