@@ -55,7 +55,7 @@ router.post(
 router.delete("/:id", protect, authorize(...ALLOWED_ROLES), deleteTask);
 
 // Bulk Delete Tasks
-router.delete(
+router.post(
   "/bulk-delete",
   protect,
   authorize(...ALLOWED_ROLES),

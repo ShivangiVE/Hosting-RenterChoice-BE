@@ -49,19 +49,54 @@ exports.createInternalUser = async (req, res) => {
 };
 
 // OfficeAdmin can list all team users
+// exports.getInternalUsers = async (req, res) => {
+//   try {
+//     const filter = {
+//       role: { $in: INTERNAL_ROLES },
+//     };
+
+//     if (req.query.createdBy) {
+//       filter.createdBy = req.query.createdBy;
+//     }
+
+//     const users = await User.find(filter).select("-password");
+//     return sendSuccess(res, "Internal users retrieved successfully", { users });
+//   } catch (err) {
+//     return sendError(res, "Failed to retrieve internal users", 500);
+//   }
+// };
+
 exports.getInternalUsers = async (req, res) => {
   try {
     const filter = {
       role: { $in: INTERNAL_ROLES },
     };
 
-    if (req.query.createdBy) {
-      filter.createdBy = req.query.createdBy;
+    if (req.user.role === "Admin") {
+      // Admin sees all
+    } else if (req.user.role === "OfficeAdmin") {
+      // OfficeAdmin sees only their created users
+      filter.createdBy = req.user._id;
+    } else if (INTERNAL_ROLES.includes(req.user.role)) {
+      // Team member (e.g. AccountsTeam, RepairsTeam, etc.)
+      // Find their office admin (the one who created them)
+      const self = await User.findById(req.user._id).select("createdBy");
+      if (self && self.createdBy) {
+        filter.createdBy = self.createdBy;
+      } else {
+        return sendError(res, "No associated OfficeAdmin found", 403);
+      }
+    } else {
+      return sendError(res, "Not authorized", 403);
     }
 
-    const users = await User.find(filter).select("-password");
+    const users = await User.find(filter)
+      .select("-password")
+      .populate("createdBy", "preferredName email role"); // optional: show OfficeAdmin info
+
     return sendSuccess(res, "Internal users retrieved successfully", { users });
   } catch (err) {
+    console.error(err);
     return sendError(res, "Failed to retrieve internal users", 500);
   }
 };

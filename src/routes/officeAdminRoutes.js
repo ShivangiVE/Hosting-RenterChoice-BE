@@ -10,7 +10,19 @@ const {
 } = require("../controllers/officeAdmin/officeAdminController");
 
 // Allow both Admin and OfficeAdmin
-router.use(protect, authorize("Admin", "OfficeAdmin"));
+router.use(
+  protect,
+  authorize(
+    "Admin",
+    "OfficeAdmin",
+    "AccountsTeam",
+    "RepairsTeam",
+    "LeaseTeam",
+    "MarketingTeam",
+    "LandlordsTeam",
+    "InspectionClerk"
+  )
+);
 
 // Create a new internal user (team member)
 router.post("/internal-users", createInternalUser);

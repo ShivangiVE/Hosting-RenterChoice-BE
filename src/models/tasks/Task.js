@@ -46,6 +46,7 @@ const taskSchema = new mongoose.Schema(
     closingComments: {
       type: String,
     },
+    completedAt: { type: Date },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

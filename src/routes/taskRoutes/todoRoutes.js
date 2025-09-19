@@ -54,7 +54,7 @@ router.post(
 router.delete("/:id", protect, authorize(...ALLOWED_ROLES), deleteTodo);
 
 // Bulk Delete Todos
-router.delete(
+router.post(
   "/bulk-delete",
   protect,
   authorize(...ALLOWED_ROLES),

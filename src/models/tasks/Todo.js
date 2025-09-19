@@ -45,6 +45,8 @@ const todoSchema = new mongoose.Schema(
       type: String,
     },
 
+    completedAt: { type: Date },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
