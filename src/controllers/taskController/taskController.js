@@ -105,7 +105,16 @@ exports.getTasks = async (req, res) => {
     if (assignedTo) filter.assignedTo = assignedTo;
     if (taskColor) filter.taskColor = taskColor;
     if (tags) filter.tags = { $in: tags.split(",") };
-    if (dueDate) filter.dueDate = { $lte: new Date(dueDate) };
+    if (dueDate) {
+      const start = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(dueDate);
+      end.setHours(23, 59, 59, 999);
+
+      filter.dueDate = { $gte: start, $lte: end };
+    }
+
     if (status) filter.status = status;
 
     const [tasks, total] = await Promise.all([
@@ -197,6 +206,7 @@ exports.closeTask = async (req, res) => {
     }
 
     task.status = "Completed";
+    task.completedAt = new Date();
     if (closingComments) task.closingComments = closingComments;
     await task.save();
 
@@ -241,7 +251,7 @@ exports.bulkCloseTasks = async (req, res) => {
       }
 
       task.status = "Completed";
-      // Instead of closingComments, add a note
+      task.completedAt = new Date();
       task.closingComments =
         "Note: To add comments, please close tasks individually.";
       await task.save();

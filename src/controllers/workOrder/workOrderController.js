@@ -417,7 +417,7 @@ exports.createInspectionRequest = async (req, res) => {
       building,
       notes,
       assignedTo,
-      keyIssued,
+      keyIssued, 
       dueDate,
       inspectionColour,
     } = req.body;

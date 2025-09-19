@@ -197,6 +197,7 @@ exports.closeTodo = async (req, res) => {
     }
 
     todo.status = "Completed";
+    todo.completedAt = new Date();
     if (closingComments) todo.closingComments = closingComments;
     await todo.save();
 
@@ -242,7 +243,7 @@ exports.bulkCloseTodos = async (req, res) => {
       }
 
       todo.status = "Completed";
-      // Add note instead of closingComments
+      todo.completedAt = new Date();
       todo.closingComments =
         "Note: To add comments, please close todos individually.";
       await todo.save();
