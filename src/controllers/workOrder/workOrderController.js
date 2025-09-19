@@ -469,8 +469,18 @@ exports.getInspectionRequests = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { status, type, user, building, city, portfolio, dueDate, search } =
-      req.query;
+    const {
+      status,
+      type,
+      user,
+      building,
+      city,
+      portfolio,
+      dueDate,
+      scheduleDate,
+      completeDate,
+      search,
+    } = req.query;
 
     let filter = {};
 
@@ -501,6 +511,22 @@ exports.getInspectionRequests = async (req, res) => {
       end.setHours(23, 59, 59, 999);
 
       filter.dueDate = { $gte: start, $lte: end };
+    }
+
+    // Schedule Date filter
+    if (scheduleDate && scheduleDate !== "All") {
+      const start = new Date(scheduleDate);
+      const end = new Date(scheduleDate);
+      end.setHours(23, 59, 59, 999);
+      filter.scheduleDate = { $gte: start, $lte: end };
+    }
+
+    // Completed Date filter
+    if (completeDate && completeDate !== "All") {
+      const start = new Date(completeDate);
+      const end = new Date(completeDate);
+      end.setHours(23, 59, 59, 999);
+      filter.completeDate = { $gte: start, $lte: end };
     }
 
     if (city && city !== "All") {
