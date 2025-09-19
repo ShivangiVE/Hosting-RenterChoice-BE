@@ -150,6 +150,15 @@ exports.getWorkOrders = async (req, res) => {
     // Building filter
     if (building && building !== "All") filter.building = building;
 
+    // Due Date filter
+    if (req.query.dueDate && req.query.dueDate !== "All") {
+      const start = new Date(req.query.dueDate);
+      const end = new Date(req.query.dueDate);
+      end.setHours(23, 59, 59, 999);
+
+      filter.dueDate = { $gte: start, $lte: end };
+    }
+
     // Portfolio filter (filter by building references)
     if (portfolio && portfolio !== "All") {
       const buildingIdsByPortfolio = await Building.find({
@@ -417,7 +426,7 @@ exports.createInspectionRequest = async (req, res) => {
       building,
       notes,
       assignedTo,
-      keyIssued, 
+      keyIssued,
       dueDate,
       inspectionColour,
     } = req.body;
@@ -484,7 +493,15 @@ exports.getInspectionRequests = async (req, res) => {
       filter["building.formData.address"] = new RegExp(building, "i");
     if (portfolio && portfolio !== "All")
       filter["building.portfolio.formData.name"] = new RegExp(portfolio, "i");
-    if (dueDate && dueDate !== "All") filter.dueDate = new Date(dueDate);
+
+    // Due Date filter
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      end.setHours(23, 59, 59, 999);
+
+      filter.dueDate = { $gte: start, $lte: end };
+    }
 
     if (city && city !== "All") {
       const buildingIdsByCity = await Building.find({
@@ -773,7 +790,11 @@ exports.getServiceAgreements = async (req, res) => {
 
     //  Due Date
     if (dueDate && dueDate !== "All") {
-      filter.initialDueDate = new Date(dueDate);
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      end.setHours(23, 59, 59, 999);
+
+      filter.initialDueDate = { $gte: start, $lte: end };
     }
 
     //  Category
