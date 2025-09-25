@@ -9,6 +9,7 @@ const {
   closeTodo,
   bulkCloseTodos,
   bulkDeleteTodos,
+  getTodoDetails,
 } = require("../../controllers/taskController/todoController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { todoUpload } = require("../../middleware/repairUpload");
@@ -36,9 +37,17 @@ router.post(
 // Get Todos
 router.get("/", protect, getTodos);
 
-// Update Todo
-router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateTodo);
+// Get Todo details
+router.get("/:id", protect, authorize(...ALLOWED_ROLES), getTodoDetails);
 
+// Update Todo
+router.put(
+  "/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  todoUpload.array("attachments"),
+  updateTodo
+);
 // Close Todo
 router.put("/:id/close", protect, authorize(...ALLOWED_ROLES), closeTodo);
 

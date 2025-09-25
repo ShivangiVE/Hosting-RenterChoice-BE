@@ -97,7 +97,7 @@ exports.getTasks = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { category, assignedTo, tags, taskColor, dueDate, status } =
+    const { category, user, assignedTo, tags, taskColor, dueDate, status } =
       req.query;
 
     let filter = {};
@@ -116,6 +116,11 @@ exports.getTasks = async (req, res) => {
     }
 
     if (status) filter.status = status;
+
+    // filter for tasks assigned to OR created by the user
+    if (user) {
+      filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    }
 
     const [tasks, total] = await Promise.all([
       Task.find(filter)
@@ -147,17 +152,48 @@ exports.getTasks = async (req, res) => {
   }
 };
 
+// GET Task Details by ID
+exports.getTaskDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const task = await Task.findById(id)
+      .populate("category", "name")
+      .populate("assignedTo", "preferredName email")
+      .populate("createdBy", "preferredName email");
+
+    if (!task) return sendError(res, "Task not found", 404);
+
+    // Map to include fallbacks
+    const mappedTask = {
+      ...task.toObject(),
+      assignedTo: task.assignedTo
+        ? task.assignedTo
+        : { preferredName: "", email: "" },
+      createdBy: task.createdBy
+        ? task.createdBy
+        : { preferredName: "", email: "" },
+      category: task.category ? task.category : { name: "" },
+    };
+
+    return sendSuccess(res, "Task details fetched successfully", mappedTask);
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch task details", 500);
+  }
+};
+
 // UPDATE Task
 exports.updateTask = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
     if (updateData.category) {
       const categoryDoc = await Category.findOne({
         _id: updateData.category,
         type: "task",
       });
+
       if (!categoryDoc) {
         return sendError(
           res,
@@ -172,6 +208,10 @@ exports.updateTask = async (req, res) => {
       if (!assignedUser) {
         return sendError(res, "Invalid assigned user. User not found.", 400);
       }
+    }
+    // If files uploaded
+    if (req.files && req.files.length > 0) {
+      updateData.attachments = req.files.map((f) => f.filename);
     }
 
     const task = await Task.findByIdAndUpdate(id, updateData, { new: true });

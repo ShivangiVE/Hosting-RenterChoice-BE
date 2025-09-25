@@ -10,6 +10,7 @@ const {
   closeTask,
   bulkCloseTasks,
   bulkDeleteTasks,
+  getTaskDetails,
 } = require("../../controllers/taskController/taskController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { taskUpload } = require("../../middleware/repairUpload");
@@ -37,8 +38,17 @@ router.post(
 // Get tasks with filters + pagination
 router.get("/", protect, getTasks);
 
+// Get Task Details by ID
+router.get("/:id", protect, authorize(...ALLOWED_ROLES), getTaskDetails);
+
 // Update Task
-router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateTask);
+router.put(
+  "/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  taskUpload.array("attachments"), // <-- matches frontend FormData
+  updateTask
+);
 
 // Close Task
 router.put("/:id/close", protect, authorize(...ALLOWED_ROLES), closeTask);

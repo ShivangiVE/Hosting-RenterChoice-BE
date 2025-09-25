@@ -492,7 +492,19 @@ exports.getInspectionRequests = async (req, res) => {
 
     // Existing filters
     if (status && status !== "All") filter.status = status;
-    if (type && type !== "All") filter.inspectionType = type;
+    // if (type && type !== "All") filter.inspectionType = type;
+
+    // Updated Filter for Marketing Module
+    if (type && type !== "All") {
+      if (type.toLowerCase() === "marketing") {
+        // Case-insensitive exact match for "marketing"
+        filter.inspectionType = { $regex: /^marketing$/i };
+      } else {
+        // Normal exact match for other types
+        filter.inspectionType = type;
+      }
+    }
+
     if (user && user !== "All") {
       const matchedUsers = await User.find({
         preferredName: new RegExp(user, "i"),

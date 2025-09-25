@@ -18,7 +18,7 @@ const todoSchema = new mongoose.Schema(
       required: true, // can assign to self or others
     },
 
-    taskColor: {
+    todoColor: {
       type: String,
       enum: ["Red", "Green", "Blue", "Yellow", "Purple"],
       // required: true,

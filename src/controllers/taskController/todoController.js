@@ -39,7 +39,7 @@ exports.getNextTodoNumber = async (req, res) => {
 // CREATE Todo
 exports.createTodo = async (req, res) => {
   try {
-    const { category, description, tags, assignedTo, taskColor } = req.body;
+    const { category, description, tags, assignedTo, todoColor } = req.body;
 
     const categoryDoc = await Category.findOne({ _id: category, type: "todo" });
     if (!categoryDoc) {
@@ -76,7 +76,7 @@ exports.createTodo = async (req, res) => {
       description,
       tags,
       assignedTo,
-      taskColor: taskColor || undefined,
+      todoColor: todoColor || undefined,
       attachments,
       status: "In Progress",
       createdBy: req.user._id,
@@ -95,14 +95,19 @@ exports.getTodos = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { category, assignedTo, tags, taskColor, status } = req.query;
+    const { category, user, assignedTo, tags, todoColor, status } = req.query;
 
     let filter = {};
     if (category) filter.category = category;
     if (assignedTo) filter.assignedTo = assignedTo;
-    if (taskColor) filter.taskColor = taskColor;
+    if (todoColor) filter.todoColor = todoColor;
     if (tags) filter.tags = { $in: tags.split(",") };
     if (status) filter.status = status;
+
+    // filter for tasks assigned to OR created by the user
+    if (user) {
+      filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    }
 
     const [todos, total] = await Promise.all([
       Todo.find(filter)
@@ -138,11 +143,41 @@ exports.getTodos = async (req, res) => {
   }
 };
 
+// GET Todo Details by ID
+exports.getTodoDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const todo = await Todo.findById(id)
+      .populate("category", "name")
+      .populate("assignedTo", "preferredName email")
+      .populate("createdBy", "preferredName email");
+
+    if (!todo) return sendError(res, "Todo not found", 404);
+
+    // Map to include fallbacks
+    const mappedTodo = {
+      ...todo.toObject(),
+      assignedTo: todo.assignedTo
+        ? todo.assignedTo
+        : { preferredName: "", email: "" },
+      createdBy: todo.createdBy
+        ? todo.createdBy
+        : { preferredName: "", email: "" },
+      category: todo.category ? todo.category : { name: "" },
+    };
+
+    return sendSuccess(res, "Todo details fetched successfully", mappedTodo);
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch todo details", 500);
+  }
+};
+
 // UPDATE Todo
 exports.updateTodo = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
     if (updateData.category) {
       const categoryDoc = await Category.findOne({
@@ -163,6 +198,11 @@ exports.updateTodo = async (req, res) => {
       if (!assignedUser) {
         return sendError(res, "Invalid assigned user. User not found.", 400);
       }
+    }
+
+    // Handle uploaded attachments
+    if (req.files && req.files.length > 0) {
+      updateData.attachments = req.files.map((f) => f.filename);
     }
 
     const todo = await Todo.findByIdAndUpdate(id, updateData, { new: true });
