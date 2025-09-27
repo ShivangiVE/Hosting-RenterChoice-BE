@@ -26,7 +26,11 @@ const fieldSchema = new mongoose.Schema({
 const formTemplateSchema = new mongoose.Schema(
   {
     formName: { type: String, required: true },
-    formType: { type: String, enum: ["portfolio", "building"], required: true },
+    formType: {
+      type: String,
+      enum: ["portfolio", "building", "inspection", "marketing"],
+      required: true,
+    },
     fields: [fieldSchema],
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
