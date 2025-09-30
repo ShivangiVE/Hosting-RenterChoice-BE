@@ -11,6 +11,7 @@ const {
   updateBuilding,
   deleteBuilding,
   bulkUpdateBuildings,
+  getBuildingsByPortfolio,
 } = require("../../controllers/building/buildingPortfolioController");
 
 // Internal roles allowed
@@ -63,5 +64,11 @@ router.post(
 
 router.get("/portfolios", protect, getAllPortfolios);
 router.get("/portfolio/:id", protect, getPortfolioDetails);
+
+router.get(
+  "/portfolio/:portfolioId/buildings",
+  protect,
+  getBuildingsByPortfolio
+);
 
 module.exports = router;
