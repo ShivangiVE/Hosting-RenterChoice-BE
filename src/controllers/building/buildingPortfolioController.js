@@ -403,3 +403,42 @@ exports.deleteBuilding = async (req, res) => {
     return sendError(res, err.message || "Failed to delete building", 500);
   }
 };
+
+// Get All buildings by Portfolio
+exports.getBuildingsByPortfolio = async (req, res) => {
+  try {
+    const { portfolioId } = req.params;
+
+    // Ensure portfolio exists
+    const portfolio = await Portfolio.findById(portfolioId).populate(
+      "createdBy",
+      "preferredName email"
+    );
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    // Fetch all buildings under this portfolio
+    const buildings = await Building.find({ portfolio: portfolioId })
+      .populate("createdBy", "preferredName email")
+      .populate("portfolio", "portfolioAbbreviation")
+      .lean();
+
+    return sendSuccess(res, "Buildings for portfolio fetched successfully", {
+      portfolio: {
+        ...portfolio.toObject(),
+        formData: {
+          portfolioAbbreviation: portfolio.portfolioAbbreviation,
+          ...(portfolio.formData || {}),
+        },
+      },
+      buildings: buildings.map((b) => ({
+        id: b._id,
+        buildingAbbreviation: b.buildingAbbreviation,
+        address: b.formData?.address || "",
+        fullAddress: b.formData?.fullAddress || "",
+        city: b.formData?.city || "",
+      })),
+    });
+  } catch (err) {
+    return sendError(res, err);
+  }
+};
