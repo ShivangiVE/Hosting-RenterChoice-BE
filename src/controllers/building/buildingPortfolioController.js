@@ -92,6 +92,7 @@ async function saveSubmission(formType, formData, userId) {
       buildingAbbreviation,
       portfolio,
       formData: { ...defaultFields, ...restData },
+      status: formData.status || "vacant",
       createdBy: userId,
     });
   }

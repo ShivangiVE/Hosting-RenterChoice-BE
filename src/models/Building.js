@@ -35,6 +35,11 @@ const buildingSchema = new mongoose.Schema(
         tenancyName: "",
       },
     },
+    status: {
+      type: String,
+      enum: ["vacant", "occupied", "deactivated"],
+      default: "vacant",
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
