@@ -1,6 +1,7 @@
 const Building = require("../../models/Building");
 const FormTemplate = require("../../models/FormTemplate");
 const Portfolio = require("../../models/Portfolio");
+const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 
 /**
@@ -411,10 +412,9 @@ exports.getBuildingsByPortfolio = async (req, res) => {
     const { portfolioId } = req.params;
 
     // Ensure portfolio exists
-    const portfolio = await Portfolio.findById(portfolioId).populate(
-      "createdBy",
-      "preferredName email"
-    );
+    const portfolio = await Portfolio.findById(portfolioId)
+      .populate("createdBy", "preferredName email")
+      .populate("owners", "preferredName email phoneNumber");
     if (!portfolio) return sendError(res, "Portfolio not found", 404);
 
     // Fetch all buildings under this portfolio
@@ -441,5 +441,58 @@ exports.getBuildingsByPortfolio = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err);
+  }
+};
+
+// Add owners to portfolio
+exports.addOwnersToPortfolio = async (req, res) => {
+  try {
+    const { portfolioId } = req.params;
+    const { ownerIds } = req.body; // array of userIds
+
+    if (!Array.isArray(ownerIds) || ownerIds.length === 0) {
+      return sendError(res, "Owner IDs are required", 400);
+    }
+
+    // Ensure all users exist & have role = Owner
+    const owners = await User.find({ _id: { $in: ownerIds }, role: "Owner" });
+    if (owners.length !== ownerIds.length) {
+      return sendError(
+        res,
+        "One or more owners not found or invalid role",
+        400
+      );
+    }
+
+    const portfolio = await Portfolio.findByIdAndUpdate(
+      portfolioId,
+      { $addToSet: { owners: { $each: ownerIds } } },
+      { new: true }
+    ).populate("owners", "preferredName email");
+
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    return sendSuccess(res, "Owners added to portfolio", { portfolio });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to add owners", 500);
+  }
+};
+
+// Remove owner from portfolio
+exports.removeOwnerFromPortfolio = async (req, res) => {
+  try {
+    const { portfolioId, ownerId } = req.params;
+
+    const portfolio = await Portfolio.findByIdAndUpdate(
+      portfolioId,
+      { $pull: { owners: ownerId } },
+      { new: true }
+    ).populate("owners", "preferredName email");
+
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    return sendSuccess(res, "Owner removed from portfolio", { portfolio });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to remove owner", 500);
   }
 };
