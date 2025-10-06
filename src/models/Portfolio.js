@@ -8,6 +8,12 @@ const portfolioSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    owners: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
   },
   { timestamps: true }
 );

@@ -12,6 +12,8 @@ const {
   deleteBuilding,
   bulkUpdateBuildings,
   getBuildingsByPortfolio,
+  addOwnersToPortfolio,
+  removeOwnerFromPortfolio,
 } = require("../../controllers/building/buildingPortfolioController");
 
 // Internal roles allowed
@@ -69,6 +71,21 @@ router.get(
   "/portfolio/:portfolioId/buildings",
   protect,
   getBuildingsByPortfolio
+);
+
+// ========================= Portfolio Owners =========================
+router.post(
+  "/portfolio/:portfolioId/owners",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  addOwnersToPortfolio
+);
+
+router.delete(
+  "/portfolio/:portfolioId/owners/:ownerId",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  removeOwnerFromPortfolio
 );
 
 module.exports = router;
