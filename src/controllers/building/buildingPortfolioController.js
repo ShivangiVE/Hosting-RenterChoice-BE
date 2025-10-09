@@ -98,8 +98,9 @@ async function saveSubmission(formType, formData, userId) {
     });
   }
   if (formType === "portfolio") {
-    const { portfolioAbbreviation, ...restData } = formData;
+    const { portfolioAbbreviation, portfolioName, ...restData } = formData;
     return Portfolio.create({
+      portfolioName,
       portfolioAbbreviation,
       formData: restData,
       createdBy: userId,
@@ -152,7 +153,10 @@ exports.createPortfolio = async (req, res) => {
 
     const formData = req.body;
 
-    // Validate portfolioAbbreviation exists
+    if (!formData.portfolioName || formData.portfolioName.trim() === "") {
+      return sendError(res, "Portfolio Name is required", 400);
+    }
+
     if (!formData.portfolioAbbreviation) {
       return sendError(res, "Portfolio Abbreviation is required", 400);
     }
@@ -216,6 +220,7 @@ exports.getPortfolioDetails = async (req, res) => {
     return sendSuccess(res, "Portfolio details fetched", {
       portfolio: {
         ...portfolio.toObject(),
+        portfolioName: portfolio.portfolioName,
         formData: {
           portfolioAbbreviation: portfolio.portfolioAbbreviation,
           ...portfolio.formData,
