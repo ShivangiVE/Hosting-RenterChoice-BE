@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const portfolioSchema = new mongoose.Schema(
   {
+    portfolioName: { type: String, required: true },
     portfolioAbbreviation: { type: String, required: true },
     formData: { type: Object, required: true },
     createdBy: {

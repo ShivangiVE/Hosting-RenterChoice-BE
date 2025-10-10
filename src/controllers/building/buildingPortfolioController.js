@@ -109,6 +109,8 @@ async function saveSubmission(formType, formData, userId) {
   throw new Error("Unsupported form type");
 }
 
+// ========================= Buildings =========================
+// create buildings
 exports.createBuilding = async (req, res) => {
   try {
     const template = await FormTemplate.findOne({
@@ -142,35 +144,7 @@ exports.createBuilding = async (req, res) => {
   }
 };
 
-exports.createPortfolio = async (req, res) => {
-  try {
-    const template = await FormTemplate.findOne({
-      formType: "portfolio",
-      isActive: true,
-    });
-    if (!template)
-      return sendError(res, "Portfolio form template not found", 404);
-
-    const formData = req.body;
-
-    if (!formData.portfolioName || formData.portfolioName.trim() === "") {
-      return sendError(res, "Portfolio Name is required", 400);
-    }
-
-    if (!formData.portfolioAbbreviation) {
-      return sendError(res, "Portfolio Abbreviation is required", 400);
-    }
-
-    const errors = validateAgainstTemplate(template, formData);
-    if (errors.length) return sendError(res, errors.join(", "), 400);
-
-    const doc = await saveSubmission("portfolio", formData, req.user._id);
-    return sendSuccess(res, "Portfolio created", { portfolio: doc }, 201);
-  } catch (err) {
-    return sendError(res, err.message || "Failed to create portfolio", 500);
-  }
-};
-
+// building details
 exports.getBuildingDetails = async (req, res) => {
   try {
     const { id } = req.params;
@@ -203,40 +177,7 @@ exports.getBuildingDetails = async (req, res) => {
   }
 };
 
-exports.getPortfolioDetails = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const portfolio = await Portfolio.findById(id).populate(
-      "createdBy",
-      "preferredName email"
-    );
-    if (!portfolio) return sendError(res, "Portfolio not found", 404);
-
-    const template = await FormTemplate.findOne({
-      formType: "portfolio",
-      isActive: true,
-    });
-
-    return sendSuccess(res, "Portfolio details fetched", {
-      portfolio: {
-        ...portfolio.toObject(),
-        portfolioName: portfolio.portfolioName,
-        formData: {
-          portfolioAbbreviation: portfolio.portfolioAbbreviation,
-          ...portfolio.formData,
-        },
-      },
-      template,
-    });
-  } catch (err) {
-    return sendError(
-      res,
-      err.message || "Failed to fetch portfolio details",
-      500
-    );
-  }
-};
-
+// get all buildings
 exports.getAllBuildings = async (req, res) => {
   try {
     const { portfolioId, onlyCities } = req.query;
@@ -264,18 +205,7 @@ exports.getAllBuildings = async (req, res) => {
   }
 };
 
-exports.getAllPortfolios = async (req, res) => {
-  try {
-    const portfolios = await Portfolio.find({})
-      .populate("createdBy", "preferredName email")
-      .lean();
-
-    return sendSuccess(res, "Portfolios fetched successfully", { portfolios });
-  } catch (err) {
-    return sendError(res, err.message || "Failed to fetch portfolios", 500);
-  }
-};
-
+// update buildings
 exports.updateBuilding = async (req, res) => {
   try {
     const { id } = req.params;
@@ -396,6 +326,7 @@ exports.bulkUpdateBuildings = async (req, res) => {
   }
 };
 
+// delete buildings
 exports.deleteBuilding = async (req, res) => {
   try {
     const { id } = req.params;
@@ -449,6 +380,211 @@ exports.getBuildingsByPortfolio = async (req, res) => {
   }
 };
 
+// ========================= Portfolios =========================
+// Create Portfolio
+exports.createPortfolio = async (req, res) => {
+  try {
+    const template = await FormTemplate.findOne({
+      formType: "portfolio",
+      isActive: true,
+    });
+    if (!template)
+      return sendError(res, "Portfolio form template not found", 404);
+
+    const formData = req.body;
+
+    if (!formData.portfolioName || formData.portfolioName.trim() === "") {
+      return sendError(res, "Portfolio Name is required", 400);
+    }
+
+    if (!formData.portfolioAbbreviation) {
+      return sendError(res, "Portfolio Abbreviation is required", 400);
+    }
+
+    const errors = validateAgainstTemplate(template, formData);
+    if (errors.length) return sendError(res, errors.join(", "), 400);
+
+    const doc = await saveSubmission("portfolio", formData, req.user._id);
+    return sendSuccess(res, "Portfolio created", { portfolio: doc }, 201);
+  } catch (err) {
+    return sendError(res, err.message || "Failed to create portfolio", 500);
+  }
+};
+
+// Portfolio Details
+exports.getPortfolioDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const portfolio = await Portfolio.findById(id).populate(
+      "createdBy",
+      "preferredName email"
+    );
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    const template = await FormTemplate.findOne({
+      formType: "portfolio",
+      isActive: true,
+    });
+
+    return sendSuccess(res, "Portfolio details fetched", {
+      portfolio: {
+        ...portfolio.toObject(),
+        portfolioName: portfolio.portfolioName,
+        formData: {
+          portfolioAbbreviation: portfolio.portfolioAbbreviation,
+          ...portfolio.formData,
+        },
+      },
+      template,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch portfolio details",
+      500
+    );
+  }
+};
+
+// Get all portfolios
+exports.getAllPortfolios = async (req, res) => {
+  try {
+    const portfolios = await Portfolio.find({})
+      .populate("createdBy", "preferredName email")
+      .lean();
+
+    return sendSuccess(res, "Portfolios fetched successfully", { portfolios });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch portfolios", 500);
+  }
+};
+
+// Update Portfolio
+exports.updatePortfolio = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const formData = req.body;
+
+    // Ensure portfolio exists
+    const portfolio = await Portfolio.findById(id);
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    // Validate against template
+    const template = await FormTemplate.findOne({
+      formType: "portfolio",
+      isActive: true,
+    });
+    if (!template)
+      return sendError(res, "Portfolio form template not found", 404);
+
+    if (!formData.portfolioName || formData.portfolioName.trim() === "") {
+      return sendError(res, "Portfolio Name is required", 400);
+    }
+
+    if (!formData.portfolioAbbreviation) {
+      return sendError(res, "Portfolio Abbreviation is required", 400);
+    }
+
+    const errors = validateAgainstTemplate(template, formData);
+    if (errors.length) return sendError(res, errors.join(", "), 400);
+
+    // Apply updates
+    if (formData.portfolioName !== undefined)
+      portfolio.portfolioName = formData.portfolioName;
+    if (formData.portfolioAbbreviation !== undefined)
+      portfolio.portfolioAbbreviation = formData.portfolioAbbreviation;
+
+    // Merge formData
+    portfolio.formData = { ...portfolio.formData, ...formData };
+
+    await portfolio.save();
+
+    return sendSuccess(res, "Portfolio updated successfully", { portfolio });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to update portfolio", 500);
+  }
+};
+
+// Bulk Update Portfolio
+exports.bulkUpdatePortfolios = async (req, res) => {
+  try {
+    const updates = req.body.updates;
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return sendError(res, "No portfolio updates provided", 400);
+    }
+
+    const results = [];
+
+    for (const update of updates) {
+      const { id, ...formData } = update;
+
+      const portfolio = await Portfolio.findById(id);
+      if (!portfolio) {
+        results.push({ id, success: false, message: "Portfolio not found" });
+        continue;
+      }
+
+      const template = await FormTemplate.findOne({
+        formType: "portfolio",
+        isActive: true,
+      });
+      if (!template) {
+        results.push({ id, success: false, message: "Template not found" });
+        continue;
+      }
+
+      const mergedData = {
+        ...(portfolio.formData?.toObject?.() || portfolio.formData),
+        ...formData,
+      };
+
+      const errors = validateAgainstTemplate(template, mergedData);
+      if (errors.length) {
+        results.push({ id, success: false, message: errors.join(", ") });
+        continue;
+      }
+
+      // Apply updates
+      if (formData.portfolioName !== undefined)
+        portfolio.portfolioName = formData.portfolioName;
+      if (formData.portfolioAbbreviation !== undefined)
+        portfolio.portfolioAbbreviation = formData.portfolioAbbreviation;
+
+      portfolio.formData = mergedData;
+
+      await portfolio.save();
+
+      results.push({ id, success: true, portfolio });
+    }
+
+    return sendSuccess(res, "Bulk update completed", { results });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to bulk update portfolios",
+      500
+    );
+  }
+};
+
+// Delete Portfolio
+exports.deletePortfolio = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const portfolio = await Portfolio.findById(id);
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    await portfolio.deleteOne();
+
+    return sendSuccess(res, "Portfolio deleted successfully");
+  } catch (err) {
+    return sendError(res, err.message || "Failed to delete portfolio", 500);
+  }
+};
+
+// ========================= Add Owner =========================
 // Add owners to portfolio
 exports.addOwnersToPortfolio = async (req, res) => {
   try {
