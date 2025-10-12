@@ -10,8 +10,8 @@ const userSchema = new mongoose.Schema(
     //     return this.role === "Owner" || this.role === "Tenant";
     //   },
     // },
-    // firstName: { type: String, trim: true }, // User's first name
-    // lastName: { type: String, trim: true }, // User's last name
+    firstName: { type: String, trim: true },
+    lastName: { type: String, trim: true },
     preferredName: {
       type: String,
       trim: true,
