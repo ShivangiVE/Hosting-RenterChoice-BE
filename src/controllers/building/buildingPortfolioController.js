@@ -98,7 +98,8 @@ async function saveSubmission(formType, formData, userId) {
     });
   }
   if (formType === "portfolio") {
-    const { portfolioAbbreviation, portfolioName, ...restData } = formData;
+    const { portfolioAbbreviation, portfolioName, ownerIds, ...restData } =
+      formData;
     return Portfolio.create({
       portfolioName,
       portfolioAbbreviation,
@@ -392,20 +393,57 @@ exports.createPortfolio = async (req, res) => {
       return sendError(res, "Portfolio form template not found", 404);
 
     const formData = req.body;
+    const { ownerIds, ...portfolioData } = formData;
 
-    if (!formData.portfolioName || formData.portfolioName.trim() === "") {
+    if (
+      !portfolioData.portfolioName ||
+      portfolioData.portfolioName.trim() === ""
+    ) {
       return sendError(res, "Portfolio Name is required", 400);
     }
 
-    if (!formData.portfolioAbbreviation) {
+    if (!portfolioData.portfolioAbbreviation) {
       return sendError(res, "Portfolio Abbreviation is required", 400);
     }
 
-    const errors = validateAgainstTemplate(template, formData);
+    const errors = validateAgainstTemplate(template, portfolioData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
 
-    const doc = await saveSubmission("portfolio", formData, req.user._id);
-    return sendSuccess(res, "Portfolio created", { portfolio: doc }, 201);
+    // Validate owners if provided
+    let validOwners = [];
+    if (ownerIds && Array.isArray(ownerIds) && ownerIds.length > 0) {
+      const owners = await User.find({ _id: { $in: ownerIds }, role: "Owner" });
+      if (owners.length !== ownerIds.length) {
+        return sendError(
+          res,
+          "One or more owners not found or invalid role",
+          400
+        );
+      }
+      validOwners = owners.map((owner) => owner._id);
+    }
+
+    // Create portfolio with owners
+    const portfolio = await Portfolio.create({
+      portfolioName: portfolioData.portfolioName,
+      portfolioAbbreviation: portfolioData.portfolioAbbreviation,
+      formData: portfolioData,
+      owners: validOwners,
+      createdBy: req.user._id,
+    });
+
+    // Populate owners for response
+    await portfolio.populate(
+      "owners",
+      "firstName lastName email preferredName"
+    );
+
+    return sendSuccess(
+      res,
+      "Portfolio created successfully",
+      { portfolio },
+      201
+    );
   } catch (err) {
     return sendError(res, err.message || "Failed to create portfolio", 500);
   }
@@ -464,6 +502,7 @@ exports.updatePortfolio = async (req, res) => {
   try {
     const { id } = req.params;
     const formData = req.body;
+    const { ownerIds, ...portfolioData } = formData;
 
     // Ensure portfolio exists
     const portfolio = await Portfolio.findById(id);
@@ -477,27 +516,49 @@ exports.updatePortfolio = async (req, res) => {
     if (!template)
       return sendError(res, "Portfolio form template not found", 404);
 
-    if (!formData.portfolioName || formData.portfolioName.trim() === "") {
+    if (
+      !portfolioData.portfolioName ||
+      portfolioData.portfolioName.trim() === ""
+    ) {
       return sendError(res, "Portfolio Name is required", 400);
     }
 
-    if (!formData.portfolioAbbreviation) {
+    if (!portfolioData.portfolioAbbreviation) {
       return sendError(res, "Portfolio Abbreviation is required", 400);
     }
 
-    const errors = validateAgainstTemplate(template, formData);
+    const errors = validateAgainstTemplate(template, portfolioData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
 
-    // Apply updates
-    if (formData.portfolioName !== undefined)
-      portfolio.portfolioName = formData.portfolioName;
-    if (formData.portfolioAbbreviation !== undefined)
-      portfolio.portfolioAbbreviation = formData.portfolioAbbreviation;
+    // Validate and update owners if provided
+    if (ownerIds && Array.isArray(ownerIds)) {
+      const owners = await User.find({ _id: { $in: ownerIds }, role: "Owner" });
+      if (owners.length !== ownerIds.length) {
+        return sendError(
+          res,
+          "One or more owners not found or invalid role",
+          400
+        );
+      }
+      portfolio.owners = owners.map((owner) => owner._id);
+    }
+
+    // Apply updates to portfolio fields
+    if (portfolioData.portfolioName !== undefined)
+      portfolio.portfolioName = portfolioData.portfolioName;
+    if (portfolioData.portfolioAbbreviation !== undefined)
+      portfolio.portfolioAbbreviation = portfolioData.portfolioAbbreviation;
 
     // Merge formData
-    portfolio.formData = { ...portfolio.formData, ...formData };
+    portfolio.formData = { ...portfolio.formData, ...portfolioData };
 
     await portfolio.save();
+
+    // Populate owners for response
+    await portfolio.populate(
+      "owners",
+      "firstName lastName email preferredName"
+    );
 
     return sendSuccess(res, "Portfolio updated successfully", { portfolio });
   } catch (err) {

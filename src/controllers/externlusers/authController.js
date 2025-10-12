@@ -113,18 +113,23 @@ exports.login = async (req, res, next) => {
 // Update Profile
 exports.updateProfile = async (req, res, next) => {
   try {
-    const { preferredName } = req.body;
+    const { preferredName, firstName, lastName } = req.body;
     const userId = req.user.id;
 
-    if (!preferredName) {
-      return sendError(res, "Preferred name is required", 400);
+    const updateData = {};
+
+    if (preferredName) updateData.preferredName = preferredName;
+    if (firstName) updateData.firstName = firstName;
+    if (lastName) updateData.lastName = lastName;
+
+    if (Object.keys(updateData).length === 0) {
+      return sendError(res, "No valid fields provided to update", 400);
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { preferredName },
-      { new: true, runValidators: true }
-    ).select("-password");
+    const updatedUser = await User.findByIdAndUpdate(userId, updateData, {
+      new: true,
+      runValidators: true,
+    }).select("-password");
 
     if (!updatedUser) {
       return sendError(res, "User not found", 404);
