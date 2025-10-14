@@ -11,7 +11,7 @@ const {
 } = require("../../controllers/formTemplate/formTemplateController");
 
 // Only Admin and OfficeAdmin can create/update templates
-router.use(protect, authorize("Admin", "OfficeAdmin"));
+router.use(protect, authorize("Admin", "OfficeAdmin", "InspectionClerk"));
 
 router.post("/", createFormTemplate);
 router.put("/:id", updateFormTemplate);

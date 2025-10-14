@@ -154,10 +154,26 @@ exports.getBuildingDetails = async (req, res) => {
       .populate("portfolio", "portfolioAbbreviation");
     if (!building) return sendError(res, "Building not found", 404);
 
-    const template = await FormTemplate.findOne({
-      formType: "building",
-      isActive: true,
-    });
+    // Get all relevant templates
+    const [buildingTemplate, inspectionTemplate, marketingTemplate] =
+      await Promise.all([
+        FormTemplate.findOne({
+          formType: "building",
+          isActive: true,
+        }),
+        FormTemplate.findOne({
+          formType: "inspection",
+          isActive: true,
+        }),
+        FormTemplate.findOne({
+          formType: "marketing",
+          isActive: true,
+        }),
+      ]);
+
+    if (!buildingTemplate) {
+      return sendError(res, "Building form template not found", 404);
+    }
 
     return sendSuccess(res, "Building details fetched", {
       building: {
@@ -166,8 +182,13 @@ exports.getBuildingDetails = async (req, res) => {
           buildingAbbreviation: building.buildingAbbreviation,
           ...building.formData,
         },
+        // Include inspection and marketing data if they exist
+        inspectionData: building.inspectionData || {},
+        marketingData: building.marketingData || {},
       },
-      template,
+      template: buildingTemplate,
+      inspectionTemplate: inspectionTemplate || null,
+      marketingTemplate: marketingTemplate || null,
     });
   } catch (err) {
     return sendError(
@@ -210,13 +231,11 @@ exports.getAllBuildings = async (req, res) => {
 exports.updateBuilding = async (req, res) => {
   try {
     const { id } = req.params;
-    const formData = req.body;
+    const { inspectionData, marketingData, ...formData } = req.body;
 
-    // ensure building exists
     const building = await Building.findById(id);
     if (!building) return sendError(res, "Building not found", 404);
 
-    // validate template rules
     const template = await FormTemplate.findOne({
       formType: "building",
       isActive: true,
@@ -224,7 +243,6 @@ exports.updateBuilding = async (req, res) => {
     if (!template)
       return sendError(res, "Building form template not found", 404);
 
-    // CONDITIONAL VALIDATION for update
     if (
       formData.buildingType === "multi_family" &&
       !formData.buildingAbbreviation
@@ -239,7 +257,52 @@ exports.updateBuilding = async (req, res) => {
     const errors = validateAgainstTemplate(template, formData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
 
-    // update main + formData fields
+    // Validate inspection data if provided
+    if (inspectionData) {
+      const inspectionTemplate = await FormTemplate.findOne({
+        formType: "inspection",
+        isActive: true,
+      });
+
+      if (inspectionTemplate) {
+        const inspectionErrors = validateAgainstTemplate(
+          inspectionTemplate,
+          inspectionData
+        );
+        if (inspectionErrors.length) {
+          return sendError(
+            res,
+            "Inspection data errors: " + inspectionErrors.join(", "),
+            400
+          );
+        }
+        building.inspectionData = inspectionData;
+      }
+    }
+
+    // Validate marketing data if provided
+    if (marketingData) {
+      const marketingTemplate = await FormTemplate.findOne({
+        formType: "marketing",
+        isActive: true,
+      });
+
+      if (marketingTemplate) {
+        const marketingErrors = validateAgainstTemplate(
+          marketingTemplate,
+          marketingData
+        );
+        if (marketingErrors.length) {
+          return sendError(
+            res,
+            "Marketing data errors: " + marketingErrors.join(", "),
+            400
+          );
+        }
+        building.marketingData = marketingData;
+      }
+    }
+
     if (formData.buildingAbbreviation !== undefined) {
       building.buildingAbbreviation = formData.buildingAbbreviation;
     }
@@ -247,9 +310,7 @@ exports.updateBuilding = async (req, res) => {
       building.portfolio = formData.portfolio;
     }
 
-    // merge formData
     building.formData = { ...building.formData, ...formData };
-
     await building.save();
 
     return sendSuccess(res, "Building updated successfully", {
@@ -379,6 +440,249 @@ exports.getBuildingsByPortfolio = async (req, res) => {
   } catch (err) {
     return sendError(res, err);
   }
+};
+
+// Dynamic Inspection & Marketing Forms for Buildings
+exports.getBuildingWithInspection = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const building = await Building.findById(id)
+      .populate("createdBy", "preferredName email")
+      .populate("portfolio", "portfolioAbbreviation");
+
+    if (!building) return sendError(res, "Building not found", 404);
+
+    const buildingTemplate = await FormTemplate.findOne({
+      formType: "building",
+      isActive: true,
+    });
+
+    const inspectionTemplate = await FormTemplate.findOne({
+      formType: "inspection",
+      isActive: true,
+    });
+
+    return sendSuccess(res, "Building details with inspection fetched", {
+      building: {
+        ...building.toObject(),
+        formData: {
+          buildingAbbreviation: building.buildingAbbreviation,
+          ...building.formData,
+        },
+      },
+      buildingTemplate,
+      inspectionTemplate,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch building details",
+      500
+    );
+  }
+};
+
+exports.getBuildingWithMarketing = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const building = await Building.findById(id)
+      .populate("createdBy", "preferredName email")
+      .populate("portfolio", "portfolioAbbreviation");
+
+    if (!building) return sendError(res, "Building not found", 404);
+
+    const buildingTemplate = await FormTemplate.findOne({
+      formType: "building",
+      isActive: true,
+    });
+
+    const marketingTemplate = await FormTemplate.findOne({
+      formType: "marketing",
+      isActive: true,
+    });
+
+    return sendSuccess(res, "Building details with inspection fetched", {
+      building: {
+        ...building.toObject(),
+        formData: {
+          buildingAbbreviation: building.buildingAbbreviation,
+          ...building.formData,
+        },
+      },
+      buildingTemplate,
+      marketingTemplate,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch building details",
+      500
+    );
+  }
+};
+
+// Update only inspection data for a building
+exports.updateBuildingInspection = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { inspectionData, requestId } = req.body;
+
+    const building = await Building.findById(id);
+    if (!building) return sendError(res, "Building not found", 404);
+
+    // Validate inspection data if provided
+    if (inspectionData) {
+      const inspectionTemplate = await FormTemplate.findOne({
+        formType: "inspection",
+        isActive: true,
+      });
+
+      if (inspectionTemplate) {
+        const inspectionErrors = validateAgainstTemplate(
+          inspectionTemplate,
+          inspectionData
+        );
+        if (inspectionErrors.length) {
+          return sendError(
+            res,
+            "Inspection data errors: " + inspectionErrors.join(", "),
+            400
+          );
+        }
+        building.inspectionData = inspectionData;
+
+        // Check if form is complete (all required fields filled)
+        const isFormComplete = checkFormCompletion(
+          inspectionTemplate,
+          inspectionData
+        );
+
+        // If form is complete and requestId is provided, update inspection request
+        if (isFormComplete && requestId) {
+          const InspectionRequest = require("../../models/InspectionRequest");
+
+          const inspectionRequest = await InspectionRequest.findById(requestId);
+
+          // Allow completion for both "pending" and "scheduled" statuses
+          if (
+            inspectionRequest &&
+            (inspectionRequest.status === "pending" ||
+              inspectionRequest.status === "scheduled")
+          ) {
+            inspectionRequest.status = "completed";
+            inspectionRequest.completeDate = new Date();
+            await inspectionRequest.save();
+          }
+        }
+      } else {
+        return sendError(res, "Inspection template not found", 404);
+      }
+    } else {
+      return sendError(res, "Inspection data is required", 400);
+    }
+
+    await building.save();
+
+    return sendSuccess(res, "Building inspection data updated successfully", {
+      building,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to update building inspection",
+      500
+    );
+  }
+};
+
+// Update only marketing data for a building
+exports.updateBuildingMarketing = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { marketingData, requestId } = req.body; // Add requestId from request
+
+    const building = await Building.findById(id);
+    if (!building) return sendError(res, "Building not found", 404);
+
+    // Validate marketing data if provided
+    if (marketingData) {
+      const marketingTemplate = await FormTemplate.findOne({
+        formType: "marketing",
+        isActive: true,
+      });
+
+      if (marketingTemplate) {
+        const marketingErrors = validateAgainstTemplate(
+          marketingTemplate,
+          marketingData
+        );
+        if (marketingErrors.length) {
+          return sendError(
+            res,
+            "Marketing data errors: " + marketingErrors.join(", "),
+            400
+          );
+        }
+        building.marketingData = marketingData;
+
+        // Check if form is complete (all required fields filled)
+        const isFormComplete = checkFormCompletion(
+          marketingTemplate,
+          marketingData
+        );
+
+        // If form is complete and requestId is provided, update inspection request
+        if (isFormComplete && requestId) {
+          const InspectionRequest = require("../../models/InspectionRequest");
+
+          const inspectionRequest = await InspectionRequest.findById(requestId);
+          if (inspectionRequest && inspectionRequest.status === "pending") {
+            inspectionRequest.status = "completed";
+            inspectionRequest.completeDate = new Date();
+            await inspectionRequest.save();
+          }
+        }
+      } else {
+        return sendError(res, "Marketing template not found", 404);
+      }
+    } else {
+      return sendError(res, "Marketing data is required", 400);
+    }
+
+    await building.save();
+
+    return sendSuccess(res, "Building marketing data updated successfully", {
+      building,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to update building marketing",
+      500
+    );
+  }
+};
+
+// Helper function to check if form is complete
+const checkFormCompletion = (template, formData) => {
+  const requiredFields = template.fields.filter((field) => field.required);
+
+  for (const field of requiredFields) {
+    const val = formData[field.name];
+
+    // Check if value is empty
+    const isEmpty = (v) =>
+      v === undefined ||
+      v === null ||
+      (typeof v === "string" && v.trim() === "") ||
+      (Array.isArray(v) && v.length === 0);
+
+    if (isEmpty(val)) {
+      return false; // Form is incomplete
+    }
+  }
+
+  return true; // All required fields are filled
 };
 
 // ========================= Portfolios =========================

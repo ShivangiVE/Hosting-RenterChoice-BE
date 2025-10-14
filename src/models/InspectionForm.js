@@ -2,6 +2,11 @@ const mongoose = require("mongoose");
 
 const inspectionSchema = new mongoose.Schema(
   {
+    building: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Building",
+      default: null,
+    },
     formData: {
       type: Object,
       required: true,

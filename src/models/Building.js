@@ -40,6 +40,16 @@ const buildingSchema = new mongoose.Schema(
       enum: ["vacant", "occupied", "deactivated"],
       default: "vacant",
     },
+
+    inspectionData: {
+      type: Object,
+      default: null,
+    },
+
+    marketingData: {
+      type: Object,
+      default: null,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
