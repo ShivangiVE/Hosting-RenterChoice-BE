@@ -86,12 +86,30 @@ exports.createInspectionForm = async (req, res) => {
     if (!template)
       return sendError(res, "Inspection form template not found", 404);
 
-    const formData = req.body;
+    const { buildingId, ...formData } = req.body;
     const errors = validateAgainstTemplate(template, formData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
 
-    const doc = await saveSubmission("inspection", formData, req.user._id);
-    return sendSuccess(res, "Inspection created", { inspection: doc }, 201);
+    const doc = await InspectionForm.create({
+      formData,
+      building: buildingId || null,
+      createdBy: req.user._id,
+    });
+
+    // If buildingId provided, update building's inspectionData
+    if (buildingId) {
+      const Building = require("../../models/Building");
+      await Building.findByIdAndUpdate(buildingId, {
+        inspectionData: formData,
+      });
+    }
+
+    return sendSuccess(
+      res,
+      "Inspection created and attached to building",
+      { inspection: doc },
+      201
+    );
   } catch (err) {
     return sendError(res, err.message || "Failed to create inspection", 500);
   }
@@ -194,12 +212,29 @@ exports.createMarketingForm = async (req, res) => {
     if (!template)
       return sendError(res, "Marketing form template not found", 404);
 
-    const formData = req.body;
+    const { buildingId, ...formData } = req.body;
     const errors = validateAgainstTemplate(template, formData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
 
-    const doc = await saveSubmission("marketing", formData, req.user._id);
-    return sendSuccess(res, "Marketing created", { marketing: doc }, 201);
+    const doc = await MarketingForm.create({
+      formData,
+      building: buildingId || null,
+      createdBy: req.user._id,
+    });
+
+    // If buildingId provided, update building's marketingData
+    if (buildingId) {
+      const Building = require("../../models/Building");
+      await Building.findByIdAndUpdate(buildingId, {
+        marketingData: formData,
+      });
+    }
+    return sendSuccess(
+      res,
+      "Marketing created and attached to building",
+      { marketing: doc },
+      201
+    );
   } catch (err) {
     return sendError(res, err.message || "Failed to create marketing", 500);
   }

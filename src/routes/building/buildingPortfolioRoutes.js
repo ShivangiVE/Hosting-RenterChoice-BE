@@ -17,6 +17,10 @@ const {
   updatePortfolio,
   bulkUpdatePortfolios,
   deletePortfolio,
+  getBuildingWithInspection,
+  getBuildingWithMarketing,
+  updateBuildingMarketing,
+  updateBuildingInspection,
 } = require("../../controllers/building/buildingPortfolioController");
 
 // Internal roles allowed
@@ -57,6 +61,27 @@ router.delete(
   protect,
   authorize(...INTERNAL_ROLES),
   deleteBuilding
+);
+
+// Dynamic Inspection and Marketing Data Routes
+router.get("/building/:id/with-inspection", protect, getBuildingWithInspection);
+
+router.get("/building/:id/with-marketing", protect, getBuildingWithMarketing);
+
+// Update only building inspection data
+router.put(
+  "/building/:id/inspection",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  updateBuildingInspection
+);
+
+// Update only building marketing data
+router.put(
+  "/building/:id/marketing",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  updateBuildingMarketing
 );
 
 // ========================= Portfolios =========================
