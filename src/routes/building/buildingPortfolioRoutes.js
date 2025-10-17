@@ -21,6 +21,7 @@ const {
   getBuildingWithMarketing,
   updateBuildingMarketing,
   updateBuildingInspection,
+  getPortfoliosList,
 } = require("../../controllers/building/buildingPortfolioController");
 
 // Internal roles allowed
@@ -91,8 +92,10 @@ router.post(
   authorize(...INTERNAL_ROLES),
   createPortfolio
 );
-
+// Get all portfolios
 router.get("/portfolios", protect, getAllPortfolios);
+// Get portfolio names/abbreviations only (for dropdowns & filters)
+router.get("/portfoliolist", protect, getPortfoliosList);
 router.get("/portfolio/:id", protect, getPortfolioDetails);
 
 // Update Portfolio

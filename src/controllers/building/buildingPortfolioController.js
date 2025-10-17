@@ -2,6 +2,9 @@ const Building = require("../../models/Building");
 const FormTemplate = require("../../models/FormTemplate");
 const Portfolio = require("../../models/Portfolio");
 const User = require("../../models/User");
+const {
+  generatePortfolioAccountNumber,
+} = require("../../utils/portfolioCounter");
 const { sendSuccess, sendError } = require("../../utils/response");
 
 /**
@@ -404,44 +407,6 @@ exports.deleteBuilding = async (req, res) => {
   }
 };
 
-// Get All buildings by Portfolio
-exports.getBuildingsByPortfolio = async (req, res) => {
-  try {
-    const { portfolioId } = req.params;
-
-    // Ensure portfolio exists
-    const portfolio = await Portfolio.findById(portfolioId)
-      .populate("createdBy", "preferredName email")
-      .populate("owners", "preferredName email phoneNumber");
-    if (!portfolio) return sendError(res, "Portfolio not found", 404);
-
-    // Fetch all buildings under this portfolio
-    const buildings = await Building.find({ portfolio: portfolioId })
-      .populate("createdBy", "preferredName email")
-      .populate("portfolio", "portfolioAbbreviation")
-      .lean();
-
-    return sendSuccess(res, "Buildings for portfolio fetched successfully", {
-      portfolio: {
-        ...portfolio.toObject(),
-        formData: {
-          portfolioAbbreviation: portfolio.portfolioAbbreviation,
-          ...(portfolio.formData || {}),
-        },
-      },
-      buildings: buildings.map((b) => ({
-        id: b._id,
-        buildingAbbreviation: b.buildingAbbreviation,
-        address: b.formData?.address || "",
-        fullAddress: b.formData?.fullAddress || "",
-        city: b.formData?.city || "",
-      })),
-    });
-  } catch (err) {
-    return sendError(res, err);
-  }
-};
-
 // Dynamic Inspection & Marketing Forms for Buildings
 exports.getBuildingWithInspection = async (req, res) => {
   try {
@@ -693,6 +658,7 @@ exports.createPortfolio = async (req, res) => {
       formType: "portfolio",
       isActive: true,
     });
+
     if (!template)
       return sendError(res, "Portfolio form template not found", 404);
 
@@ -727,10 +693,14 @@ exports.createPortfolio = async (req, res) => {
       validOwners = owners.map((owner) => owner._id);
     }
 
+    // Generate portfolio account number
+    const portfolioAccountNumber = await generatePortfolioAccountNumber();
+
     // Create portfolio with owners
     const portfolio = await Portfolio.create({
       portfolioName: portfolioData.portfolioName,
       portfolioAbbreviation: portfolioData.portfolioAbbreviation,
+      portfolioAccountNumber,
       formData: portfolioData,
       owners: validOwners,
       createdBy: req.user._id,
@@ -749,6 +719,14 @@ exports.createPortfolio = async (req, res) => {
       201
     );
   } catch (err) {
+    // Handle duplicate account number error
+    if (err.code === 11000 && err.keyPattern?.portfolioAccountNumber) {
+      return sendError(
+        res,
+        "Duplicate portfolio account number generated. Please try again.",
+        500
+      );
+    }
     return sendError(res, err.message || "Failed to create portfolio", 500);
   }
 };
@@ -757,10 +735,10 @@ exports.createPortfolio = async (req, res) => {
 exports.getPortfolioDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const portfolio = await Portfolio.findById(id).populate(
-      "createdBy",
-      "preferredName email"
-    );
+    const portfolio = await Portfolio.findById(id)
+      .populate("createdBy", "preferredName email")
+      .populate("owners", "preferredName firstName lastName email phoneNumber");
+
     if (!portfolio) return sendError(res, "Portfolio not found", 404);
 
     const template = await FormTemplate.findOne({
@@ -788,16 +766,83 @@ exports.getPortfolioDetails = async (req, res) => {
   }
 };
 
-// Get all portfolios
+// Get all portfolios with pagination
 exports.getAllPortfolios = async (req, res) => {
   try {
-    const portfolios = await Portfolio.find({})
+    const { page = 1, limit = 10, search = "", filter = "" } = req.query;
+
+    // Convert to numbers
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build query
+    let query = {};
+
+    // Search functionality
+    if (search) {
+      query.$or = [
+        { portfolioName: { $regex: search, $options: "i" } },
+        { portfolioAbbreviation: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Filter by portfolio abbreviation
+    if (filter && filter !== "All") {
+      query.portfolioAbbreviation = filter;
+    }
+
+    // Get total count for pagination
+    const totalCount = await Portfolio.countDocuments(query);
+
+    // Fetch portfolios with pagination
+    const portfolios = await Portfolio.find(query)
       .populate("createdBy", "preferredName email")
+      .skip(skip)
+      .limit(limitNum)
       .lean();
 
-    return sendSuccess(res, "Portfolios fetched successfully", { portfolios });
+    // Get building counts for each portfolio
+    const portfoliosWithCounts = await Promise.all(
+      portfolios.map(async (portfolio) => {
+        const buildingCount = await Building.countDocuments({
+          portfolio: portfolio._id,
+        });
+
+        return {
+          ...portfolio,
+          buildingCount,
+          ownerCount: portfolio.owners?.length || 0,
+        };
+      })
+    );
+
+    return sendSuccess(res, "Portfolios fetched successfully", {
+      portfolios: portfoliosWithCounts,
+      pagination: {
+        currentPage: pageNum,
+        totalPages: Math.ceil(totalCount / limitNum),
+        totalItems: totalCount,
+        itemsPerPage: limitNum,
+        hasNextPage: pageNum < Math.ceil(totalCount / limitNum),
+        hasPrevPage: pageNum > 1,
+      },
+    });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch portfolios", 500);
+  }
+};
+
+// Get portfolio names/abbreviations only (for dropdowns & filters)
+exports.getPortfoliosList = async (req, res) => {
+  try {
+    const portfolios = await Portfolio.find({})
+      .select("portfolioName portfolioAbbreviation")
+      .lean();
+
+    return sendSuccess(res, "Portfolio list fetched", { portfolios });
+  } catch (err) {
+    return sendError(res, err.message, 500);
   }
 };
 
@@ -946,6 +991,47 @@ exports.deletePortfolio = async (req, res) => {
     return sendSuccess(res, "Portfolio deleted successfully");
   } catch (err) {
     return sendError(res, err.message || "Failed to delete portfolio", 500);
+  }
+};
+
+// Get All buildings by Portfolio
+exports.getBuildingsByPortfolio = async (req, res) => {
+  try {
+    const { portfolioId } = req.params;
+
+    // Ensure portfolio exists
+    const portfolio = await Portfolio.findById(portfolioId)
+      .populate("createdBy", "preferredName email")
+      .populate("owners", "preferredName email phoneNumber");
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+
+    // Fetch all buildings under this portfolio
+    const buildings = await Building.find({ portfolio: portfolioId })
+      .populate("createdBy", "preferredName email")
+      .populate("portfolio", "portfolioAbbreviation")
+      .lean();
+
+    return sendSuccess(res, "Buildings for portfolio fetched successfully", {
+      portfolio: {
+        ...portfolio.toObject(),
+        formData: {
+          portfolioAbbreviation: portfolio.portfolioAbbreviation,
+          ...(portfolio.formData || {}),
+        },
+      },
+      buildings: buildings.map((b) => ({
+        id: b._id,
+        buildingAbbreviation: b.buildingAbbreviation,
+        address: b.formData?.address || "",
+        fullAddress: b.formData?.fullAddress || "",
+        city: b.formData?.city || "",
+        status: b.status || "vacant",
+        monthlyRent: b.formData?.monthlyRent || 0,
+        buildingType: b.formData?.buildingType || "",
+      })),
+    });
+  } catch (err) {
+    return sendError(res, err);
   }
 };
 
