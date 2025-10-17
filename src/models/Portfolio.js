@@ -3,6 +3,7 @@ const portfolioSchema = new mongoose.Schema(
   {
     portfolioName: { type: String, required: true },
     portfolioAbbreviation: { type: String, required: true },
+    portfolioAccountNumber: { type: String, unique: true },
     formData: { type: Object, required: true },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
