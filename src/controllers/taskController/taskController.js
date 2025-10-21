@@ -152,6 +152,67 @@ exports.getTasks = async (req, res) => {
   }
 };
 
+// Add this method to your TaskController.js
+
+// GET Tasks by Tags (Portfolio/Building)
+exports.getTasksByTags = async (req, res) => {
+  try {
+    const { tags, tagType } = req.query; // tagType: 'portfolio' or 'building'
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    if (!tags || !tagType) {
+      return sendError(res, "Both tags and tagType are required", 400);
+    }
+
+    // Convert single tag to array if needed
+    const tagArray = Array.isArray(tags) ? tags : [tags];
+
+    // Prefix each tag with tagType
+    const prefixedTags = tagArray.map((tag) => `${tagType}:${tag}`);
+
+    const filter = {
+      tags: { $in: prefixedTags },
+    };
+
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+
+    const [tasks, total] = await Promise.all([
+      Task.find(filter)
+        .populate("category", "name")
+        .populate("assignedTo", "preferredName email")
+        .populate("createdBy", "preferredName email")
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 }),
+      Task.countDocuments(filter),
+    ]);
+
+    const mappedTasks = tasks.map((task) => ({
+      ...task.toObject(),
+      assignedTo: task.assignedTo || { preferredName: "", email: "" },
+      createdBy: task.createdBy || { preferredName: "", email: "" },
+      category: task.category || { name: "" },
+    }));
+
+    return sendSuccess(res, "Tasks fetched successfully", {
+      tasks: mappedTasks,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      filterInfo: {
+        tagType,
+        matchedTags: prefixedTags,
+      },
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch tasks by tags", 500);
+  }
+};
+
 // GET Task Details by ID
 exports.getTaskDetails = async (req, res) => {
   try {
