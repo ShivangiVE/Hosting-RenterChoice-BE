@@ -769,7 +769,15 @@ exports.getPortfolioDetails = async (req, res) => {
 // Get all portfolios with pagination
 exports.getAllPortfolios = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = "", filter = "" } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      portfolioFilter = "",
+      buildingCount,
+      managementFees,
+      repairType,
+    } = req.query;
 
     // Convert to numbers
     const pageNum = parseInt(page);
@@ -788,18 +796,18 @@ exports.getAllPortfolios = async (req, res) => {
     }
 
     // Filter by portfolio abbreviation
-    if (filter && filter !== "All") {
-      query.portfolioAbbreviation = filter;
+    if (portfolioFilter && portfolioFilter !== "All") {
+      query.portfolioAbbreviation = portfolioFilter;
     }
 
-    // Get total count for pagination
-    const totalCount = await Portfolio.countDocuments(query);
+    // Filter by repair type
+    if (repairType && repairType !== "All") {
+      query["formData.repairType"] = { $regex: repairType, $options: "i" };
+    }
 
-    // Fetch portfolios with pagination
+    // Fetch ALL portfolios that match the initial query (without pagination)
     const portfolios = await Portfolio.find(query)
       .populate("createdBy", "preferredName email")
-      .skip(skip)
-      .limit(limitNum)
       .lean();
 
     // Get building counts for each portfolio
@@ -817,14 +825,40 @@ exports.getAllPortfolios = async (req, res) => {
       })
     );
 
+    let filteredPortfolios = portfoliosWithCounts;
+
+    // Filter by building count (exact match)
+    if (buildingCount) {
+      filteredPortfolios = filteredPortfolios.filter(
+        (portfolio) => portfolio.buildingCount === parseInt(buildingCount)
+      );
+    }
+
+    // Filter by management fees (partial match)
+    if (managementFees) {
+      filteredPortfolios = filteredPortfolios.filter((portfolio) => {
+        const fees = portfolio.formData?.managementFees;
+        return (
+          fees &&
+          fees.toString().toLowerCase().includes(managementFees.toLowerCase())
+        );
+      });
+    }
+
+    // Get total count AFTER all filtering
+    const totalFilteredCount = filteredPortfolios.length;
+
+    // Apply pagination to filtered results
+    const paginatedPortfolios = filteredPortfolios.slice(skip, skip + limitNum);
+
     return sendSuccess(res, "Portfolios fetched successfully", {
-      portfolios: portfoliosWithCounts,
+      portfolios: paginatedPortfolios, // ✅ Return paginated filtered results
       pagination: {
         currentPage: pageNum,
-        totalPages: Math.ceil(totalCount / limitNum),
-        totalItems: totalCount,
+        totalPages: Math.ceil(totalFilteredCount / limitNum), // ✅ Use filtered count
+        totalItems: totalFilteredCount, // ✅ Use filtered count
         itemsPerPage: limitNum,
-        hasNextPage: pageNum < Math.ceil(totalCount / limitNum),
+        hasNextPage: pageNum < Math.ceil(totalFilteredCount / limitNum),
         hasPrevPage: pageNum > 1,
       },
     });
