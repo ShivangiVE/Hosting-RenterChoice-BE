@@ -26,6 +26,9 @@ const {
   bulkCloseWorkOrders,
   bulkCloseInspectionRequests,
   bulkCloseServiceAgreements,
+  getWorkOrdersByBuilding,
+  getInspectionRequestsByBuilding,
+  getServiceAgreementsByBuilding,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -51,6 +54,15 @@ router.post(
 );
 
 router.get("/work-orders", protect, getWorkOrders);
+
+// Get Work Orders by Building
+router.get(
+  "/work-order/by-building",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getWorkOrdersByBuilding
+);
+
 router.get("/work-orders/:id", protect, getWorkOrder);
 
 router.put(
@@ -107,6 +119,14 @@ router.post(
 
 router.get("/inspection-requests", protect, getInspectionRequests);
 
+// Get Inspection Request by Building
+router.get(
+  "/inspection-requests/by-building",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getInspectionRequestsByBuilding
+);
+
 router.put(
   "/inspection-requests/:id",
   protect,
@@ -153,6 +173,14 @@ router.post(
 );
 
 router.get("/service-agreements", protect, getServiceAgreements);
+
+// Get Service agreement by Building
+router.get(
+  "/service-agreements/by-building",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getServiceAgreementsByBuilding
+);
 
 router.put(
   "/service-agreements/:id",

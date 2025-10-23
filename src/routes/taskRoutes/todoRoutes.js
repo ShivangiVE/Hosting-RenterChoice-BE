@@ -10,6 +10,7 @@ const {
   bulkCloseTodos,
   bulkDeleteTodos,
   getTodoDetails,
+  getTodosByTags,
 } = require("../../controllers/taskController/todoController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { todoUpload } = require("../../middleware/repairUpload");
@@ -36,6 +37,9 @@ router.post(
 
 // Get Todos
 router.get("/", protect, getTodos);
+
+// GET Todos by Tags (Portfolio/Building)
+router.get("/by-tags", protect, authorize(...ALLOWED_ROLES), getTodosByTags);
 
 // Get Todo details
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getTodoDetails);
