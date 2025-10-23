@@ -251,6 +251,59 @@ exports.getWorkOrders = async (req, res) => {
   }
 };
 
+// Get Work Orders by Building
+exports.getWorkOrdersByBuilding = async (req, res) => {
+  try {
+    const { buildingId, page = 1, limit = 10, status } = req.query;
+
+    if (!buildingId) {
+      return sendError(res, "Building ID is required", 400);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const filter = { building: buildingId };
+    if (status && status !== "All") {
+      filter.status = status;
+    }
+
+    // Fetch work orders
+    const [workOrders, total] = await Promise.all([
+      WorkOrder.find(filter)
+        .populate({
+          path: "building",
+          select:
+            "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio",
+          populate: {
+            path: "portfolio",
+            select: "portfolioAbbreviation formData.name",
+          },
+        })
+        .populate("vendor", "companyName technicianName")
+        .populate("category", "name")
+        .populate("createdBy", "preferredName email")
+        .populate("dynamicStatus", "name description isDefault")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      WorkOrder.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Work orders fetched successfully", {
+      workOrders,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch work orders by building",
+      500
+    );
+  }
+};
+
 // Get single work order
 exports.getWorkOrder = async (req, res) => {
   try {
@@ -614,6 +667,52 @@ exports.getInspectionRequests = async (req, res) => {
   }
 };
 
+// Get Inspection Requests by Building
+exports.getInspectionRequestsByBuilding = async (req, res) => {
+  try {
+    const { buildingId, page = 1, limit = 10, status } = req.query;
+
+    if (!buildingId) return sendError(res, "Building ID is required", 400);
+
+    const skip = (page - 1) * limit;
+
+    const filter = { building: buildingId };
+    if (status && status !== "All") filter.status = status;
+
+    const [inspectionRequests, total] = await Promise.all([
+      InspectionRequest.find(filter)
+        .populate({
+          path: "building",
+          select:
+            "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio",
+          populate: {
+            path: "portfolio",
+            select: "portfolioAbbreviation formData.name",
+          },
+        })
+        .populate("assignedTo", "preferredName email")
+        .populate("createdBy", "preferredName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      InspectionRequest.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Inspection requests fetched successfully", {
+      inspectionRequests,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch inspection requests by building",
+      500
+    );
+  }
+};
+
 // Update Inspection Request
 exports.updateInspectionRequest = async (req, res) => {
   try {
@@ -924,6 +1023,53 @@ exports.getServiceAgreements = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch service agreements",
+      500
+    );
+  }
+};
+
+// Get Service Agreements by Building
+exports.getServiceAgreementsByBuilding = async (req, res) => {
+  try {
+    const { buildingId, page = 1, limit = 10, status } = req.query;
+
+    if (!buildingId) return sendError(res, "Building ID is required", 400);
+
+    const skip = (page - 1) * limit;
+
+    const filter = { building: buildingId };
+    if (status && status !== "All") filter.status = status;
+
+    const [serviceAgreements, total] = await Promise.all([
+      ServiceAgreement.find(filter)
+        .populate({
+          path: "building",
+          select:
+            "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio",
+          populate: {
+            path: "portfolio",
+            select: "portfolioAbbreviation formData.name",
+          },
+        })
+        .populate("vendor", "companyName technicianName email")
+        .populate("category", "name")
+        .populate("createdBy", "preferredName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      ServiceAgreement.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Service agreements fetched successfully", {
+      serviceAgreements,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch service agreements by building",
       500
     );
   }

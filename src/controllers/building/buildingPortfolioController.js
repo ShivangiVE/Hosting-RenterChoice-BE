@@ -777,6 +777,8 @@ exports.getAllPortfolios = async (req, res) => {
       buildingCount,
       managementFees,
       repairType,
+      sortBy,
+      sortOrder = "asc",
     } = req.query;
 
     // Convert to numbers
@@ -821,6 +823,12 @@ exports.getAllPortfolios = async (req, res) => {
           ...portfolio,
           buildingCount,
           ownerCount: portfolio.owners?.length || 0,
+          managementFees: portfolio.formData?.managementFees || "",
+          repairType: portfolio.formData?.repairType || "",
+          specialConsiderations:
+            portfolio.formData?.specialConsiderations || "",
+          assignedlandlorkClerk:
+            portfolio.formData?.assignedlandlorkClerk || "",
         };
       })
     );
@@ -842,6 +850,65 @@ exports.getAllPortfolios = async (req, res) => {
           fees &&
           fees.toString().toLowerCase().includes(managementFees.toLowerCase())
         );
+      });
+    }
+
+    if (sortBy) {
+      filteredPortfolios.sort((a, b) => {
+        let aValue = a[sortBy];
+        let bValue = b[sortBy];
+
+        // Handle nested formData fields
+        if (
+          sortBy === "managementFees" ||
+          sortBy === "repairType" ||
+          sortBy === "specialConsiderations" ||
+          sortBy === "assignedlandlorkClerk"
+        ) {
+          aValue = a.formData?.[sortBy] || "";
+          bValue = b.formData?.[sortBy] || "";
+        }
+
+        // Handle empty/null values
+        if (aValue === null || aValue === undefined || aValue === "—")
+          aValue = "";
+        if (bValue === null || bValue === undefined || bValue === "—")
+          bValue = "";
+
+        // Convert to string for comparison
+        aValue = String(aValue).toLowerCase();
+        bValue = String(bValue).toLowerCase();
+
+        // Special handling for buildingCount (numeric sorting)
+        if (sortBy === "buildingCount") {
+          aValue = parseInt(aValue) || 0;
+          bValue = parseInt(bValue) || 0;
+
+          if (sortOrder === "asc") {
+            return aValue - bValue;
+          } else {
+            return bValue - aValue;
+          }
+        }
+
+        // Special handling for managementFees (extract numbers for sorting)
+        if (sortBy === "managementFees") {
+          const aNum = parseFloat(aValue.replace(/[^\d.-]/g, "")) || 0;
+          const bNum = parseFloat(bValue.replace(/[^\d.-]/g, "")) || 0;
+
+          if (sortOrder === "asc") {
+            return aNum - bNum;
+          } else {
+            return bNum - aNum;
+          }
+        }
+
+        // Default string comparison for other fields
+        if (sortOrder === "asc") {
+          return aValue.localeCompare(bValue);
+        } else {
+          return bValue.localeCompare(aValue);
+        }
       });
     }
 
