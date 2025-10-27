@@ -249,37 +249,71 @@ exports.updateTask = async (req, res) => {
     const { id } = req.params;
     const updateData = { ...req.body };
 
+    // Handle category validation
     if (updateData.category) {
       const categoryDoc = await Category.findOne({
         _id: updateData.category,
         type: "task",
       });
-
       if (!categoryDoc) {
-        return sendError(
-          res,
-          "Invalid category. Must be a task category.",
-          400
-        );
+        return sendError(res, "Invalid category. Must be a task category.", 400);
       }
     }
 
+    // Handle assigned user validation
     if (updateData.assignedTo) {
       const assignedUser = await User.findById(updateData.assignedTo);
       if (!assignedUser) {
         return sendError(res, "Invalid assigned user. User not found.", 400);
       }
     }
-    // If files uploaded
-    if (req.files && req.files.length > 0) {
-      updateData.attachments = req.files.map((f) => f.filename);
+
+    // Get existing task to preserve attachments
+    const existingTask = await Task.findById(id);
+    if (!existingTask) {
+      return sendError(res, "Task not found", 404);
     }
 
-    const task = await Task.findByIdAndUpdate(id, updateData, { new: true });
-    if (!task) return sendError(res, "Task not found", 404);
+    // Handle file attachments
+    let attachments = [];
+
+    // Handle existing attachments - only keep those specified
+    if (updateData.existingAttachments && Array.isArray(updateData.existingAttachments)) {
+      // Filter existing attachments to keep only those in existingAttachments array
+      attachments = existingTask.attachments.filter(att => 
+        updateData.existingAttachments.includes(att.fileUrl)
+      );
+    }
+
+    // Add new uploaded files
+    if (req.files && req.files.length > 0) {
+      const newAttachments = req.files.map((file) => ({
+        fileName: file.originalname,
+        fileUrl: `/uploads/Repair/tasks/${file.filename}`,
+        fileType: file.mimetype.startsWith("image")
+          ? "image"
+          : file.mimetype.startsWith("video")
+          ? "video"
+          : "document",
+      }));
+      
+      attachments = [...attachments, ...newAttachments];
+    }
+
+    // Update the attachments
+    updateData.attachments = attachments;
+
+    // Remove existingAttachments from updateData as it's not a schema field
+    delete updateData.existingAttachments;
+
+    const task = await Task.findByIdAndUpdate(id, updateData, { new: true })
+      .populate("category", "name")
+      .populate("assignedTo", "preferredName email")
+      .populate("createdBy", "preferredName email");
 
     return sendSuccess(res, "Task updated successfully", { task });
   } catch (err) {
+    console.error("Update task error:", err);
     return sendError(res, err.message || "Failed to update task", 500);
   }
 };
