@@ -233,6 +233,7 @@ exports.getTodoDetails = async (req, res) => {
 };
 
 // UPDATE Todo
+// UPDATE Todo
 exports.updateTodo = async (req, res) => {
   try {
     const { id } = req.params;
@@ -244,11 +245,7 @@ exports.updateTodo = async (req, res) => {
         type: "todo",
       });
       if (!categoryDoc) {
-        return sendError(
-          res,
-          "Invalid category. Must be a todo category.",
-          400
-        );
+        return sendError(res, "Invalid category. Must be a todo category.", 400);
       }
     }
 
@@ -259,16 +256,48 @@ exports.updateTodo = async (req, res) => {
       }
     }
 
-    // Handle uploaded attachments
-    if (req.files && req.files.length > 0) {
-      updateData.attachments = req.files.map((f) => f.filename);
+    // Get existing todo
+    const existingTodo = await Todo.findById(id);
+    if (!existingTodo) {
+      return sendError(res, "Todo not found", 404);
     }
 
-    const todo = await Todo.findByIdAndUpdate(id, updateData, { new: true });
-    if (!todo) return sendError(res, "Todo not found", 404);
+    // Handle file attachments
+    let attachments = [];
+
+    // Handle existing attachments - only keep those specified
+    if (updateData.existingAttachments && Array.isArray(updateData.existingAttachments)) {
+      attachments = existingTodo.attachments.filter(att => 
+        updateData.existingAttachments.includes(att.fileUrl)
+      );
+    }
+
+    // Add new uploaded files
+    if (req.files && req.files.length > 0) {
+      const newAttachments = req.files.map((file) => ({
+        fileName: file.originalname,
+        fileUrl: `/uploads/Repair/todos/${file.filename}`,
+        fileType: file.mimetype.startsWith("image")
+          ? "image"
+          : file.mimetype.startsWith("video")
+          ? "video"
+          : "document",
+      }));
+      
+      attachments = [...attachments, ...newAttachments];
+    }
+
+    updateData.attachments = attachments;
+    delete updateData.existingAttachments;
+
+    const todo = await Todo.findByIdAndUpdate(id, updateData, { new: true })
+      .populate("category", "name")
+      .populate("assignedTo", "preferredName email")
+      .populate("createdBy", "preferredName email");
 
     return sendSuccess(res, "Todo updated successfully", { todo });
   } catch (err) {
+    console.error("Update todo error:", err);
     return sendError(res, err.message || "Failed to update todo", 500);
   }
 };
