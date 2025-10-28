@@ -146,7 +146,7 @@ exports.getTodos = async (req, res) => {
 // GET Todos by Tags (Portfolio/Building)
 exports.getTodosByTags = async (req, res) => {
   try {
-    const { tags, tagType } = req.query; // tagType: 'portfolio' or 'building'
+    const { tags, tagType, assignedTo, user } = req.query; 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -164,6 +164,16 @@ exports.getTodosByTags = async (req, res) => {
     const filter = {
       tags: { $in: prefixedTags },
     };
+
+    // Add assignedTo filter
+    if (assignedTo) {
+      filter.assignedTo = assignedTo;
+    }
+
+    // Add user filter (todos assigned to OR created by the user)
+    if (user) {
+      filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    }
 
     if (req.query.status) {
       filter.status = req.query.status;
@@ -232,7 +242,6 @@ exports.getTodoDetails = async (req, res) => {
   }
 };
 
-// UPDATE Todo
 // UPDATE Todo
 exports.updateTodo = async (req, res) => {
   try {
