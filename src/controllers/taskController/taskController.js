@@ -152,12 +152,10 @@ exports.getTasks = async (req, res) => {
   }
 };
 
-// Add this method to your TaskController.js
-
 // GET Tasks by Tags (Portfolio/Building)
 exports.getTasksByTags = async (req, res) => {
   try {
-    const { tags, tagType } = req.query; // tagType: 'portfolio' or 'building'
+    const { tags, tagType, assignedTo, user } = req.query; 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -175,6 +173,16 @@ exports.getTasksByTags = async (req, res) => {
     const filter = {
       tags: { $in: prefixedTags },
     };
+
+    // Add assignedTo filter
+    if (assignedTo) {
+      filter.assignedTo = assignedTo;
+    }
+
+    // Add user filter (tasks assigned to OR created by the user)
+    if (user) {
+      filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    }
 
     if (req.query.status) {
       filter.status = req.query.status;
@@ -256,7 +264,11 @@ exports.updateTask = async (req, res) => {
         type: "task",
       });
       if (!categoryDoc) {
-        return sendError(res, "Invalid category. Must be a task category.", 400);
+        return sendError(
+          res,
+          "Invalid category. Must be a task category.",
+          400
+        );
       }
     }
 
@@ -278,9 +290,12 @@ exports.updateTask = async (req, res) => {
     let attachments = [];
 
     // Handle existing attachments - only keep those specified
-    if (updateData.existingAttachments && Array.isArray(updateData.existingAttachments)) {
+    if (
+      updateData.existingAttachments &&
+      Array.isArray(updateData.existingAttachments)
+    ) {
       // Filter existing attachments to keep only those in existingAttachments array
-      attachments = existingTask.attachments.filter(att => 
+      attachments = existingTask.attachments.filter((att) =>
         updateData.existingAttachments.includes(att.fileUrl)
       );
     }
@@ -296,7 +311,7 @@ exports.updateTask = async (req, res) => {
           ? "video"
           : "document",
       }));
-      
+
       attachments = [...attachments, ...newAttachments];
     }
 
