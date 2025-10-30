@@ -18,7 +18,9 @@ const taskRoutes = require("./src/routes/taskRoutes/taskRoutes");
 const todosRoutes = require("./src/routes/taskRoutes/todoRoutes");
 const repairCategories = require("./src/routes/workOrderRoutes/repairCategoriesRoutes");
 const woDynamicStatusRoutes = require("./src/routes/workOrderRoutes/woDynamicStatusRoutes");
+const noteCategoryRoutes = require("./src/routes/notes&Documents/noteCategoryRoutes");
 const internalUsers = require("./src/routes/internalUsers/internalUserRoutes");
+const noteRoutes = require("./src/routes/notes&Documents/noteRoutes");
 
 const app = express();
 app.use(cors());
@@ -47,6 +49,8 @@ app.use("/api/tasks", taskRoutes);
 app.use("/api/todos", todosRoutes);
 app.use("/api/categories", repairCategories);
 app.use("/api/work-orders/dynamicstatuses", woDynamicStatusRoutes);
+app.use("/api/note-categories", noteCategoryRoutes);
+app.use("/api/notes", noteRoutes);
 
 app.use(errorHandler);
 
