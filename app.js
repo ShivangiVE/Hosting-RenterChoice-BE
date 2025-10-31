@@ -21,6 +21,7 @@ const woDynamicStatusRoutes = require("./src/routes/workOrderRoutes/woDynamicSta
 const noteCategoryRoutes = require("./src/routes/notes&Documents/noteCategoryRoutes");
 const internalUsers = require("./src/routes/internalUsers/internalUserRoutes");
 const noteRoutes = require("./src/routes/notes&Documents/noteRoutes");
+const documentRoutes = require("./src/routes/notes&Documents/DocumentRoutes");
 
 const app = express();
 app.use(cors());
@@ -51,6 +52,7 @@ app.use("/api/categories", repairCategories);
 app.use("/api/work-orders/dynamicstatuses", woDynamicStatusRoutes);
 app.use("/api/note-categories", noteCategoryRoutes);
 app.use("/api/notes", noteRoutes);
+app.use("/api/documents", documentRoutes);
 
 app.use(errorHandler);
 
