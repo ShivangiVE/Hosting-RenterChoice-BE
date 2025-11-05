@@ -95,7 +95,7 @@ exports.getTodos = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { category, user, assignedTo, tags, todoColor, status } = req.query;
+    const { category, user, assignedTo, tags, todoColor, status, myView } = req.query;
 
     let filter = {};
     if (category) filter.category = category;
@@ -106,6 +106,18 @@ exports.getTodos = async (req, res) => {
 
     // filter for tasks assigned to OR created by the user
     if (user) {
+      filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    }
+
+    // Special "My View" filter logic
+    if (myView === "true") {
+      filter.$or = [
+        {
+          createdBy: req.user._id,
+          assignedTo: { $ne: req.user._id }
+        }
+      ];
+    } else if (user) {
       filter.$or = [{ assignedTo: user }, { createdBy: user }];
     }
 

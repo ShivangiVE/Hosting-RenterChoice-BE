@@ -97,7 +97,7 @@ exports.getTasks = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { category, user, assignedTo, tags, taskColor, dueDate, status } =
+    const { category, user, assignedTo, tags, taskColor, dueDate, status, myView } =
       req.query;
 
     let filter = {};
@@ -121,6 +121,16 @@ exports.getTasks = async (req, res) => {
     if (user) {
       filter.$or = [{ assignedTo: user }, { createdBy: user }];
     }
+
+    // filter for tasks assigned to OR created by the user
+    if (myView === "true") {
+      filter.$or = [
+        { createdBy: req.user._id, assignedTo: { $ne: req.user._id } },
+      ];
+    } else if (user) {
+      filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    }
+
 
     const [tasks, total] = await Promise.all([
       Task.find(filter)
