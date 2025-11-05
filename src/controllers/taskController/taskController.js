@@ -63,8 +63,8 @@ exports.createTask = async (req, res) => {
         fileType: file.mimetype.startsWith("image")
           ? "image"
           : file.mimetype.startsWith("video")
-          ? "video"
-          : "document",
+            ? "video"
+            : "document",
       }));
     }
 
@@ -118,17 +118,24 @@ exports.getTasks = async (req, res) => {
     if (status) filter.status = status;
 
     // filter for tasks assigned to OR created by the user
-    if (user) {
-      filter.$or = [{ assignedTo: user }, { createdBy: user }];
-    }
+    // if (user) {
+    //   filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    // }
 
     // filter for tasks assigned to OR created by the user
     if (myView === "true") {
       filter.$or = [
-        { createdBy: req.user._id, assignedTo: { $ne: req.user._id } },
+        { assignedTo: req.user._id },
+        { createdBy: req.user._id }
       ];
-    } else if (user) {
-      filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    }
+
+    // If ?user=<id> passed → show tasks assigned to OR created by that user
+    else if (user) {
+      filter.$or = [
+        { assignedTo: user },
+        { createdBy: user }
+      ];
     }
 
 
@@ -165,7 +172,7 @@ exports.getTasks = async (req, res) => {
 // GET Tasks by Tags (Portfolio/Building)
 exports.getTasksByTags = async (req, res) => {
   try {
-    const { tags, tagType, assignedTo, user } = req.query; 
+    const { tags, tagType, assignedTo, user } = req.query;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -318,8 +325,8 @@ exports.updateTask = async (req, res) => {
         fileType: file.mimetype.startsWith("image")
           ? "image"
           : file.mimetype.startsWith("video")
-          ? "video"
-          : "document",
+            ? "video"
+            : "document",
       }));
 
       attachments = [...attachments, ...newAttachments];

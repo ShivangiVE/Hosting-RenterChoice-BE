@@ -61,8 +61,8 @@ exports.createTodo = async (req, res) => {
         fileType: file.mimetype.startsWith("image")
           ? "image"
           : file.mimetype.startsWith("video")
-          ? "video"
-          : "document",
+            ? "video"
+            : "document",
       }));
     }
 
@@ -105,9 +105,9 @@ exports.getTodos = async (req, res) => {
     if (status) filter.status = status;
 
     // filter for tasks assigned to OR created by the user
-    if (user) {
-      filter.$or = [{ assignedTo: user }, { createdBy: user }];
-    }
+    // if (user) {
+    //   filter.$or = [{ assignedTo: user }, { createdBy: user }];
+    // }
 
     // Special "My View" filter logic
     if (myView === "true") {
@@ -158,7 +158,7 @@ exports.getTodos = async (req, res) => {
 // GET Todos by Tags (Portfolio/Building)
 exports.getTodosByTags = async (req, res) => {
   try {
-    const { tags, tagType, assignedTo, user } = req.query; 
+    const { tags, tagType, assignedTo, user } = req.query;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -288,7 +288,7 @@ exports.updateTodo = async (req, res) => {
 
     // Handle existing attachments - only keep those specified
     if (updateData.existingAttachments && Array.isArray(updateData.existingAttachments)) {
-      attachments = existingTodo.attachments.filter(att => 
+      attachments = existingTodo.attachments.filter(att =>
         updateData.existingAttachments.includes(att.fileUrl)
       );
     }
@@ -301,10 +301,10 @@ exports.updateTodo = async (req, res) => {
         fileType: file.mimetype.startsWith("image")
           ? "image"
           : file.mimetype.startsWith("video")
-          ? "video"
-          : "document",
+            ? "video"
+            : "document",
       }));
-      
+
       attachments = [...attachments, ...newAttachments];
     }
 
