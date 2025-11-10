@@ -78,13 +78,22 @@ exports.register = async (req, res, next) => {
   }
 };
 
-// Login (any role)
+// Login (strict role-based)
 exports.login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
     if (!email || !password) {
       return sendError(res, "Email and password are required", 400);
+    }
+
+    // Validate allowed roles
+    if (!EXTERNAL_ROLES.includes(role)) {
+      return sendError(
+        res,
+        "Invalid role. Allowed roles: Vendor, Owner, Tenant",
+        400
+      );
     }
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
@@ -97,13 +106,23 @@ exports.login = async (req, res, next) => {
       return sendError(res, "Invalid credentials", 401);
     }
 
+    if (user.role !== role) {
+      return sendError(
+        res,
+        `Role mismatch. You are registered as ${user.role}. Please log in using the correct role.`,
+        403
+      );
+    }
+
+    const token = generateToken(user);
+
     return sendSuccess(res, "Login successful", {
       _id: user._id,
       preferredName: user.preferredName,
       profileImage: user.profileImage,
       email: user.email,
       role: user.role,
-      token: generateToken(user),
+      token,
     });
   } catch (err) {
     next(err);

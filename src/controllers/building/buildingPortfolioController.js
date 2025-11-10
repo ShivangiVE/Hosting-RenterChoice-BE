@@ -2,6 +2,7 @@ const Building = require("../../models/Building");
 const FormTemplate = require("../../models/FormTemplate");
 const Portfolio = require("../../models/Portfolio");
 const User = require("../../models/User");
+const AuditService = require("../../services/auditService");
 const {
   generatePortfolioAccountNumber,
 } = require("../../utils/portfolioCounter");
@@ -239,6 +240,18 @@ exports.updateBuilding = async (req, res) => {
     const building = await Building.findById(id);
     if (!building) return sendError(res, "Building not found", 404);
 
+    // Track changes
+    const changes = [];
+    Object.keys(formData).forEach((key) => {
+      if (building.formData[key] !== formData[key]) {
+        changes.push({
+          field: key,
+          oldValue: building.formData[key],
+          newValue: formData[key],
+        });
+      }
+    });
+
     const template = await FormTemplate.findOne({
       formType: "building",
       isActive: true,
@@ -315,6 +328,17 @@ exports.updateBuilding = async (req, res) => {
 
     building.formData = { ...building.formData, ...formData };
     await building.save();
+
+     await AuditService.logActivity({
+      entityType: 'building',
+      entityId: id,
+      action: 'updated',
+      actionDetails: `Building ${building.buildingAbbreviation} updated`,
+      changes,
+      performedBy: req.user._id,
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent')
+    });
 
     return sendSuccess(res, "Building updated successfully", {
       building,

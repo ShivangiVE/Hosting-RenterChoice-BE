@@ -61,8 +61,8 @@ exports.createTodo = async (req, res) => {
         fileType: file.mimetype.startsWith("image")
           ? "image"
           : file.mimetype.startsWith("video")
-            ? "video"
-            : "document",
+          ? "video"
+          : "document",
       }));
     }
 
@@ -95,7 +95,8 @@ exports.getTodos = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { category, user, assignedTo, tags, todoColor, status, myView } = req.query;
+    const { category, user, assignedTo, tags, todoColor, status, myView } =
+      req.query;
 
     let filter = {};
     if (category) filter.category = category;
@@ -114,8 +115,8 @@ exports.getTodos = async (req, res) => {
       filter.$or = [
         {
           createdBy: req.user._id,
-          assignedTo: { $ne: req.user._id }
-        }
+          assignedTo: { $ne: req.user._id },
+        },
       ];
     } else if (user) {
       filter.$or = [{ assignedTo: user }, { createdBy: user }];
@@ -266,7 +267,11 @@ exports.updateTodo = async (req, res) => {
         type: "todo",
       });
       if (!categoryDoc) {
-        return sendError(res, "Invalid category. Must be a todo category.", 400);
+        return sendError(
+          res,
+          "Invalid category. Must be a todo category.",
+          400
+        );
       }
     }
 
@@ -287,8 +292,11 @@ exports.updateTodo = async (req, res) => {
     let attachments = [];
 
     // Handle existing attachments - only keep those specified
-    if (updateData.existingAttachments && Array.isArray(updateData.existingAttachments)) {
-      attachments = existingTodo.attachments.filter(att =>
+    if (
+      updateData.existingAttachments &&
+      Array.isArray(updateData.existingAttachments)
+    ) {
+      attachments = existingTodo.attachments.filter((att) =>
         updateData.existingAttachments.includes(att.fileUrl)
       );
     }
@@ -301,8 +309,8 @@ exports.updateTodo = async (req, res) => {
         fileType: file.mimetype.startsWith("image")
           ? "image"
           : file.mimetype.startsWith("video")
-            ? "video"
-            : "document",
+          ? "video"
+          : "document",
       }));
 
       attachments = [...attachments, ...newAttachments];
