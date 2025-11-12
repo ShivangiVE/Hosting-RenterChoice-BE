@@ -2,6 +2,12 @@ const AdvertisingMedia = require("../../models/AdvertisingMedia");
 const { sendError, sendSuccess } = require("../../utils/response");
 const fs = require("fs");
 const path = require("path");
+const {
+  deleteFile,
+  fileExists,
+  getFileStream,
+  uploadFile,
+} = require("../../utils/storageService");
 
 // Helper function to determine media type
 const getMediaType = (mimeType) => {
@@ -24,23 +30,22 @@ exports.uploadAdvertisingMedia = async (req, res) => {
       const mediaType = getMediaType(file.mimetype);
 
       if (!mediaType) {
-        // Clean up uploaded files
-        req.files.forEach((file) => {
-          try {
-            fs.unlinkSync(file.path);
-          } catch (unlinkErr) {
-            console.error("Error deleting file:", unlinkErr);
-          }
-        });
+        for (const f of req.files) await deleteFile(f.path);
         return sendError(res, "Invalid file type", 400);
       }
+
+      // Upload file to S3 or keep locally
+      const fileUrl = await uploadFile(
+        file,
+        `uploads/advertising/${mediaType}s`
+      );
 
       const media = await AdvertisingMedia.create({
         fileName: file.originalname,
         mediaType: mediaType,
         mimeType: file.mimetype,
         fileSize: file.size,
-        fileUrl: `/uploads/advertising/${mediaType}s/${file.filename}`,
+        fileUrl,
         uploadedBy: req.user._id,
       });
 
@@ -116,16 +121,42 @@ exports.deleteMedia = async (req, res) => {
     }
 
     // Delete the physical file
-    const filePath = path.join(__dirname, "../../", media.fileUrl);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
+    await deleteFile(media.fileUrl);
     await media.deleteOne();
 
     return sendSuccess(res, "Media deleted successfully");
   } catch (err) {
     console.error("Error deleting media:", err);
+    return sendError(res, err.message || "Failed to delete media", 500);
+  }
+};
+
+// Delete Multiple Media
+exports.deleteMultipleMedia = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return sendError(res, "No media IDs provided", 400);
+    }
+
+    const mediaToDelete = await AdvertisingMedia.find({ _id: { $in: ids } });
+    if (mediaToDelete.length === 0) {
+      return sendError(res, "No media found with provided IDs", 404);
+    }
+
+    // Delete each file via storage service
+    for (const media of mediaToDelete) {
+      await deleteFile(media.fileUrl);
+    }
+
+    await AdvertisingMedia.deleteMany({ _id: { $in: ids } });
+
+    return sendSuccess(
+      res,
+      `${mediaToDelete.length} media items deleted successfully`
+    );
+  } catch (err) {
+    console.error("Error deleting multiple media:", err);
     return sendError(res, err.message || "Failed to delete media", 500);
   }
 };
@@ -152,5 +183,30 @@ exports.toggleMediaStatus = async (req, res) => {
   } catch (err) {
     console.error("Error toggling media status:", err);
     return sendError(res, err.message || "Failed to toggle media status", 500);
+  }
+};
+
+// Download media
+exports.downloadAdvertisingMedia = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const media = await AdvertisingMedia.findById(id);
+    if (!media) return sendError(res, "Media not found", 404);
+
+    if (!fileExists(media.fileUrl)) {
+      return sendError(res, "File not found on server", 404);
+    }
+
+    res.setHeader("Content-Type", media.mimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${media.fileName}"`
+    );
+
+    const stream = getFileStream(media.fileUrl);
+    stream.pipe(res);
+  } catch (err) {
+    console.error("Error downloading media:", err);
+    return sendError(res, err.message || "Failed to download media", 500);
   }
 };

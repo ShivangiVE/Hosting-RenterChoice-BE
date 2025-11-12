@@ -3,6 +3,7 @@ const User = require("../../models/User");
 const Category = require("../../models/repairCategories");
 const { sendSuccess, sendError } = require("../../utils/response");
 const Counter = require("../../utils/Counter");
+const { uploadFile, deleteFile } = require("../../utils/storageService");
 
 // Increment counter
 const getNextSequence = async (sequenceName) => {
@@ -57,15 +58,18 @@ exports.createTask = async (req, res) => {
     // File attachments
     let attachments = [];
     if (req.files?.length) {
-      attachments = req.files.map((file) => ({
-        fileName: file.originalname,
-        fileUrl: `/uploads/Repair/tasks/${file.filename}`,
-        fileType: file.mimetype.startsWith("image")
-          ? "image"
-          : file.mimetype.startsWith("video")
+      for (const file of req.files) {
+        const fileUrl = await uploadFile(file, "uploads/Repair/tasks");
+        attachments.push({
+          fileName: file.originalname,
+          fileUrl,
+          fileType: file.mimetype.startsWith("image")
+            ? "image"
+            : file.mimetype.startsWith("video")
             ? "video"
             : "document",
-      }));
+        });
+      }
     }
 
     const sequence = await getNextSequence("task");
@@ -97,8 +101,16 @@ exports.getTasks = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { category, user, assignedTo, tags, taskColor, dueDate, status, myView } =
-      req.query;
+    const {
+      category,
+      user,
+      assignedTo,
+      tags,
+      taskColor,
+      dueDate,
+      status,
+      myView,
+    } = req.query;
 
     let filter = {};
     if (category) filter.category = category;
@@ -124,20 +136,13 @@ exports.getTasks = async (req, res) => {
 
     // filter for tasks assigned to OR created by the user
     if (myView === "true") {
-      filter.$or = [
-        { assignedTo: req.user._id },
-        { createdBy: req.user._id }
-      ];
+      filter.$or = [{ assignedTo: req.user._id }, { createdBy: req.user._id }];
     }
 
     // If ?user=<id> passed → show tasks assigned to OR created by that user
     else if (user) {
-      filter.$or = [
-        { assignedTo: user },
-        { createdBy: user }
-      ];
+      filter.$or = [{ assignedTo: user }, { createdBy: user }];
     }
-
 
     const [tasks, total] = await Promise.all([
       Task.find(filter)
@@ -319,17 +324,25 @@ exports.updateTask = async (req, res) => {
 
     // Add new uploaded files
     if (req.files && req.files.length > 0) {
-      const newAttachments = req.files.map((file) => ({
-        fileName: file.originalname,
-        fileUrl: `/uploads/Repair/tasks/${file.filename}`,
-        fileType: file.mimetype.startsWith("image")
-          ? "image"
-          : file.mimetype.startsWith("video")
+      for (const file of req.files) {
+        const fileUrl = await uploadFile(file, "uploads/Repair/tasks");
+        attachments.push({
+          fileName: file.originalname,
+          fileUrl,
+          fileType: file.mimetype.startsWith("image")
+            ? "image"
+            : file.mimetype.startsWith("video")
             ? "video"
             : "document",
-      }));
+        });
+      }
+    }
 
-      attachments = [...attachments, ...newAttachments];
+    const removed = existingTask.attachments.filter(
+      (att) => !attachments.some((a) => a.fileUrl === att.fileUrl)
+    );
+    for (const r of removed) {
+      await deleteFile(r.fileUrl);
     }
 
     // Update the attachments
@@ -451,6 +464,11 @@ exports.deleteTask = async (req, res) => {
     }
 
     // Delete task
+
+    for (const att of task.attachments) {
+      await deleteFile(att.fileUrl);
+    }
+
     await Task.findByIdAndDelete(id);
     return sendSuccess(res, "Task deleted successfully");
   } catch (err) {
@@ -479,6 +497,10 @@ exports.bulkDeleteTasks = async (req, res) => {
           message: "Not authorized to delete",
         });
         continue;
+      }
+
+      for (const att of task.attachments) {
+        await deleteFile(att.fileUrl);
       }
 
       await Task.findByIdAndDelete(task._id);
