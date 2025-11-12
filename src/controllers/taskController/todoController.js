@@ -3,6 +3,7 @@ const User = require("../../models/User");
 const Category = require("../../models/repairCategories");
 const { sendSuccess, sendError } = require("../../utils/response");
 const Counter = require("../../utils/Counter");
+const { uploadFile, deleteFile } = require("../../utils/storageService");
 
 //  Increment (used only when creating)
 const getNextSequence = async (sequenceName) => {
@@ -55,15 +56,18 @@ exports.createTodo = async (req, res) => {
 
     let attachments = [];
     if (req.files?.length) {
-      attachments = req.files.map((file) => ({
-        fileName: file.originalname,
-        fileUrl: `/uploads/Repair/todos/${file.filename}`,
-        fileType: file.mimetype.startsWith("image")
-          ? "image"
-          : file.mimetype.startsWith("video")
-          ? "video"
-          : "document",
-      }));
+      for (const file of req.files) {
+        const fileUrl = await uploadFile(file, "uploads/Repair/todos");
+        attachments.push({
+          fileName: file.originalname,
+          fileUrl,
+          fileType: file.mimetype.startsWith("image")
+            ? "image"
+            : file.mimetype.startsWith("video")
+            ? "video"
+            : "document",
+        });
+      }
     }
 
     // Get next todo number
@@ -302,19 +306,25 @@ exports.updateTodo = async (req, res) => {
     }
 
     // Add new uploaded files
-    if (req.files && req.files.length > 0) {
-      const newAttachments = req.files.map((file) => ({
-        fileName: file.originalname,
-        fileUrl: `/uploads/Repair/todos/${file.filename}`,
-        fileType: file.mimetype.startsWith("image")
-          ? "image"
-          : file.mimetype.startsWith("video")
-          ? "video"
-          : "document",
-      }));
-
-      attachments = [...attachments, ...newAttachments];
+    if (req.files?.length) {
+      for (const file of req.files) {
+        const fileUrl = await uploadFile(file, "uploads/Repair/todos");
+        attachments.push({
+          fileName: file.originalname,
+          fileUrl,
+          fileType: file.mimetype.startsWith("image")
+            ? "image"
+            : file.mimetype.startsWith("video")
+            ? "video"
+            : "document",
+        });
+      }
     }
+
+    const removed = existingTodo.attachments.filter(
+      (att) => !attachments.some((a) => a.fileUrl === att.fileUrl)
+    );
+    for (const r of removed) await deleteFile(r.fileUrl);
 
     updateData.attachments = attachments;
     delete updateData.existingAttachments;
@@ -431,7 +441,7 @@ exports.deleteTodo = async (req, res) => {
     if (todo.createdBy.toString() !== req.user._id.toString()) {
       return sendError(res, "You are not authorized to delete this todo", 403);
     }
-
+    for (const att of todo.attachments) await deleteFile(att.fileUrl);
     // Delete todo
     await Todo.findByIdAndDelete(id);
     return sendSuccess(res, "Todo deleted successfully");
@@ -462,6 +472,8 @@ exports.bulkDeleteTodos = async (req, res) => {
         });
         continue;
       }
+
+      for (const att of todo.attachments) await deleteFile(att.fileUrl);
 
       await Todo.findByIdAndDelete(todo._id);
       results.push({

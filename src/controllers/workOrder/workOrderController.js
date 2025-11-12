@@ -6,6 +6,7 @@ const WODynamicStatus = require("../../models/WODynamicStatus");
 const WorkOrder = require("../../models/WorkOrder");
 const Counter = require("../../utils/Counter");
 const { sendSuccess, sendError } = require("../../utils/response");
+const { uploadFile, deleteFile } = require("../../utils/storageService");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -335,31 +336,39 @@ exports.getWorkOrder = async (req, res) => {
 exports.updateWorkOrder = async (req, res) => {
   try {
     const { id } = req.params;
-
     const updateData = { ...req.body };
 
-    // Handle new file upload (if provided)
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    if (req.body.removeExistingFile === "true" && workOrder.fileUrl) {
+      await deleteFile(workOrder.fileUrl);
+      updateData.fileUrl = null;
+    }
+
     if (req.file) {
-      updateData.fileUrl = `/uploads/Repair/workOrders/${req.file.filename}`;
+      if (workOrder.fileUrl) await deleteFile(workOrder.fileUrl);
+      updateData.fileUrl = await uploadFile(
+        req.file,
+        "uploads/Repair/workOrders"
+      );
     }
 
     if (updateData.dynamicStatus) {
       const statusExists = await WODynamicStatus.findById(
         updateData.dynamicStatus
       );
-      if (!statusExists) {
-        return sendError(res, "Invalid dynamic status", 400);
-      }
+      if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
     }
 
-    const workOrder = await WorkOrder.findByIdAndUpdate(id, updateData, {
+    const updated = await WorkOrder.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
     }).populate("dynamicStatus", "name description");
 
-    if (!workOrder) return sendError(res, "Work order not found", 404);
-
-    return sendSuccess(res, "Work order updated successfully", { workOrder });
+    return sendSuccess(res, "Work order updated successfully", {
+      workOrder: updated,
+    });
   } catch (err) {
     return sendError(res, err.message || "Failed to update work order", 500);
   }
@@ -372,8 +381,11 @@ exports.deleteWorkOrder = async (req, res) => {
     const workOrder = await WorkOrder.findByIdAndDelete(id);
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
+    if (workOrder.fileUrl) await deleteFile(workOrder.fileUrl);
 
-    return sendSuccess(res, "Work order deleted successfully", { workOrder });
+    await WorkOrder.findByIdAndDelete(id);
+
+    return sendSuccess(res, "Work order deleted successfully");
   } catch (err) {
     return sendError(res, err.message || "Failed to delete work order", 500);
   }
@@ -382,25 +394,21 @@ exports.deleteWorkOrder = async (req, res) => {
 // Bulk Delete Work Orders
 exports.bulkDeleteWorkOrders = async (req, res) => {
   try {
-    // console.log("Request body:", req.body);
-    const { ids } = req.body; // array of workOrder IDs
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No work order IDs provided" });
+    const { ids } = req.body;
+    if (!ids?.length) return sendError(res, "No work order IDs provided", 400);
+
+    const workOrders = await WorkOrder.find({ _id: { $in: ids } });
+    for (const wo of workOrders) {
+      if (wo.fileUrl) await deleteFile(wo.fileUrl);
     }
 
     const result = await WorkOrder.deleteMany({ _id: { $in: ids } });
-
-    return res.json({
-      success: true,
-      message: `${result.deletedCount} work orders deleted successfully`,
-    });
+    return sendSuccess(
+      res,
+      `${result.deletedCount} work orders deleted successfully`
+    );
   } catch (err) {
-    console.error("Bulk delete error:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to delete work orders" });
+    return sendError(res, err.message || "Failed to delete work orders", 500);
   }
 };
 
@@ -869,9 +877,10 @@ exports.createServiceAgreement = async (req, res) => {
       vendor,
     } = req.body;
 
-    const fileUrl = req.file
-      ? `/uploads/Repair/serviceAgreements/${req.file.filename}`
-      : null;
+    let fileUrl = null;
+    if (req.file) {
+      fileUrl = await uploadFile(req.file, "uploads/Repair/serviceAgreements");
+    }
 
     // Generate service agreement number
     const sequence = await getNextSequence("serviceAgreement");
@@ -1090,17 +1099,30 @@ exports.updateServiceAgreement = async (req, res) => {
       updateData.fileUrl = `/uploads/Repair/serviceAgreements/${req.file.filename}`;
     }
 
-    const serviceAgreement = await ServiceAgreement.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
+    const serviceAgreement = await ServiceAgreement.findById(id);
     if (!serviceAgreement)
       return sendError(res, "Service agreement not found", 404);
 
+    if (req.body.removeExistingFile === "true" && serviceAgreement.fileUrl) {
+      await deleteFile(serviceAgreement.fileUrl);
+      updateData.fileUrl = null;
+    }
+
+    if (req.file) {
+      if (serviceAgreement.fileUrl) await deleteFile(serviceAgreement.fileUrl);
+      updateData.fileUrl = await uploadFile(
+        req.file,
+        "uploads/Repair/serviceAgreements"
+      );
+    }
+
+    const updated = await ServiceAgreement.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+    });
+
     return sendSuccess(res, "Service agreement updated successfully", {
-      serviceAgreement,
+      serviceAgreement: updated,
     });
   } catch (err) {
     return sendError(
@@ -1120,6 +1142,10 @@ exports.deleteServiceAgreement = async (req, res) => {
     if (!serviceAgreement)
       return sendError(res, "Service agreement not found", 404);
 
+    if (serviceAgreement.fileUrl) await deleteFile(serviceAgreement.fileUrl);
+
+    await ServiceAgreement.findByIdAndDelete(id);
+
     return sendSuccess(res, "Service agreement deleted successfully", {
       serviceAgreement,
     });
@@ -1135,24 +1161,26 @@ exports.deleteServiceAgreement = async (req, res) => {
 // Bulk Delete Service Agreements
 exports.bulkDeleteServiceAgreements = async (req, res) => {
   try {
-    const { ids } = req.body; // array of service agreement IDs
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No service agreement IDs provided" });
+    const { ids } = req.body;
+    if (!ids?.length)
+      return sendError(res, "No service agreement IDs provided", 400);
+
+    const agreements = await ServiceAgreement.find({ _id: { $in: ids } });
+    for (const sa of agreements) {
+      if (sa.fileUrl) await deleteFile(sa.fileUrl);
     }
 
     const result = await ServiceAgreement.deleteMany({ _id: { $in: ids } });
-
-    return res.json({
-      success: true,
-      message: `${result.deletedCount} service agreements deleted successfully`,
-    });
+    return sendSuccess(
+      res,
+      `${result.deletedCount} service agreements deleted successfully`
+    );
   } catch (err) {
-    console.error("Bulk delete service agreement error:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to delete service agreements" });
+    return sendError(
+      res,
+      err.message || "Failed to bulk delete service agreements",
+      500
+    );
   }
 };
 

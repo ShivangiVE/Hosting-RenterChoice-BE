@@ -5,6 +5,12 @@ const Portfolio = require("../../models/Portfolio");
 const { sendSuccess, sendError } = require("../../utils/response");
 const fs = require("fs");
 const path = require("path");
+const {
+  uploadFile,
+  deleteFile,
+  getFileStream,
+  fileExists,
+} = require("../../utils/storageService");
 
 // Helper function to determine file type from mime type
 const getFileType = (mimeType) => {
@@ -101,6 +107,8 @@ exports.uploadDocuments = async (req, res) => {
         return sendError(res, "Category not found", 404);
       }
 
+      const fileUrl = await uploadFile(file, "uploads/documents");
+
       const document = await Document.create({
         fileName: metadata.fileName || file.originalname,
         originalFileName: file.originalname,
@@ -109,7 +117,7 @@ exports.uploadDocuments = async (req, res) => {
         fileType: getFileType(file.mimetype),
         mimeType: file.mimetype,
         fileSize: file.size,
-        fileUrl: `/uploads/documents/${file.filename}`,
+        fileUrl,
         building: building || null,
         portfolio: portfolio || null,
         uploadedBy: req.user._id,
@@ -428,7 +436,7 @@ exports.updateDocument = async (req, res) => {
 
     // Populate updated document
     await document.populate([
-      { path: "category", select: "name" }, 
+      { path: "category", select: "name" },
       { path: "uploadedBy", select: "preferredName email" },
       { path: "building", select: "buildingAbbreviation formData.address" },
       { path: "portfolio", select: "portfolioAbbreviation formData.name" },
@@ -452,10 +460,7 @@ exports.deleteDocument = async (req, res) => {
     }
 
     // Delete the physical file
-    const filePath = path.join(__dirname, "../../", document.fileUrl);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    await deleteFile(document.fileUrl);
 
     await document.deleteOne();
 
@@ -476,13 +481,30 @@ exports.downloadDocument = async (req, res) => {
       return sendError(res, "Document not found", 404);
     }
 
-    const filePath = path.join(__dirname, "../../", document.fileUrl);
-
-    if (!fs.existsSync(filePath)) {
+    if (!fileExists(document.fileUrl)) {
       return sendError(res, "File not found on server", 404);
     }
 
-    res.download(filePath, document.fileName);
+    res.setHeader(
+      "Content-Type",
+      document.mimeType || "application/octet-stream"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${encodeURIComponent(document.fileName)}"`
+    );
+    res.setHeader("Content-Transfer-Encoding", "binary");
+    res.setHeader("Accept-Ranges", "bytes");
+
+    // Pipe stream safely
+    const stream = getFileStream(document.fileUrl);
+
+    stream.on("error", (err) => {
+      console.error("Stream error:", err);
+      return sendError(res, "Error reading file", 500);
+    });
+
+    stream.pipe(res);
   } catch (err) {
     console.error("Error downloading document:", err);
     return sendError(res, err.message || "Failed to download document", 500);

@@ -6,6 +6,8 @@ const {
   getMediaByType,
   deleteMedia,
   toggleMediaStatus,
+  deleteMultipleMedia,
+  downloadAdvertisingMedia,
 } = require("../../controllers/Advertising/AdvertisingController");
 
 const router = express.Router();
@@ -32,12 +34,28 @@ router.get(
 // Delete media
 router.delete("/:id", protect, authorize(...ALLOWED_ROLES), deleteMedia);
 
+// Delete Multiple Media
+router.post(
+  "/delete-multiple",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  deleteMultipleMedia
+);
+
 // Toggle media status
 router.patch(
   "/:id/toggle-status",
   protect,
   authorize(...ALLOWED_ROLES),
   toggleMediaStatus
+);
+
+// Download media
+router.get(
+  "/:id/download",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  downloadAdvertisingMedia
 );
 
 module.exports = router;
