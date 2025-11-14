@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const advertisingMediaSchema = new mongoose.Schema(
@@ -11,6 +10,11 @@ const advertisingMediaSchema = new mongoose.Schema(
       type: String,
       required: true,
       enum: ["image", "video"],
+    },
+    buildingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Building",
+      required: true,
     },
     mimeType: {
       type: String,

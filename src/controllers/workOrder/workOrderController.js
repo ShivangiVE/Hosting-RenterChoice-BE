@@ -678,14 +678,55 @@ exports.getInspectionRequests = async (req, res) => {
 // Get Inspection Requests by Building
 exports.getInspectionRequestsByBuilding = async (req, res) => {
   try {
-    const { buildingId, page = 1, limit = 10, status } = req.query;
+    const {
+      buildingId,
+      page = 1,
+      limit = 10,
+      status,
+      inspectionType,
+      assignedTo,
+      startDate,
+      endDate,
+    } = req.query;
 
     if (!buildingId) return sendError(res, "Building ID is required", 400);
 
     const skip = (page - 1) * limit;
 
+    // Build filter object - DON'T hardcode status
     const filter = { building: buildingId };
-    if (status && status !== "All") filter.status = status;
+
+    // Filter by status (if provided) - maintains backward compatibility
+    if (status && status !== "All") {
+      filter.status = status;
+    }
+
+    // Filter by inspection type
+    if (inspectionType && inspectionType !== "" && inspectionType !== "All") {
+      filter.inspectionType = inspectionType;
+    }
+
+    // Filter by assigned user (completed by)
+    if (assignedTo && assignedTo !== "" && assignedTo !== "All") {
+      filter.assignedTo = assignedTo;
+    }
+
+    // Filter by completion date range
+    if (startDate || endDate) {
+      filter.completeDate = {};
+
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        filter.completeDate.$gte = start;
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.completeDate.$lte = end;
+      }
+    }
 
     const [inspectionRequests, total] = await Promise.all([
       InspectionRequest.find(filter)
