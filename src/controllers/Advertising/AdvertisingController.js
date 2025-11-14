@@ -19,22 +19,21 @@ const getMediaType = (mimeType) => {
 // Upload advertising media
 exports.uploadAdvertisingMedia = async (req, res) => {
   try {
+    const { buildingId } = req.body;
+
+    if (!buildingId) return sendError(res, "Building ID is required", 400);
     if (!req.files || req.files.length === 0) {
       return sendError(res, "No files uploaded", 400);
     }
 
-    // Create media records
     const uploadedMedia = [];
-    for (let i = 0; i < req.files.length; i++) {
-      const file = req.files[i];
+    for (let file of req.files) {
       const mediaType = getMediaType(file.mimetype);
-
       if (!mediaType) {
-        for (const f of req.files) await deleteFile(f.path);
+        await deleteFile(file.path);
         return sendError(res, "Invalid file type", 400);
       }
 
-      // Upload file to S3 or keep locally
       const fileUrl = await uploadFile(
         file,
         `uploads/advertising/${mediaType}s`
@@ -42,11 +41,12 @@ exports.uploadAdvertisingMedia = async (req, res) => {
 
       const media = await AdvertisingMedia.create({
         fileName: file.originalname,
-        mediaType: mediaType,
+        mediaType,
         mimeType: file.mimetype,
         fileSize: file.size,
         fileUrl,
         uploadedBy: req.user._id,
+        buildingId, // 👈 store building ID
       });
 
       await media.populate("uploadedBy", "preferredName email");
@@ -61,16 +61,6 @@ exports.uploadAdvertisingMedia = async (req, res) => {
     );
   } catch (err) {
     console.error("Error uploading media:", err);
-    // Clean up uploaded files on error
-    if (req.files) {
-      req.files.forEach((file) => {
-        try {
-          fs.unlinkSync(file.path);
-        } catch (unlinkErr) {
-          console.error("Error deleting file:", unlinkErr);
-        }
-      });
-    }
     return sendError(res, err.message || "Failed to upload media", 500);
   }
 };
@@ -79,6 +69,7 @@ exports.uploadAdvertisingMedia = async (req, res) => {
 exports.getMediaByType = async (req, res) => {
   try {
     const { mediaType } = req.params;
+    const { buildingId } = req.query;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -87,7 +78,9 @@ exports.getMediaByType = async (req, res) => {
       return sendError(res, "Invalid media type", 400);
     }
 
-    const filter = { mediaType, isActive: true };
+    if (!buildingId) return sendError(res, "Building ID is required", 400);
+
+    const filter = { mediaType, isActive: true, buildingId };
 
     const [media, total] = await Promise.all([
       AdvertisingMedia.find(filter)
