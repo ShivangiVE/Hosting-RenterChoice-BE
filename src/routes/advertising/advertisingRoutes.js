@@ -8,6 +8,7 @@ const {
   toggleMediaStatus,
   deleteMultipleMedia,
   downloadAdvertisingMedia,
+  reorderMedia,
 } = require("../../controllers/Advertising/AdvertisingController");
 
 const router = express.Router();
@@ -57,5 +58,8 @@ router.get(
   authorize(...ALLOWED_ROLES),
   downloadAdvertisingMedia
 );
+
+// Reorder media
+router.put("/reorder", protect, authorize(...ALLOWED_ROLES), reorderMedia);
 
 module.exports = router;

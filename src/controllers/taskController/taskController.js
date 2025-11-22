@@ -4,6 +4,7 @@ const Category = require("../../models/repairCategories");
 const { sendSuccess, sendError } = require("../../utils/response");
 const Counter = require("../../utils/Counter");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
+const Todo = require("../../models/tasks/Todo");
 
 // Increment counter
 const getNextSequence = async (sequenceName) => {
@@ -514,5 +515,84 @@ exports.bulkDeleteTasks = async (req, res) => {
     return sendSuccess(res, "Bulk delete operation completed", { results });
   } catch (err) {
     return sendError(res, err.message || "Failed to bulk delete tasks", 500);
+  }
+};
+
+// Tasks and Todos Combined
+exports.getMyTasks = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const [tasks, todos] = await Promise.all([
+      Task.find({
+        assignedTo: userId,
+        status: "In Progress",
+      })
+        .populate("category", "name")
+        .populate("assignedTo", "preferredName email")
+        .populate("createdBy", "preferredName email"),
+
+      Todo.find({
+        assignedTo: userId,
+        status: "In Progress",
+      })
+        .populate("category", "name")
+        .populate("assignedTo", "preferredName email")
+        .populate("createdBy", "preferredName email"),
+    ]);
+
+    // Normalize result for merged array
+    const mappedTasks = tasks.map((t) => ({
+      _id: t._id,
+      type: "Task",
+      description: t.description,
+      category: t.category?.name,
+      dueDate: t.dueDate,
+      createdAt: t.createdAt,
+
+      taskNumber: t.taskNumber,
+      status: t.status,
+      taskColor: t.taskColor,
+      closingComments: t.closingComments,
+      completedAt: t.completedAt,
+      assignedTo: t.assignedTo,
+      attachments: t.attachments,
+      createdBy: t.createdBy,
+      tags: t.tags,
+    }));
+
+    const mappedTodos = todos.map((t) => ({
+      _id: t._id,
+      type: "Todo",
+      description: t.description,
+      category: t.category?.name,
+      createdAt: t.createdAt,
+
+      todoNumber: t.todoNumber,
+      status: t.status,
+      todoColor: t.todoColor,
+      closingComments: t.closingComments,
+      completedAt: t.completedAt,
+      assignedTo: t.assignedTo,
+      attachments: t.attachments,
+      createdBy: t.createdBy,
+      tags: t.tags,
+    }));
+
+    const combined = [...mappedTasks, ...mappedTodos].sort(
+      (a, b) => b.createdAt - a.createdAt
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        tasks: mappedTasks,
+        todos: mappedTodos,
+        combined,
+      },
+    });
+  } catch (error) {
+    console.error("getMyWork error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };

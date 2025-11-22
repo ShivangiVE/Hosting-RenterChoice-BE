@@ -5,6 +5,7 @@ const User = require("../../models/User");
 const WODynamicStatus = require("../../models/WODynamicStatus");
 const WorkOrder = require("../../models/WorkOrder");
 const Counter = require("../../utils/Counter");
+const { TYPE_MAP, normalize } = require("../../utils/inspectionType");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 
@@ -555,13 +556,21 @@ exports.getInspectionRequests = async (req, res) => {
     if (status && status !== "All") filter.status = status;
     // if (type && type !== "All") filter.inspectionType = type;
 
-    // Updated Filter for Marketing Module
+    // Updated Filter for Inspection Type (Marketing + Move-out, SAFE)
     if (type && type !== "All") {
-      if (type.toLowerCase() === "marketing") {
-        // Case-insensitive exact match for "marketing"
-        filter.inspectionType = { $regex: /^marketing$/i };
+      const normalizedType = normalize(type);
+
+      if (normalizedType === "marketing") {
+        filter.inspectionType = { $regex: TYPE_MAP.marketing };
+      } else if (
+        normalizedType === "moveout" ||
+        normalizedType === "moveoutinspection"
+      ) {
+        filter.inspectionType = {
+          $regex: TYPE_MAP.moveoutinspection,
+        };
       } else {
-        // Normal exact match for other types
+        // Default exact match (preserves old functionality)
         filter.inspectionType = type;
       }
     }
@@ -572,6 +581,7 @@ exports.getInspectionRequests = async (req, res) => {
       }).distinct("_id");
       filter.assignedTo = { $in: matchedUsers };
     }
+
     if (building && building !== "All")
       filter["building.formData.address"] = new RegExp(building, "i");
     if (portfolio && portfolio !== "All")
@@ -624,6 +634,33 @@ exports.getInspectionRequests = async (req, res) => {
       }
     }
 
+    let sortQuery = { createdAt: -1 };
+
+    if (req.query.sortBy) {
+      const field = req.query.sortBy;
+      const direction = req.query.sortOrder === "desc" ? -1 : 1;
+
+      const sortableFields = [
+        "inspectionNumber",
+        "inspectionType",
+        "dueDate",
+        "scheduleDate",
+      ];
+
+      if (sortableFields.includes(field)) {
+        sortQuery = { [field]: direction };
+      }
+
+      // Special handling for nested fields
+      if (field === "community") {
+        sortQuery = { "building.formData.city": direction };
+      }
+
+      if (field === "address") {
+        sortQuery = { "building.formData.address": direction };
+      }
+    }
+
     // Global search
     if (search && search.trim() !== "") {
       const regex = new RegExp(search, "i");
@@ -656,7 +693,7 @@ exports.getInspectionRequests = async (req, res) => {
       })
       .populate("assignedTo", "preferredName email")
       .populate("createdBy", "preferredName email")
-      .sort({ createdAt: -1 })
+      .sort(sortQuery)
       .skip(skip)
       .limit(limit);
 
