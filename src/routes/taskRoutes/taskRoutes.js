@@ -12,6 +12,7 @@ const {
   bulkDeleteTasks,
   getTaskDetails,
   getTasksByTags,
+  getMyTasks,
 } = require("../../controllers/taskController/taskController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { taskUpload } = require("../../middleware/repairUpload");
@@ -41,6 +42,9 @@ router.get("/", protect, getTasks);
 
 // GET Tasks by Tags (Portfolio/Building)
 router.get("/by-tags", protect, authorize(...ALLOWED_ROLES), getTasksByTags);
+
+// Task and Todos Combine
+router.get("/my-tasks", protect, authorize(...ALLOWED_ROLES), getMyTasks);
 
 // Get Task Details by ID
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getTaskDetails);

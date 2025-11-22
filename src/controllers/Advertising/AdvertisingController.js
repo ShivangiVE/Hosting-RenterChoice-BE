@@ -8,6 +8,7 @@ const {
   getFileStream,
   uploadFile,
 } = require("../../utils/storageService");
+const { processImageFile } = require("../../utils/resizeImage");
 
 // Helper function to determine media type
 const getMediaType = (mimeType) => {
@@ -27,26 +28,36 @@ exports.uploadAdvertisingMedia = async (req, res) => {
     }
 
     const uploadedMedia = [];
+
     for (let file of req.files) {
       const mediaType = getMediaType(file.mimetype);
+
       if (!mediaType) {
-        await deleteFile(file.path);
         return sendError(res, "Invalid file type", 400);
       }
 
+      let processedFile = file;
+
+      // Process images (resize + compress)
+      if (mediaType === "image") {
+        processedFile = await processImageFile(file);
+      }
+
+      // Upload processed file to storage
       const fileUrl = await uploadFile(
-        file,
+        processedFile,
         `uploads/advertising/${mediaType}s`
       );
 
+      // Save in DB
       const media = await AdvertisingMedia.create({
-        fileName: file.originalname,
+        fileName: processedFile.originalname,
         mediaType,
-        mimeType: file.mimetype,
-        fileSize: file.size,
+        mimeType: processedFile.mimetype,
+        fileSize: processedFile.size,
         fileUrl,
         uploadedBy: req.user._id,
-        buildingId, // 👈 store building ID
+        buildingId,
       });
 
       await media.populate("uploadedBy", "preferredName email");
@@ -85,7 +96,7 @@ exports.getMediaByType = async (req, res) => {
     const [media, total] = await Promise.all([
       AdvertisingMedia.find(filter)
         .populate("uploadedBy", "preferredName email")
-        .sort({ createdAt: -1 })
+        .sort({ order: 1 })
         .skip(skip)
         .limit(limit),
       AdvertisingMedia.countDocuments(filter),
@@ -201,5 +212,26 @@ exports.downloadAdvertisingMedia = async (req, res) => {
   } catch (err) {
     console.error("Error downloading media:", err);
     return sendError(res, err.message || "Failed to download media", 500);
+  }
+};
+
+// Reorder media items
+exports.reorderMedia = async (req, res) => {
+  try {
+    const { orderedIds } = req.body;
+
+    if (!orderedIds || !Array.isArray(orderedIds)) {
+      return sendError(res, "Invalid format", 400);
+    }
+
+    await Promise.all(
+      orderedIds.map((id, index) =>
+        AdvertisingMedia.findByIdAndUpdate(id, { order: index })
+      )
+    );
+
+    return sendSuccess(res, "Order updated successfully");
+  } catch (err) {
+    return sendError(res, err.message || "Failed to update order", 500);
   }
 };
