@@ -18,7 +18,12 @@ const fetchBuildingsAndPortfolios = async () => {
 
 exports.exportData = async (req, res) => {
   try {
-    const { ids, module: documentType, format = "pdf" } = req.body;
+    const {
+      ids,
+      module: documentType,
+      format = "pdf",
+      preview = false,
+    } = req.body;
 
     if (!documentType)
       return sendError(res, "module (documentType) is required", 400);
@@ -136,7 +141,12 @@ exports.exportData = async (req, res) => {
         ? "application/pdf"
         : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    const dispositionType = preview ? "inline" : "attachment";
+    res.setHeader(
+      "Content-Disposition",
+      `${dispositionType}; filename="${fileName}"`
+    );
     res.setHeader("Content-Length", buffer.length);
 
     return res.send(buffer);
