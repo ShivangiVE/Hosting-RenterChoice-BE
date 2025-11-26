@@ -18,19 +18,38 @@ const fetchBuildingsAndPortfolios = async () => {
 
 exports.exportData = async (req, res) => {
   try {
-    const {
-      ids,
-      module: documentType,
-      format = "pdf",
-      preview = false,
-    } = req.body;
+    // Accept ids from GET ?ids=1,2,3 or POST body
+    const idsInput = req.body.ids || req.query.ids;
 
-    if (!documentType)
+    // Accept module from GET or POST
+    const documentType = req.body.module || req.query.module;
+
+    // Accept format
+    const format = req.body.format || req.query.format || "pdf";
+
+    // Preview mode (true = inline view)
+    const preview =
+      req.body.preview === true ||
+      req.body.preview === "true" ||
+      req.query.preview === "true";
+
+    // ---- Validate Inputs ----
+    if (!documentType) {
       return sendError(res, "module (documentType) is required", 400);
-    if (!ids || !Array.isArray(ids) || ids.length === 0)
-      return sendError(res, "ids array required", 400);
+    }
 
-    // Model map
+    // Convert ids to array
+    let ids = [];
+    if (Array.isArray(idsInput)) {
+      ids = idsInput;
+    } else if (typeof idsInput === "string") {
+      ids = idsInput.split(","); // "1,2,3"
+    }
+
+    if (!ids.length) {
+      return sendError(res, "ids array required", 400);
+    }
+
     const moduleMap = {
       task: require("../../models/tasks/Task"),
       todo: require("../../models/tasks/Todo"),
@@ -40,7 +59,16 @@ exports.exportData = async (req, res) => {
       inspectionRequest: require("../../models/InspectionRequest"),
     };
 
-    // Populate rules map
+    const Model = moduleMap[documentType];
+    if (!Model) {
+      return sendError(
+        res,
+        `Invalid module: ${documentType}. No model registered.`,
+        400
+      );
+    }
+
+    // ---- POPULATE RULES ----
     const populateMap = {
       task: [
         { path: "category", select: "name" },
@@ -69,7 +97,6 @@ exports.exportData = async (req, res) => {
         { path: "dynamicStatus", select: "name description" },
         { path: "createdBy", select: "preferredName email" },
       ],
-
       serviceAgreement: [
         {
           path: "building",
@@ -83,7 +110,6 @@ exports.exportData = async (req, res) => {
         { path: "category", select: "name" },
         { path: "createdBy", select: "preferredName email" },
       ],
-
       inspectionRequest: [
         {
           path: "building",
@@ -98,31 +124,24 @@ exports.exportData = async (req, res) => {
       ],
     };
 
-    // Select Model
-    const Model = moduleMap[documentType];
-    if (!Model)
-      return sendError(
-        res,
-        `No model registered for module: ${documentType}`,
-        400
-      );
-
+    // -------- Query Records --------
     let query = Model.find({ _id: { $in: ids } }).sort({ createdAt: -1 });
 
     if (populateMap[documentType]) {
-      populateMap[documentType].forEach((pop) => {
-        query = query.populate(pop);
-      });
+      populateMap[documentType].forEach((p) => (query = query.populate(p)));
     }
 
     const items = await query;
 
-    if (!items || items.length === 0)
+    if (!items || items.length === 0) {
       return sendError(res, "No items found for provided ids", 404);
+    }
 
+    // Fetch related data
     const { buildings, portfolios, categories } =
       await fetchBuildingsAndPortfolios();
 
+    // Generate PDF/Excel buffer
     const buffer = await generateExport({
       items,
       documentType,
@@ -132,9 +151,11 @@ exports.exportData = async (req, res) => {
       categories,
     });
 
+    // Final filename
     const ext = format === "pdf" ? "pdf" : "xlsx";
     const fileName = `${documentType}_export_${Date.now()}.${ext}`;
 
+    // Headers
     res.setHeader(
       "Content-Type",
       format === "pdf"
@@ -142,11 +163,13 @@ exports.exportData = async (req, res) => {
         : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
 
-    const dispositionType = preview ? "inline" : "attachment";
     res.setHeader(
       "Content-Disposition",
-      `${dispositionType}; filename="${fileName}"`
+      `${preview ? "inline" : "attachment"}; filename="${fileName}"`
     );
+
+    res.setHeader("X-Filename", fileName);
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Length", buffer.length);
 
     return res.send(buffer);

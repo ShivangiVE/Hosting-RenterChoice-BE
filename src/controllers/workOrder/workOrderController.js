@@ -253,6 +253,159 @@ exports.getWorkOrders = async (req, res) => {
   }
 };
 
+// Get Vendor Assigned Work Orders
+exports.getVendorWorkOrders = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const {
+      status,
+      category,
+      search,
+      dynamicStatus,
+      dueDate,
+      sortBy,
+      sortOrder = "asc",
+    } = req.query;
+
+    let filter = { vendor: vendorId };
+
+    // Status support for your UI tabs
+    if (status && status !== "All") filter.status = status.toLowerCase();
+
+    if (category && category !== "All") filter.category = category;
+
+    if (dynamicStatus && dynamicStatus !== "All") {
+      const dyn = await WODynamicStatus.findOne({
+        $or: [{ _id: dynamicStatus }, { name: new RegExp(dynamicStatus, "i") }],
+      });
+      if (dyn) filter.dynamicStatus = dyn._id;
+    }
+
+    // Due Date filter
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+
+      filter.dueDate = { $gte: start, $lte: end };
+    }
+
+    // if (dueDateRange && dueDateRange !== "All") {
+    //   const start = new Date();
+    //   const end = new Date();
+
+    //   start.setHours(0, 0, 0, 0);
+    //   end.setHours(23, 59, 59, 999);
+
+    //   if (dueDateRange === "today") {
+    //     filter.dueDate = { $gte: start, $lte: end };
+    //   }
+
+    //   if (dueDateRange === "tomorrow") {
+    //     const t1 = new Date(start);
+    //     const t2 = new Date(end);
+    //     t1.setDate(t1.getDate() + 1);
+    //     t2.setDate(t2.getDate() + 1);
+
+    //     filter.dueDate = { $gte: t1, $lte: t2 };
+    //   }
+
+    //   if (dueDateRange === "overdue") {
+    //     filter.dueDate = { $lt: start };
+    //     filter.status = { $ne: "closed" };
+    //   }
+
+    //   if (dueDateRange === "week") {
+    //     const weekEnd = new Date(start);
+    //     weekEnd.setDate(weekEnd.getDate() + 7);
+    //     filter.dueDate = { $gte: start, $lte: weekEnd };
+    //   }
+
+    //   if (dueDateRange === "month") {
+    //     const monthEnd = new Date(start);
+    //     monthEnd.setMonth(monthEnd.getMonth() + 1);
+    //     filter.dueDate = { $gte: start, $lte: monthEnd };
+    //   }
+    // }
+
+    if (search && search.trim() !== "") {
+      const regex = new RegExp(search, "i");
+
+      // Find buildings matching the search text
+      const buildingIds = await Building.find({
+        $or: [{ "formData.address": regex }, { buildingAbbreviation: regex }],
+      }).distinct("_id");
+
+      filter.$or = [
+        // { workOrderNumber: regex },
+        // { description: regex },
+        { building: { $in: buildingIds } },
+      ];
+    }
+
+    // SORTING LOGIC
+    let sortQuery = {};
+
+    if (sortBy) {
+      let key = sortBy;
+      let direction = sortOrder === "asc" ? 1 : -1;
+
+      if (sortBy === "workStatus") {
+        key = "status";
+      }
+
+      if (
+        sortBy === "dueDate" ||
+        sortBy === "completedDate" ||
+        sortBy === "declinedDate"
+      ) {
+        key =
+          sortBy === "dueDate"
+            ? "dueDate"
+            : sortBy === "completedDate"
+            ? "completeDate"
+            : "updatedAt";
+      }
+
+      sortQuery[key] = direction;
+    } else {
+      // Default sort
+      sortQuery["createdAt"] = -1;
+    }
+
+    const workOrders = await WorkOrder.find(filter)
+      .populate(
+        "building",
+        "formData.address formData.city buildingAbbreviation status"
+      )
+      .populate("category", "name")
+      .populate("dynamicStatus", "name description isDefault")
+      .sort(sortQuery)
+      .skip(skip)
+      .limit(limit);
+
+    const total = await WorkOrder.countDocuments(filter);
+
+    return sendSuccess(res, "Vendor work orders fetched", {
+      workOrders,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total,
+      },
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch vendor work orders");
+  }
+};
+
 // Get Work Orders by Building
 exports.getWorkOrdersByBuilding = async (req, res) => {
   try {
@@ -426,8 +579,30 @@ exports.closeWorkOrder = async (req, res) => {
         .json({ success: false, message: "Work order not found" });
     }
 
+    /**
+     * 📌 Vendor Security Rule
+     * Vendors can ONLY close work orders assigned to them.
+     * Internal roles skip this check.
+     */
+    if (req.user.role === "Vendor") {
+      if (!workOrder.vendor) {
+        return res.status(403).json({
+          success: false,
+          message: "This work order is not assigned to any vendor",
+        });
+      }
+
+      if (workOrder.vendor.toString() !== req.user._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not allowed to close this work order",
+        });
+      }
+    }
+
     workOrder.status = "closed";
     workOrder.completeDate = new Date();
+
     if (comments) {
       workOrder.closingComments = comments;
     }
