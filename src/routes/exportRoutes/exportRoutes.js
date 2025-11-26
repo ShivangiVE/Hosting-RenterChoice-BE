@@ -14,6 +14,7 @@ const ALLOWED_ROLES = [
   "MarketingTeam",
   "LandlordsTeam",
   "InspectionClerk",
+  "Vendor",
 ];
 
 router.post("/", protect, authorize(...ALLOWED_ROLES), exportData);

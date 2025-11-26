@@ -29,6 +29,7 @@ const {
   getWorkOrdersByBuilding,
   getInspectionRequestsByBuilding,
   getServiceAgreementsByBuilding,
+  getVendorWorkOrders,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -44,6 +45,8 @@ const ALLOWED_ROLES = [
   "InspectionClerk",
 ];
 
+const Extra_Roles = [...ALLOWED_ROLES, "Vendor"];
+
 // ========================= Work Orders =========================
 router.post(
   "/work-order",
@@ -53,7 +56,15 @@ router.post(
   createWorkOrder
 );
 
-router.get("/work-orders", protect, getWorkOrders);
+router.get("/work-orders", protect, authorize(...ALLOWED_ROLES), getWorkOrders);
+
+// Get Work Orders for vendor
+router.get(
+  "/vendor/my-work-orders",
+  protect,
+  authorize("Vendor"),
+  getVendorWorkOrders
+);
 
 // Get Work Orders by Building
 router.get(
@@ -83,7 +94,7 @@ router.put(
 router.put(
   "/work-orders/:id/close",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...Extra_Roles),
   closeWorkOrder
 );
 
