@@ -8,6 +8,8 @@ const {
   deleteNote,
   getNotesByBuilding,
   getNotesByPortfolio,
+  vendorCreateNote,
+  getNotesByWorkOrder,
 } = require("../../controllers/notes&Documents/NoteController");
 
 const router = express.Router();
@@ -23,21 +25,43 @@ const ALLOWED_ROLES = [
   "InspectionClerk",
 ];
 
+// const Extra_Roles = [...ALLOWED_ROLES, "Vendor"];
+
 // All routes are protected
 router.post("/create", protect, authorize(...ALLOWED_ROLES), createNote);
+
+// Notes Created by vendor
+router.post(
+  "/vendor-create/:workOrderId",
+  protect,
+  authorize("Vendor"),
+  vendorCreateNote
+);
+
 router.get("/", protect, authorize(...ALLOWED_ROLES), getNotes);
+
 router.get(
   "/building/:buildingId",
   protect,
   authorize(...ALLOWED_ROLES),
   getNotesByBuilding
 );
+
 router.get(
   "/portfolio/:portfolioId",
   protect,
   authorize(...ALLOWED_ROLES),
   getNotesByPortfolio
 );
+
+// Get Notes By Work Order
+router.get(
+  "/work-order/:workOrderId",
+  protect,
+  authorize(...ALLOWED_ROLES, "Vendor"),
+  getNotesByWorkOrder
+);
+
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getNoteById);
 router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateNote);
 router.delete("/:id", protect, authorize(...ALLOWED_ROLES), deleteNote);

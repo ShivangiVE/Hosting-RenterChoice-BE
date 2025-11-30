@@ -46,6 +46,12 @@ const documentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Portfolio",
     },
+
+    workOrder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WorkOrder",
+    },
+
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

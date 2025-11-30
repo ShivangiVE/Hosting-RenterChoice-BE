@@ -11,6 +11,7 @@ const {
   getFileStream,
   fileExists,
 } = require("../../utils/storageService");
+const WorkOrder = require("../../models/WorkOrder");
 
 // Helper function to determine file type from mime type
 const getFileType = (mimeType) => {
@@ -155,6 +156,138 @@ exports.uploadDocuments = async (req, res) => {
   }
 };
 
+// Upload documents by Vendor for a specific Work Order
+exports.vendorUploadDocuments = async (req, res) => {
+  try {
+    const { workOrderId } = req.params;
+    const vendorId = req.user._id;
+
+    if (!req.files || req.files.length === 0) {
+      return sendError(res, "No files uploaded", 400);
+    }
+
+    // Ensure the work order belongs to the logged-in vendor
+    const workOrder = await WorkOrder.findOne({
+      _id: workOrderId,
+      vendor: vendorId,
+    }).populate("building");
+
+    if (!workOrder) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (err) {}
+      });
+      return sendError(
+        res,
+        "You are not allowed to upload documents for this work order",
+        403
+      );
+    }
+
+    if (!workOrder.building) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (err) {}
+      });
+      return sendError(
+        res,
+        "No building is associated with this work order",
+        400
+      );
+    }
+
+    // ✔ Auto-detect / auto-create Vendor category (same as vendor notes)
+    let vendorCategory = await NoteCategory.findOne({
+      name: { $regex: /^vendor$/i },
+    });
+
+    if (!vendorCategory) {
+      vendorCategory = await NoteCategory.create({
+        name: "Vendor",
+        createdBy: vendorId,
+      });
+    }
+
+    const finalCategory = vendorCategory._id;
+
+    // Parse metadata (we ignore category sent by FE now)
+    const { documents } = req.body;
+    let documentsMetadata = [];
+
+    if (documents) {
+      try {
+        documentsMetadata = JSON.parse(documents);
+      } catch (err) {
+        console.error("Error parsing documents metadata:", err);
+      }
+    }
+
+    const uploadedDocuments = [];
+
+    // Upload each file
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const metadata = documentsMetadata[i] || {};
+
+      // Upload file to storage (S3/local)
+      const fileUrl = await uploadFile(file, "uploads/documents");
+
+      // Create document with auto category: Vendor
+      const document = await Document.create({
+        fileName: metadata.fileName || file.originalname,
+        originalFileName: file.originalname,
+        description: metadata.description || "",
+        category: finalCategory, // ✔ Always Vendor category
+        fileType: getFileType(file.mimetype),
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        fileUrl,
+        workOrder: workOrder._id,
+        building: null,
+        portfolio: null,
+        uploadedBy: vendorId,
+      });
+
+      await document.populate([
+        { path: "category", select: "name" },
+        {
+          path: "uploadedBy",
+          select: "preferredName technicianName companyName email",
+        },
+        { path: "building", select: "buildingAbbreviation formData.address" },
+        { path: "portfolio", select: "portfolioAbbreviation formData.name" },
+      ]);
+
+      uploadedDocuments.push(document);
+    }
+
+    return sendSuccess(
+      res,
+      "Vendor documents uploaded successfully",
+      { documents: uploadedDocuments },
+      201
+    );
+  } catch (err) {
+    console.error("Error uploading vendor documents:", err);
+
+    if (req.files) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (unlinkErr) {}
+      });
+    }
+
+    return sendError(
+      res,
+      err.message || "Failed to upload vendor documents",
+      500
+    );
+  }
+};
+
 // Get all documents with filtering
 exports.getDocuments = async (req, res) => {
   try {
@@ -212,8 +345,11 @@ exports.getDocuments = async (req, res) => {
     // Fetch documents with pagination
     const [documents, total] = await Promise.all([
       Document.find(filter)
-        .populate("category", "name") // Populate category
-        .populate("uploadedBy", "preferredName email")
+        .populate("category", "name")
+        .populate(
+          "uploadedBy",
+          "preferredName technicianName companyName email"
+        )
         .populate("building", "buildingAbbreviation formData.address")
         .populate("portfolio", "portfolioAbbreviation formData.name")
         .sort({ createdAt: -1 })
@@ -272,7 +408,10 @@ exports.getDocumentsByBuilding = async (req, res) => {
     const [documents, total] = await Promise.all([
       Document.find(filter)
         .populate("category", "name") // Populate category
-        .populate("uploadedBy", "preferredName email")
+        .populate(
+          "uploadedBy",
+          "preferredName technicianName companyName email"
+        )
         .populate("building", "buildingAbbreviation formData.address")
         .populate("portfolio", "portfolioAbbreviation formData.name")
         .sort({ createdAt: -1 })
@@ -355,6 +494,40 @@ exports.getDocumentsByPortfolio = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch documents by portfolio",
+      500
+    );
+  }
+};
+
+// Get Documents by Work Order
+exports.getDocumentsByWorkOrder = async (req, res) => {
+  try {
+    const { workOrderId } = req.params;
+
+    // Validate Work Order
+    const workOrder = await WorkOrder.findById(workOrderId);
+    if (!workOrder) {
+      return sendError(res, "Work Order not found", 404);
+    }
+
+    // Fetch documents linked ONLY to this work order
+    const documents = await Document.find({ workOrder: workOrderId })
+      .populate("category", "name")
+      .populate("uploadedBy", "preferredName technicianName companyName email")
+      .populate("building", "buildingAbbreviation formData.address")
+      .populate("portfolio", "portfolioAbbreviation formData.name")
+      .sort({ createdAt: -1 });
+
+    return sendSuccess(
+      res,
+      "Work order documents fetched successfully",
+      documents
+    );
+  } catch (err) {
+    console.error("Error fetching work order documents:", err);
+    return sendError(
+      res,
+      err.message || "Failed to fetch work order documents",
       500
     );
   }
