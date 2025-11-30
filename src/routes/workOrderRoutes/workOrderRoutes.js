@@ -30,6 +30,8 @@ const {
   getInspectionRequestsByBuilding,
   getServiceAgreementsByBuilding,
   getVendorWorkOrders,
+  vendorUpdateWorkOrder,
+  vendorBulkUpdateWorkOrderStatus,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -89,6 +91,22 @@ router.put(
   protect,
   authorize(...ALLOWED_ROLES),
   updateWorkOrderStatus
+);
+
+// Vendor Update Work Order
+router.put(
+  "/vendor/work-orders/:id/status",
+  protect,
+  authorize("Vendor"),
+  vendorUpdateWorkOrder
+);
+
+// Vendor — Bulk Update Work Order Status
+router.post(
+  "/vendor/work-orders/bulk-status",
+  protect,
+  authorize("Vendor"),
+  vendorBulkUpdateWorkOrderStatus
 );
 
 router.put(

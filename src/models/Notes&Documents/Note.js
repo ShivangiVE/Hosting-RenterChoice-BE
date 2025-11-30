@@ -25,6 +25,12 @@ const noteSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Portfolio",
     },
+
+    workOrder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WorkOrder",
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

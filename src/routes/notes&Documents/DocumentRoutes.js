@@ -10,6 +10,8 @@ const {
   updateDocument,
   deleteDocument,
   downloadDocument,
+  vendorUploadDocuments,
+  getDocumentsByWorkOrder,
 } = require("../../controllers/notes&Documents/DocumentController");
 
 const router = express.Router();
@@ -34,6 +36,15 @@ router.post(
   uploadDocuments
 );
 
+// Upload documents by Vendor for a specific Work Order
+router.post(
+  "/vendor-upload/:workOrderId",
+  protect,
+  authorize("Vendor"),
+  documentUpload.array("files", 10),
+  vendorUploadDocuments
+);
+
 // Get all documents
 router.get("/", protect, authorize(...ALLOWED_ROLES), getDocuments);
 
@@ -51,6 +62,14 @@ router.get(
   protect,
   authorize(...ALLOWED_ROLES),
   getDocumentsByPortfolio
+);
+
+// Get documents by Vendor
+router.get(
+  "/work-order/:workOrderId",
+  protect,
+  authorize(...ALLOWED_ROLES, "Vendor"),
+  getDocumentsByWorkOrder
 );
 
 // Get single document

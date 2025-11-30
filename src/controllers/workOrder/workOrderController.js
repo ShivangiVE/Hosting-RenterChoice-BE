@@ -358,7 +358,7 @@ exports.getVendorWorkOrders = async (req, res) => {
       let direction = sortOrder === "asc" ? 1 : -1;
 
       if (sortBy === "workStatus") {
-        key = "status";
+        key = "dynamicStatus";
       }
 
       if (
@@ -466,7 +466,7 @@ exports.getWorkOrder = async (req, res) => {
     const workOrder = await WorkOrder.findById(id)
       .populate({
         path: "building",
-        select: "buildingAbbreviation formData.address portfolio",
+        select: "buildingAbbreviation formData.address portfolio status",
         populate: {
           path: "portfolio",
           select: "portfolioAbbreviation formData.name",
@@ -525,6 +525,92 @@ exports.updateWorkOrder = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err.message || "Failed to update work order", 500);
+  }
+};
+
+// Vendor Update Work Order
+exports.vendorUpdateWorkOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const allowed = ["dynamicStatus"];
+    const invalid = Object.keys(updates).filter(
+      (key) => !allowed.includes(key)
+    );
+
+    if (invalid.length > 0) {
+      return sendError(res, `You cannot update: ${invalid.join(", ")}`, 400);
+    }
+
+    if (updates.dynamicStatus) {
+      const statusExists = await WODynamicStatus.findById(
+        updates.dynamicStatus
+      );
+      if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
+    }
+
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    if (workOrder.vendor.toString() !== req.user._id.toString()) {
+      return sendError(res, "Unauthorized vendor", 403);
+    }
+
+    Object.assign(workOrder, updates);
+    await workOrder.save();
+
+    const updated = await WorkOrder.findById(id).populate(
+      "dynamicStatus",
+      "name description"
+    );
+
+    return sendSuccess(res, "Work order updated", { workOrder: updated });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to update work order", 500);
+  }
+};
+
+// Vendor Bulk Update Work Order Status
+exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+    const { ids, dynamicStatus } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return sendError(res, "No work order IDs provided", 400);
+    }
+
+    if (!dynamicStatus) {
+      return sendError(res, "dynamicStatus is required", 400);
+    }
+
+    // Validate Status
+    const statusExists = await WODynamicStatus.findById(dynamicStatus);
+    if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
+
+    // Ensure vendor owns all work orders
+    const workOrders = await WorkOrder.find({
+      _id: { $in: ids },
+      vendor: vendorId,
+    });
+
+    if (workOrders.length !== ids.length) {
+      return sendError(
+        res,
+        "One or more work orders do not belong to this vendor",
+        403
+      );
+    }
+
+    // Bulk update
+    await WorkOrder.updateMany({ _id: { $in: ids } }, { dynamicStatus });
+
+    return sendSuccess(res, "Statuses updated successfully", {
+      updatedCount: ids.length,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Bulk update failed", 500);
   }
 };
 

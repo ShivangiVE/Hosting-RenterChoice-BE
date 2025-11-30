@@ -3,10 +3,19 @@ const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
 const Building = require("../../models/Building");
 const Portfolio = require("../../models/Portfolio");
 const { sendSuccess, sendError } = require("../../utils/response");
+const WorkOrder = require("../../models/WorkOrder");
 
 // Create Note
 exports.createNote = async (req, res) => {
   try {
+    if (req.user.role === "Vendor") {
+      return sendError(
+        res,
+        "Vendors cannot create notes using this endpoint",
+        403
+      );
+    }
+
     const { subject, description, category, building, portfolio } = req.body;
 
     // Validation
@@ -66,6 +75,64 @@ exports.createNote = async (req, res) => {
   }
 };
 
+// Create Note by Vendor
+exports.vendorCreateNote = async (req, res) => {
+  try {
+    const { workOrderId } = req.params;
+    const { description } = req.body;
+    const vendorId = req.user._id;
+
+    // Validate
+    if (!description || !description.trim()) {
+      return sendError(res, "Description is required", 400);
+    }
+
+    const workOrder = await WorkOrder.findOne({
+      _id: workOrderId,
+      vendor: vendorId,
+    }).populate("building");
+
+    if (!workOrder) {
+      return sendError(
+        res,
+        "You are not allowed to add notes for this work order",
+        403
+      );
+    }
+
+    //  Check if a Vendor category exists (case-insensitive)
+    let vendorCategory = await NoteCategory.findOne({
+      name: { $regex: /^vendor$/i },
+    });
+
+    // If not found → auto-create default Vendor category
+    if (!vendorCategory) {
+      vendorCategory = await NoteCategory.create({
+        name: "Vendor",
+        createdBy: vendorId,
+      });
+    }
+
+    const finalCategory = vendorCategory._id;
+
+    // Subject is generated on server
+    const subject = "Message from Vendor";
+
+    const note = await Note.create({
+      subject,
+      description,
+      category: finalCategory,
+      workOrder: workOrder._id,
+      createdBy: vendorId,
+    });
+
+    return sendSuccess(res, "Vendor note created successfully", { note });
+  } catch (err) {
+    console.error("Vendor note creation failed:", err);
+    return sendError(res, "Failed to create vendor note", 500);
+  }
+};
+
 // Get All Notes with filtering by building/portfolio
 exports.getNotes = async (req, res) => {
   try {
@@ -111,7 +178,7 @@ exports.getNotes = async (req, res) => {
     const [notes, total] = await Promise.all([
       Note.find(filter)
         .populate("category", "name")
-        .populate("createdBy", "preferredName email")
+        .populate("createdBy", "preferredName technicianName companyName email")
         .populate("building", "buildingAbbreviation formData.address")
         .populate("portfolio", "portfolioAbbreviation formData.name")
         .sort({ createdAt: -1 })
@@ -254,6 +321,22 @@ exports.getNotesByPortfolio = async (req, res) => {
   }
 };
 
+// Get Notes by Portfolio
+exports.getNotesByWorkOrder = async (req, res) => {
+  try {
+    const { workOrderId } = req.params;
+
+    const notes = await Note.find({ workOrder: workOrderId })
+      .populate("category", "name")
+      .populate("createdBy", "preferredName technicianName companyName email")
+      .sort({ createdAt: -1 });
+
+    return sendSuccess(res, "Work order notes fetched", notes);
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch notes", 500);
+  }
+};
+
 // Get Single Note by ID
 exports.getNoteById = async (req, res) => {
   try {
@@ -261,7 +344,7 @@ exports.getNoteById = async (req, res) => {
 
     const note = await Note.findById(id)
       .populate("category", "name")
-      .populate("createdBy", "preferredName email")
+      .populate("createdBy", "preferredName technicianName companyName email")
       .populate("building", "buildingAbbreviation formData.address")
       .populate("portfolio", "portfolioAbbreviation formData.name");
 
