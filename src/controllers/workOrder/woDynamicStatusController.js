@@ -8,7 +8,10 @@ exports.createStatus = async (req, res) => {
     if (!name) return sendError(res, "Status name is required", 400);
 
     // Prevent duplicates
-    const exists = await WODynamicStatus.findOne({ name });
+    const exists = await WODynamicStatus.findOne({
+      name: { $regex: `^${name}$`, $options: "i" },
+    });
+
     if (exists) return sendError(res, "Status already exists", 400);
 
     // If marking as default, unset previous default

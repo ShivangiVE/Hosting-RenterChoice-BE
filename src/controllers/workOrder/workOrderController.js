@@ -5,6 +5,7 @@ const User = require("../../models/User");
 const WODynamicStatus = require("../../models/WODynamicStatus");
 const WorkOrder = require("../../models/WorkOrder");
 const Counter = require("../../utils/Counter");
+const { findDynamicStatus } = require("../../utils/dynamicStatus");
 const { TYPE_MAP, normalize } = require("../../utils/inspectionType");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
@@ -280,10 +281,8 @@ exports.getVendorWorkOrders = async (req, res) => {
     if (category && category !== "All") filter.category = category;
 
     if (dynamicStatus && dynamicStatus !== "All") {
-      const dyn = await WODynamicStatus.findOne({
-        $or: [{ _id: dynamicStatus }, { name: new RegExp(dynamicStatus, "i") }],
-      });
-      if (dyn) filter.dynamicStatus = dyn._id;
+      const dyn = await findDynamicStatus(dynamicStatus);
+      filter.dynamicStatus = dyn ? dyn._id : null;
     }
 
     // Due Date filter
