@@ -259,12 +259,12 @@ exports.getVendorWorkOrders = async (req, res) => {
   try {
     const vendorId = req.user._id;
 
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
     const {
-      status,
+      tab,
       category,
       search,
       dynamicStatus,
@@ -275,117 +275,155 @@ exports.getVendorWorkOrders = async (req, res) => {
 
     let filter = { vendor: vendorId };
 
-    // Status support for your UI tabs
-    if (status && status !== "All") filter.status = status.toLowerCase();
+    //  TAB LOGIC (Primary rules)
+    if (tab === "Pending") {
+      const excluded = await WODynamicStatus.find({
+        name: { $in: ["Completed", "Declined"] },
+      }).distinct("_id");
 
-    if (category && category !== "All") filter.category = category;
+      filter.status = "open";
+      if (excluded.length > 0) {
+        filter.dynamicStatus = { $nin: excluded };
+      }
+    } else if (tab === "Completed") {
+      const completedStatus = await WODynamicStatus.findOne({
+        name: "Completed",
+      });
 
-    if (dynamicStatus && dynamicStatus !== "All") {
-      const dyn = await findDynamicStatus(dynamicStatus);
-      filter.dynamicStatus = dyn ? dyn._id : null;
+      filter.$or = [
+        { status: "closed" },
+        completedStatus ? { dynamicStatus: completedStatus._id } : null,
+      ].filter(Boolean);
+    } else if (tab === "Declined") {
+      const declinedStatus = await WODynamicStatus.findOne({
+        name: "Declined",
+      });
+
+      if (!declinedStatus) {
+        return sendSuccess(res, "Vendor work orders fetched", {
+          workOrders: [],
+          pagination: { current: 1, pages: 0, total: 0 },
+        });
+      }
+
+      filter.dynamicStatus = declinedStatus._id;
     }
 
-    // Due Date filter
+    // ADDITIONAL FILTERS (Refinement only — never override tab)
+    // Category filter
+    if (category && category !== "All") {
+      filter.category = category;
+    }
+
+    // Dynamic Status filter
+    if (dynamicStatus && dynamicStatus !== "All") {
+      const dyn = await findDynamicStatus(dynamicStatus);
+
+      if (!dyn) {
+        return sendSuccess(res, "Vendor work orders fetched", {
+          workOrders: [],
+          pagination: { current: 1, pages: 0, total: 0 },
+        });
+      }
+
+      // PENDING TAB
+      if (tab === "Pending") {
+        const forbidden = ["Completed", "Declined"];
+        if (forbidden.includes(dyn.name)) {
+          return sendSuccess(res, "Vendor work orders fetched", {
+            workOrders: [],
+            pagination: { current: 1, pages: 0, total: 0 },
+          });
+        }
+
+        filter.dynamicStatus = dyn._id;
+      } else if (tab === "Completed") {
+        // COMPLETED TAB
+        // User must select only "Completed"
+        if (dyn.name !== "Completed") {
+          return sendSuccess(res, "Vendor work orders fetched", {
+            workOrders: [],
+            pagination: { current: 1, pages: 0, total: 0 },
+          });
+        }
+      } else if (tab === "Declined") {
+        // DECLINED TAB
+        // must select only Declined
+        if (dyn.name !== "Declined") {
+          return sendSuccess(res, "Vendor work orders fetched", {
+            workOrders: [],
+            pagination: { current: 1, pages: 0, total: 0 },
+          });
+        }
+      } else {
+        filter.dynamicStatus = dyn._id;
+      }
+    }
+
+    //  DUE DATE FILTER
     if (dueDate && dueDate !== "All") {
       const start = new Date(dueDate);
       const end = new Date(dueDate);
-
       start.setHours(0, 0, 0, 0);
       end.setHours(23, 59, 59, 999);
-
       filter.dueDate = { $gte: start, $lte: end };
     }
 
-    // if (dueDateRange && dueDateRange !== "All") {
-    //   const start = new Date();
-    //   const end = new Date();
+    if (req.query.completedDate && req.query.completedDate !== "All") {
+      const start = new Date(req.query.completedDate);
+      const end = new Date(req.query.completedDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
 
-    //   start.setHours(0, 0, 0, 0);
-    //   end.setHours(23, 59, 59, 999);
+      filter.completeDate = { $gte: start, $lte: end };
+    }
 
-    //   if (dueDateRange === "today") {
-    //     filter.dueDate = { $gte: start, $lte: end };
-    //   }
-
-    //   if (dueDateRange === "tomorrow") {
-    //     const t1 = new Date(start);
-    //     const t2 = new Date(end);
-    //     t1.setDate(t1.getDate() + 1);
-    //     t2.setDate(t2.getDate() + 1);
-
-    //     filter.dueDate = { $gte: t1, $lte: t2 };
-    //   }
-
-    //   if (dueDateRange === "overdue") {
-    //     filter.dueDate = { $lt: start };
-    //     filter.status = { $ne: "closed" };
-    //   }
-
-    //   if (dueDateRange === "week") {
-    //     const weekEnd = new Date(start);
-    //     weekEnd.setDate(weekEnd.getDate() + 7);
-    //     filter.dueDate = { $gte: start, $lte: weekEnd };
-    //   }
-
-    //   if (dueDateRange === "month") {
-    //     const monthEnd = new Date(start);
-    //     monthEnd.setMonth(monthEnd.getMonth() + 1);
-    //     filter.dueDate = { $gte: start, $lte: monthEnd };
-    //   }
-    // }
-
+    //  SEARCH FILTER
     if (search && search.trim() !== "") {
       const regex = new RegExp(search, "i");
 
-      // Find buildings matching the search text
       const buildingIds = await Building.find({
-        $or: [{ "formData.address": regex }, { buildingAbbreviation: regex }],
+        $or: [
+          { "formData.address": regex },
+          { "formData.fullAddress": regex },
+          { buildingAbbreviation: regex },
+        ],
       }).distinct("_id");
 
-      filter.$or = [
-        // { workOrderNumber: regex },
-        // { description: regex },
-        { building: { $in: buildingIds } },
-      ];
+      if (buildingIds.length === 0) {
+        return sendSuccess(res, "Vendor work orders fetched", {
+          workOrders: [],
+          pagination: { current: 1, pages: 0, total: 0 },
+        });
+      }
+
+      filter.building = { $in: buildingIds };
     }
 
     // SORTING LOGIC
     let sortQuery = {};
 
     if (sortBy) {
-      let key = sortBy;
-      let direction = sortOrder === "asc" ? 1 : -1;
+      const map = {
+        workStatus: "dynamicStatus",
+        dueDate: "dueDate",
+        completedDate: "completeDate",
+        declinedDate: "updatedAt",
+      };
 
-      if (sortBy === "workStatus") {
-        key = "dynamicStatus";
-      }
-
-      if (
-        sortBy === "dueDate" ||
-        sortBy === "completedDate" ||
-        sortBy === "declinedDate"
-      ) {
-        key =
-          sortBy === "dueDate"
-            ? "dueDate"
-            : sortBy === "completedDate"
-            ? "completeDate"
-            : "updatedAt";
-      }
-
-      sortQuery[key] = direction;
+      sortQuery[map[sortBy] || sortBy] = sortOrder === "asc" ? 1 : -1;
     } else {
-      // Default sort
-      sortQuery["createdAt"] = -1;
+      sortQuery = { createdAt: -1 };
     }
 
+    // QUERY EXECUTION
     const workOrders = await WorkOrder.find(filter)
       .populate(
         "building",
-        "formData.address formData.city buildingAbbreviation status"
+        "formData.address formData.fullAddress formData.city buildingAbbreviation status"
       )
       .populate("category", "name")
-      .populate("dynamicStatus", "name description isDefault")
+      .populate("dynamicStatus", "name")
       .sort(sortQuery)
       .skip(skip)
       .limit(limit);
@@ -401,6 +439,7 @@ exports.getVendorWorkOrders = async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("Error in getVendorWorkOrders:", err);
     return sendError(res, err.message || "Failed to fetch vendor work orders");
   }
 };
