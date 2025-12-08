@@ -35,6 +35,7 @@ const workOrderSchema = new mongoose.Schema(
     },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     completeDate: { type: Date },
+    declinedDate: { type: Date },
     closingComments: { type: String },
   },
   { timestamps: true }

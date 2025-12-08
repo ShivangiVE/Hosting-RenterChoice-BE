@@ -317,46 +317,55 @@ exports.getVendorWorkOrders = async (req, res) => {
 
     // Dynamic Status filter
     if (dynamicStatus && dynamicStatus !== "All") {
-      const dyn = await findDynamicStatus(dynamicStatus);
-
-      if (!dyn) {
-        return sendSuccess(res, "Vendor work orders fetched", {
-          workOrders: [],
-          pagination: { current: 1, pages: 0, total: 0 },
-        });
-      }
-
-      // PENDING TAB
-      if (tab === "Pending") {
-        const forbidden = ["Completed", "Declined"];
-        if (forbidden.includes(dyn.name)) {
-          return sendSuccess(res, "Vendor work orders fetched", {
-            workOrders: [],
-            pagination: { current: 1, pages: 0, total: 0 },
-          });
-        }
-
-        filter.dynamicStatus = dyn._id;
-      } else if (tab === "Completed") {
-        // COMPLETED TAB
-        // User must select only "Completed"
-        if (dyn.name !== "Completed") {
-          return sendSuccess(res, "Vendor work orders fetched", {
-            workOrders: [],
-            pagination: { current: 1, pages: 0, total: 0 },
-          });
-        }
-      } else if (tab === "Declined") {
-        // DECLINED TAB
-        // must select only Declined
-        if (dyn.name !== "Declined") {
+      // SPECIAL CASE: Closed (Primary Status)
+      if (dynamicStatus === "primary-closed") {
+        if (tab === "Completed") {
+          filter.status = "closed"; // Primary status match
+          delete filter.dynamicStatus; // Ensure no conflict
+        } else {
           return sendSuccess(res, "Vendor work orders fetched", {
             workOrders: [],
             pagination: { current: 1, pages: 0, total: 0 },
           });
         }
       } else {
-        filter.dynamicStatus = dyn._id;
+        // Existing logic for dynamic statuses
+        const dyn = await findDynamicStatus(dynamicStatus);
+
+        if (!dyn) {
+          return sendSuccess(res, "Vendor work orders fetched", {
+            workOrders: [],
+            pagination: { current: 1, pages: 0, total: 0 },
+          });
+        }
+
+        if (tab === "Pending") {
+          const forbidden = ["Completed", "Declined"];
+          if (forbidden.includes(dyn.name)) {
+            return sendSuccess(res, "Vendor work orders fetched", {
+              workOrders: [],
+              pagination: { current: 1, pages: 0, total: 0 },
+            });
+          }
+
+          filter.dynamicStatus = dyn._id;
+        } else if (tab === "Completed") {
+          if (dyn.name !== "Completed") {
+            return sendSuccess(res, "Vendor work orders fetched", {
+              workOrders: [],
+              pagination: { current: 1, pages: 0, total: 0 },
+            });
+          }
+        } else if (tab === "Declined") {
+          if (dyn.name !== "Declined") {
+            return sendSuccess(res, "Vendor work orders fetched", {
+              workOrders: [],
+              pagination: { current: 1, pages: 0, total: 0 },
+            });
+          }
+        } else {
+          filter.dynamicStatus = dyn._id;
+        }
       }
     }
 
@@ -369,6 +378,7 @@ exports.getVendorWorkOrders = async (req, res) => {
       filter.dueDate = { $gte: start, $lte: end };
     }
 
+    //  Completed DATE FILTER
     if (req.query.completedDate && req.query.completedDate !== "All") {
       const start = new Date(req.query.completedDate);
       const end = new Date(req.query.completedDate);
@@ -376,6 +386,16 @@ exports.getVendorWorkOrders = async (req, res) => {
       end.setHours(23, 59, 59, 999);
 
       filter.completeDate = { $gte: start, $lte: end };
+    }
+
+    // DECLINED DATE FILTER
+    if (req.query.declinedDate && req.query.declinedDate !== "All") {
+      const start = new Date(req.query.declinedDate);
+      const end = new Date(req.query.declinedDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+
+      filter.declinedDate = { $gte: start, $lte: end };
     }
 
     //  SEARCH FILTER
@@ -572,30 +592,50 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
+    // Only dynamicStatus is allowed
     const allowed = ["dynamicStatus"];
     const invalid = Object.keys(updates).filter(
       (key) => !allowed.includes(key)
     );
-
     if (invalid.length > 0) {
       return sendError(res, `You cannot update: ${invalid.join(", ")}`, 400);
     }
 
+    // Validate dynamicStatus sent
+    let newStatus = null;
     if (updates.dynamicStatus) {
-      const statusExists = await WODynamicStatus.findById(
-        updates.dynamicStatus
-      );
-      if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
+      newStatus = await WODynamicStatus.findById(updates.dynamicStatus);
+      if (!newStatus) {
+        return sendError(res, "Invalid dynamic status", 400);
+      }
+
+      // Vendors CANNOT update to Completed
+      if (["Completed"].includes(newStatus.name)) {
+        return sendError(
+          res,
+          `Vendors are not allowed to change status to ${newStatus.name}`,
+          403
+        );
+      }
     }
 
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
+    // Ensure vendor owns the work order
     if (workOrder.vendor.toString() !== req.user._id.toString()) {
       return sendError(res, "Unauthorized vendor", 403);
     }
 
-    Object.assign(workOrder, updates);
+    if (newStatus && newStatus.name === "Declined") {
+      workOrder.dynamicStatus = newStatus._id;
+      workOrder.declinedDate = new Date();
+      workOrder.status = "open";
+    } else {
+      // Normal update
+      Object.assign(workOrder, updates);
+    }
+
     await workOrder.save();
 
     const updated = await WorkOrder.findById(id).populate(
@@ -625,7 +665,18 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
 
     // Validate Status
     const statusExists = await WODynamicStatus.findById(dynamicStatus);
-    if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
+    if (!statusExists) {
+      return sendError(res, "Invalid dynamic status", 400);
+    }
+
+    // Restriction: Vendor cannot set Completed
+    if (["Completed"].includes(statusExists.name)) {
+      return sendError(
+        res,
+        `You are not allowed to update status to ${statusExists.name}`,
+        403
+      );
+    }
 
     // Ensure vendor owns all work orders
     const workOrders = await WorkOrder.find({
@@ -642,7 +693,13 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
     }
 
     // Bulk update
-    await WorkOrder.updateMany({ _id: { $in: ids } }, { dynamicStatus });
+    let updateFields = { dynamicStatus };
+
+    if (statusExists.name === "Declined") {
+      updateFields.declinedDate = new Date();
+      updateFields.status = "open";
+    }
+    await WorkOrder.updateMany({ _id: { $in: ids } }, { $set: updateFields });
 
     return sendSuccess(res, "Statuses updated successfully", {
       updatedCount: ids.length,

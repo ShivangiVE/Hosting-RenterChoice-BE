@@ -4,6 +4,7 @@ const {
   getStatuses,
   updateStatus,
   deleteStatus,
+  getVendorStatusOptions,
 } = require("../../controllers/workOrder/woDynamicStatusController");
 const { authorize, protect } = require("../../middleware/authMiddleware");
 
@@ -17,6 +18,7 @@ router.post(
   createStatus
 );
 router.get("/", protect, getStatuses);
+router.get("/vendor/status-options", getVendorStatusOptions);
 router.put("/:id", protect, authorize("Admin", "OfficeAdmin"), updateStatus);
 router.delete("/:id", protect, authorize("Admin", "OfficeAdmin"), deleteStatus);
 
