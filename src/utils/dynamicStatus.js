@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const WODynamicStatus = require("../models/WODynamicStatus");
+const { normalizeStatusName } = require("./statusUtils");
 
 exports.findDynamicStatus = async (value) => {
   if (!value) return null;
@@ -9,8 +10,9 @@ exports.findDynamicStatus = async (value) => {
     return await WODynamicStatus.findById(value);
   }
 
-  // If user passed name (case-insensitive)
+  const normalized = normalizeStatusName(value);
+
   return await WODynamicStatus.findOne({
-    name: { $regex: `^${value}$`, $options: "i" },
+    nameNormalized: normalized,
   });
 };
