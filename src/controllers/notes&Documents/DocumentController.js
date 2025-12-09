@@ -170,7 +170,9 @@ exports.vendorUploadDocuments = async (req, res) => {
     const workOrder = await WorkOrder.findOne({
       _id: workOrderId,
       vendor: vendorId,
-    }).populate("building");
+    })
+      .populate("building")
+      .populate("dynamicStatus", "name");
 
     if (!workOrder) {
       req.files.forEach((file) => {
@@ -178,9 +180,25 @@ exports.vendorUploadDocuments = async (req, res) => {
           fs.unlinkSync(file.path);
         } catch (err) {}
       });
+
       return sendError(
         res,
         "You are not allowed to upload documents for this work order",
+        403
+      );
+    }
+
+    if (workOrder.dynamicStatus?.name === "Declined") {
+      if (req.files) {
+        req.files.forEach((file) => {
+          try {
+            fs.unlinkSync(file.path);
+          } catch {}
+        });
+      }
+      return sendError(
+        res,
+        "You cannot upload documents because this work order is Declined",
         403
       );
     }

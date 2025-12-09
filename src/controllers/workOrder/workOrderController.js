@@ -389,13 +389,35 @@ exports.getVendorWorkOrders = async (req, res) => {
     }
 
     // DECLINED DATE FILTER
-    if (req.query.declinedDate && req.query.declinedDate !== "All") {
-      const start = new Date(req.query.declinedDate);
-      const end = new Date(req.query.declinedDate);
-      start.setHours(0, 0, 0, 0);
-      end.setHours(23, 59, 59, 999);
+    // if (req.query.declinedDate && req.query.declinedDate !== "All") {
+    //   const start = new Date(req.query.declinedDate);
+    //   const end = new Date(req.query.declinedDate);
+    //   start.setHours(0, 0, 0, 0);
+    //   end.setHours(23, 59, 59, 999);
 
-      filter.declinedDate = { $gte: start, $lte: end };
+    //   filter.declinedDate = { $gte: start, $lte: end };
+    // }
+
+    // DECLINED DATE RANGE FILTER
+    const declinedStartDate = req.query.declinedStartDate;
+    const declinedEndDate = req.query.declinedEndDate;
+
+    if (declinedStartDate || declinedEndDate) {
+      filter.declinedDate = {};
+
+      // Start date → beginning of the selected day
+      if (declinedStartDate) {
+        const start = new Date(declinedStartDate);
+        start.setHours(0, 0, 0, 0);
+        filter.declinedDate.$gte = start;
+      }
+
+      // End date → end of the selected day
+      if (declinedEndDate) {
+        const end = new Date(declinedEndDate);
+        end.setHours(23, 59, 59, 999);
+        filter.declinedDate.$lte = end;
+      }
     }
 
     //  SEARCH FILTER
@@ -450,8 +472,20 @@ exports.getVendorWorkOrders = async (req, res) => {
 
     const total = await WorkOrder.countDocuments(filter);
 
+    const formatted = workOrders.map((wo) => {
+      const dyn = wo.dynamicStatus?.name || "";
+
+      const canEdit =
+        wo.status === "open" && !["Completed", "Declined"].includes(dyn);
+
+      return {
+        ...wo.toObject(),
+        canEditStatus: canEdit,
+      };
+    });
+
     return sendSuccess(res, "Vendor work orders fetched", {
-      workOrders,
+      workOrders: formatted,
       pagination: {
         current: page,
         pages: Math.ceil(total / limit),
@@ -538,7 +572,16 @@ exports.getWorkOrder = async (req, res) => {
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
-    return sendSuccess(res, "Work order fetched successfully", { workOrder });
+    const dyn = workOrder.dynamicStatus?.name ?? "";
+    const canEdit =
+      workOrder.status === "open" && !["Completed", "Declined"].includes(dyn);
+
+    return sendSuccess(res, "Work order fetched successfully", {
+      workOrder: {
+        ...workOrder.toObject(),
+        canEditStatus: canEdit,
+      },
+    });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch work order", 500);
   }
@@ -609,8 +652,8 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
         return sendError(res, "Invalid dynamic status", 400);
       }
 
-      // Vendors CANNOT update to Completed
-      if (["Completed"].includes(newStatus.name)) {
+      // Vendors CANNOT update to Completed & Declined
+      if (["Completed", "Declined"].includes(newStatus.name)) {
         return sendError(
           res,
           `Vendors are not allowed to change status to ${newStatus.name}`,
@@ -625,6 +668,31 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
     // Ensure vendor owns the work order
     if (workOrder.vendor.toString() !== req.user._id.toString()) {
       return sendError(res, "Unauthorized vendor", 403);
+    }
+
+    const currentDyn = workOrder.dynamicStatus?.toString();
+    let currentStatusName = "";
+
+    if (currentDyn) {
+      const ds = await WODynamicStatus.findById(currentDyn);
+      currentStatusName = ds?.name;
+    }
+
+    if (["Completed", "Declined"].includes(currentStatusName)) {
+      return sendError(
+        res,
+        `You cannot change dynamic status because it is already marked as ${currentStatusName}`,
+        400
+      );
+    }
+
+    // BLOCK if primary status is closed
+    if (workOrder.status === "closed") {
+      return sendError(
+        res,
+        "You cannot update status because the work order is already closed",
+        400
+      );
     }
 
     if (newStatus && newStatus.name === "Declined") {
@@ -670,7 +738,7 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
     }
 
     // Restriction: Vendor cannot set Completed
-    if (["Completed"].includes(statusExists.name)) {
+    if (["Completed", "Declined"].includes(statusExists.name)) {
       return sendError(
         res,
         `You are not allowed to update status to ${statusExists.name}`,
@@ -690,6 +758,27 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
         "One or more work orders do not belong to this vendor",
         403
       );
+    }
+
+    for (const wo of workOrders) {
+      const dyn = await WODynamicStatus.findById(wo.dynamicStatus);
+      const dynName = dyn?.name;
+
+      if (["Completed", "Declined"].includes(dynName)) {
+        return sendError(
+          res,
+          `Cannot update Work Order ${wo.workOrderNumber} because its status is already ${dynName}`,
+          400
+        );
+      }
+
+      if (wo.status === "closed") {
+        return sendError(
+          res,
+          `Cannot update Work Order ${wo.workOrderNumber} because it is already closed`,
+          400
+        );
+      }
     }
 
     // Bulk update

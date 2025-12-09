@@ -90,12 +90,22 @@ exports.vendorCreateNote = async (req, res) => {
     const workOrder = await WorkOrder.findOne({
       _id: workOrderId,
       vendor: vendorId,
-    }).populate("building");
+    })
+      .populate("building")
+      .populate("dynamicStatus", "name");
 
     if (!workOrder) {
       return sendError(
         res,
         "You are not allowed to add notes for this work order",
+        403
+      );
+    }
+
+    if (workOrder.dynamicStatus?.name === "Declined") {
+      return sendError(
+        res,
+        "You cannot add notes because this work order is Declined",
         403
       );
     }
