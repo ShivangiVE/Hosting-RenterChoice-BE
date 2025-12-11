@@ -331,17 +331,34 @@ exports.getNotesByPortfolio = async (req, res) => {
   }
 };
 
-// Get Notes by Portfolio
+// Get Notes by Work Order
 exports.getNotesByWorkOrder = async (req, res) => {
   try {
     const { workOrderId } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    const notes = await Note.find({ workOrder: workOrderId })
-      .populate("category", "name")
-      .populate("createdBy", "preferredName technicianName companyName email")
-      .sort({ createdAt: -1 });
+    const [notes, total] = await Promise.all([
+      Note.find({ workOrder: workOrderId })
+        .populate("category", "name")
+        .populate("createdBy", "preferredName technicianName companyName email")
 
-    return sendSuccess(res, "Work order notes fetched", notes);
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select(
+          "subject description category createdBy building portfolio workOrder createdAt"
+        ),
+      Note.countDocuments({ workOrder: workOrderId }),
+    ]);
+
+    return sendSuccess(res, "Work order notes fetched", {
+      notes,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch notes", 500);
   }

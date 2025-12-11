@@ -19,6 +19,10 @@ const workOrderSchema = new mongoose.Schema(
     keyIssued: { type: Boolean, default: false },
     dueDate: { type: Date },
     fileUrl: { type: String },
+    keyReturnStatus: { type: String },
+    invoicePending: { type: Boolean, default: false },
+    invoiceUploaded: { type: Boolean, default: false },
+
     status: {
       type: String,
       enum: ["open", "closed"],

@@ -521,33 +521,34 @@ exports.getDocumentsByPortfolio = async (req, res) => {
 exports.getDocumentsByWorkOrder = async (req, res) => {
   try {
     const { workOrderId } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    // Validate Work Order
-    const workOrder = await WorkOrder.findById(workOrderId);
-    if (!workOrder) {
-      return sendError(res, "Work Order not found", 404);
-    }
+    const [documents, total] = await Promise.all([
+      Document.find({ workOrder: workOrderId })
+        .populate("category", "name")
+        .populate(
+          "uploadedBy",
+          "preferredName technicianName companyName email"
+        )
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select(
+          "fileName description fileType mimeType fileUrl category uploadedBy createdAt"
+        ),
+      Document.countDocuments({ workOrder: workOrderId }),
+    ]);
 
-    // Fetch documents linked ONLY to this work order
-    const documents = await Document.find({ workOrder: workOrderId })
-      .populate("category", "name")
-      .populate("uploadedBy", "preferredName technicianName companyName email")
-      .populate("building", "buildingAbbreviation formData.address")
-      .populate("portfolio", "portfolioAbbreviation formData.name")
-      .sort({ createdAt: -1 });
-
-    return sendSuccess(
-      res,
-      "Work order documents fetched successfully",
-      documents
-    );
+    return sendSuccess(res, "Work order documents fetched", {
+      documents,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    });
   } catch (err) {
-    console.error("Error fetching work order documents:", err);
-    return sendError(
-      res,
-      err.message || "Failed to fetch work order documents",
-      500
-    );
+    return sendError(res, err.message || "Failed to fetch documents", 500);
   }
 };
 

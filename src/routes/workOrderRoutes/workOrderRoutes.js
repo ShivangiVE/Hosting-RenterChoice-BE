@@ -32,6 +32,8 @@ const {
   getVendorWorkOrders,
   vendorUpdateWorkOrder,
   vendorBulkUpdateWorkOrderStatus,
+  markWorkOrderCompleted,
+  vendorUploadInvoiceLater,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -107,6 +109,24 @@ router.post(
   protect,
   authorize("Vendor"),
   vendorBulkUpdateWorkOrderStatus
+);
+
+// Vendor Mark Work Orders as Completed
+router.put(
+  "/vendor/work-orders/:id/complete",
+  protect,
+  authorize(...Extra_Roles),
+  upload.workOrderUpload.array("files", 5),
+  markWorkOrderCompleted
+);
+
+// Vendor Upload Invoice Later
+router.put(
+  "/vendor/work-orders/:id/upload-invoice",
+  protect,
+  authorize("Vendor"),
+  upload.workOrderUpload.array("files", 5),
+  vendorUploadInvoiceLater
 );
 
 router.put(
