@@ -1,5 +1,8 @@
 const Building = require("../../models/Building");
 const InspectionRequest = require("../../models/InspectionRequest");
+const Document = require("../../models/Notes&Documents/Document");
+const Note = require("../../models/Notes&Documents/Note");
+const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
 const ServiceAgreement = require("../../models/ServiceAgreement");
 const User = require("../../models/User");
 const WODynamicStatus = require("../../models/WODynamicStatus");
@@ -40,6 +43,26 @@ exports.getNextCounterValue = async (req, res) => {
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch counter", 500);
   }
+};
+
+const getFileType = (mimeType) => {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf") return "pdf";
+  if (
+    mimeType === "application/vnd.ms-excel" ||
+    mimeType ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  ) {
+    return "excel";
+  }
+  if (
+    mimeType === "application/msword" ||
+    mimeType ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    return "word";
+  }
+  return "other";
 };
 
 // Create Work Order
@@ -795,6 +818,185 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err.message || "Bulk update failed", 500);
+  }
+};
+
+// Vendor Mark Work Orders as Completed
+exports.markWorkOrderCompleted = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { note, keyReturnOption, invoiceOption, invoiceDescription } =
+      req.body;
+
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    // Vendor security check
+    if (req.user.role === "Vendor") {
+      if (
+        !workOrder.vendor ||
+        workOrder.vendor.toString() !== req.user._id.toString()
+      ) {
+        return sendError(res, "Not authorized", 403);
+      }
+    }
+
+    // HANDLE KEY RETURN LOGIC
+    let finalKeyOption = workOrder.keyIssued ? keyReturnOption : null;
+
+    if (workOrder.keyIssued) {
+      if (finalKeyOption === "returned_now") {
+        workOrder.keyIssued = false;
+        workOrder.keyReturnStatus = "Returned";
+      } else if (finalKeyOption === "return_later") {
+        workOrder.keyReturnStatus = "Return Later";
+      }
+    }
+
+    //  HANDLE INVOICE UPLOAD NOW
+    let invoiceUrl = null;
+
+    if (invoiceOption === "upload_now" && req.files?.length > 0) {
+      let invoiceCategory = await NoteCategory.findOne({ name: "Invoice" });
+      if (!invoiceCategory) {
+        invoiceCategory = await NoteCategory.create({
+          name: "Invoice",
+          createdBy: req.user._id,
+        });
+      }
+
+      const invoiceMeta = JSON.parse(req.body.invoiceDocuments || "[]");
+
+      for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+        const metadata = invoiceMeta[i] || {};
+
+        const fileType = getFileType(file.mimetype);
+        const invoiceUrl = await uploadFile(file, "uploads/Repair/invoices");
+
+        await Document.create({
+          fileName: metadata.fileName || file.originalname,
+          originalFileName: file.originalname,
+          description: metadata.description || "",
+          category: invoiceCategory._id,
+          fileType,
+          mimeType: file.mimetype,
+          fileSize: file.size,
+          fileUrl: invoiceUrl,
+          workOrder: id,
+          uploadedBy: req.user._id,
+        });
+      }
+
+      workOrder.invoiceUploaded = true;
+      workOrder.invoicePending = false;
+    }
+
+    // HANDLE INVOICE LATER
+    if (invoiceOption === "upload_later") {
+      workOrder.invoiceUploaded = false;
+      workOrder.invoicePending = true;
+    }
+
+    //  COMPLETION NOTE → USE VENDOR CATEGORY
+    if (note) {
+      let vendorCategory = await NoteCategory.findOne({ name: "Vendor" });
+      if (!vendorCategory) {
+        vendorCategory = await NoteCategory.create({
+          name: "Vendor",
+          createdBy: req.user._id,
+        });
+      }
+
+      await Note.create({
+        workOrder: id,
+        category: vendorCategory._id,
+        subject: "Completion Note",
+        description: note,
+        createdBy: req.user._id,
+      });
+    }
+
+    // UPDATE WORK ORDER STATUS
+    const completedStatus = await WODynamicStatus.findOne({
+      name: "Completed",
+    });
+    if (!completedStatus)
+      return sendError(res, "Completed status missing", 400);
+
+    workOrder.dynamicStatus = completedStatus._id;
+    workOrder.completeDate = new Date();
+
+    // Primary status logic
+    workOrder.status = invoiceOption === "upload_now" ? "closed" : "open";
+
+    await workOrder.save();
+
+    return sendSuccess(res, "Work order marked as completed", { workOrder });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to complete work order", 500);
+  }
+};
+
+// Vendor Upload Invoice Later
+exports.vendorUploadInvoiceLater = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { invoiceDescription } = req.body;
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    if (req.user.role === "Vendor") {
+      if (
+        !workOrder.vendor ||
+        workOrder.vendor.toString() !== req.user._id.toString()
+      ) {
+        return sendError(res, "Not authorized", 403);
+      }
+    }
+
+    if (!req.files || req.files.length === 0)
+      return sendError(res, "At least one invoice file is required", 400);
+
+    let invoiceCategory = await NoteCategory.findOne({ name: "Invoice" });
+    if (!invoiceCategory) {
+      invoiceCategory = await NoteCategory.create({
+        name: "Invoice",
+        createdBy: req.user._id,
+      });
+    }
+
+    const invoiceMeta = JSON.parse(req.body.invoiceDocuments || "[]");
+
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const metadata = invoiceMeta[i] || {};
+
+      const fileType = getFileType(file.mimetype);
+      const invoiceUrl = await uploadFile(file, "uploads/Repair/invoices");
+
+      await Document.create({
+        fileName: metadata.fileName || file.originalname,
+        originalFileName: file.originalname,
+        description: metadata.description || "",
+        category: invoiceCategory._id,
+        fileType,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        fileUrl: invoiceUrl,
+        workOrder: id,
+        uploadedBy: req.user._id,
+      });
+    }
+
+    workOrder.invoiceUploaded = true;
+    workOrder.invoicePending = false;
+    workOrder.status = "closed";
+    await workOrder.save();
+
+    return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to upload invoice", 500);
   }
 };
 
