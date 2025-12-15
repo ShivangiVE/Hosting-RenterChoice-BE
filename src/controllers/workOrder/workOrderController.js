@@ -297,41 +297,48 @@ exports.getVendorWorkOrders = async (req, res) => {
     } = req.query;
 
     let filter = { vendor: vendorId };
-
-    //  TAB LOGIC (Primary rules)
-    if (tab === "Pending") {
-      const excluded = await WODynamicStatus.find({
-        name: { $in: ["Completed", "Declined"] },
-      }).distinct("_id");
-
+    if (req.query.vendorResponse === "pending") {
+      filter.vendorResponse = "pending";
       filter.status = "open";
-      if (excluded.length > 0) {
-        filter.dynamicStatus = { $nin: excluded };
-      }
-    } else if (tab === "Completed") {
-      const completedStatus = await WODynamicStatus.findOne({
-        name: "Completed",
-      });
-
-      filter.$or = [
-        { status: "closed" },
-        completedStatus ? { dynamicStatus: completedStatus._id } : null,
-      ].filter(Boolean);
-    } else if (tab === "Declined") {
-      const declinedStatus = await WODynamicStatus.findOne({
-        name: "Declined",
-      });
-
-      if (!declinedStatus) {
-        return sendSuccess(res, "Vendor work orders fetched", {
-          workOrders: [],
-          pagination: { current: 1, pages: 0, total: 0 },
-        });
-      }
-
-      filter.dynamicStatus = declinedStatus._id;
     }
 
+    //  TAB LOGIC
+    if (!req.query.vendorResponse) {
+      if (tab === "Pending") {
+        const excluded = await WODynamicStatus.find({
+          name: { $in: ["Completed", "Declined"] },
+        }).distinct("_id");
+
+        filter.status = "open";
+        filter.vendorResponse = "accepted";
+
+        if (excluded.length > 0) {
+          filter.dynamicStatus = { $nin: excluded };
+        }
+      } else if (tab === "Completed") {
+        const completedStatus = await WODynamicStatus.findOne({
+          name: "Completed",
+        });
+
+        filter.$or = [
+          { status: "closed" },
+          completedStatus ? { dynamicStatus: completedStatus._id } : null,
+        ].filter(Boolean);
+      } else if (tab === "Declined") {
+        const declinedStatus = await WODynamicStatus.findOne({
+          name: "Declined",
+        });
+
+        if (!declinedStatus) {
+          return sendSuccess(res, "Vendor work orders fetched", {
+            workOrders: [],
+            pagination: { current: 1, pages: 0, total: 0 },
+          });
+        }
+
+        filter.dynamicStatus = declinedStatus._id;
+      }
+    }
     // ADDITIONAL FILTERS (Refinement only — never override tab)
     // Category filter
     if (category && category !== "All") {
@@ -495,6 +502,19 @@ exports.getVendorWorkOrders = async (req, res) => {
 
     const total = await WorkOrder.countDocuments(filter);
 
+    if (req.query.vendorResponse === "pending") {
+      await WorkOrder.updateMany(
+        {
+          vendor: vendorId,
+          vendorResponse: "pending",
+          vendorSeenAt: null,
+        },
+        {
+          $set: { vendorSeenAt: new Date() },
+        }
+      );
+    }
+
     const formatted = workOrders.map((wo) => {
       const dyn = wo.dynamicStatus?.name || "";
 
@@ -650,6 +670,73 @@ exports.updateWorkOrder = async (req, res) => {
   } catch (err) {
     return sendError(res, err.message || "Failed to update work order", 500);
   }
+};
+
+// Vendor Accept Work Order
+exports.vendorAcceptWorkOrder = async (req, res) => {
+  const { id } = req.params;
+
+  const wo = await WorkOrder.findById(id);
+  if (!wo) return sendError(res, "Work order not found", 404);
+
+  //  MUST be assigned
+  if (!wo.vendor) {
+    return sendError(res, "This work order is not assigned to any vendor", 403);
+  }
+
+  //  MUST belong to logged-in vendor
+  if (wo.vendor.toString() !== req.user._id.toString()) {
+    return sendError(res, "You are not allowed to accept this work order", 403);
+  }
+
+  // MUST be pending
+  if (wo.vendorResponse !== "pending") {
+    return sendError(res, "Work order already responded", 400);
+  }
+
+  wo.vendorResponse = "accepted";
+  await wo.save();
+
+  return sendSuccess(res, "Work order accepted", { workOrder: wo });
+};
+
+// Vendor Decline Work Order
+exports.vendorDeclineWorkOrder = async (req, res) => {
+  const { id } = req.params;
+
+  const declinedStatus = await WODynamicStatus.findOne({ name: "Declined" });
+  if (!declinedStatus) return sendError(res, "Declined status missing", 400);
+
+  const wo = await WorkOrder.findById(id);
+  if (!wo) return sendError(res, "Work order not found", 404);
+
+  //  MUST be assigned
+  if (!wo.vendor) {
+    return sendError(res, "This work order is not assigned to any vendor", 403);
+  }
+
+  //  MUST belong to logged-in vendor
+  if (wo.vendor.toString() !== req.user._id.toString()) {
+    return sendError(
+      res,
+      "You are not allowed to decline this work order",
+      403
+    );
+  }
+
+  //  MUST be pending
+  if (wo.vendorResponse !== "pending") {
+    return sendError(res, "Work order already responded", 400);
+  }
+
+  wo.vendorResponse = "declined";
+  wo.dynamicStatus = declinedStatus._id;
+  wo.declinedDate = new Date();
+  wo.status = "open";
+
+  await wo.save();
+
+  return sendSuccess(res, "Work order declined", { workOrder: wo });
 };
 
 // Vendor Update Work Order
@@ -997,6 +1084,24 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
   } catch (err) {
     return sendError(res, err.message || "Failed to upload invoice", 500);
+  }
+};
+
+// Count work orders assigned to vendor
+exports.getVendorNewWorkOrderCount = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+
+    const count = await WorkOrder.countDocuments({
+      vendor: vendorId,
+      vendorResponse: "pending",
+      status: "open",
+      vendorSeenAt: null,
+    });
+
+    return sendSuccess(res, "New work order count fetched", { count });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch count", 500);
   }
 };
 

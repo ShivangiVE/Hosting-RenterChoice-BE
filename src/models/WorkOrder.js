@@ -32,12 +32,19 @@ const workOrderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "WODynamicStatus",
     },
+
+    vendorResponse: {
+      type: String,
+      enum: ["pending", "accepted", "declined"],
+      default: "pending",
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    vendorSeenAt: { type: Date, default: null },
     completeDate: { type: Date },
     declinedDate: { type: Date },
     closingComments: { type: String },
