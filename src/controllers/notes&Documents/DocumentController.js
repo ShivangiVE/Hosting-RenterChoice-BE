@@ -645,12 +645,38 @@ exports.updateDocument = async (req, res) => {
 exports.deleteDocument = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user._id;
+    const userRole = req.user.role;
 
-    const document = await Document.findById(id);
+    const document = await Document.findById(id).populate(
+      "workOrder",
+      "vendor"
+    );
     if (!document) {
       return sendError(res, "Document not found", 404);
     }
 
+    // If vendor is deleting
+    if (userRole === "Vendor") {
+      // Check if this document was uploaded by the same vendor
+      const isOwner = document.uploadedBy.toString() === userId.toString();
+
+      // Ensure the work order belongs to this vendor
+      const isVendorWorkOrder =
+        document.workOrder &&
+        document.workOrder.vendor &&
+        document.workOrder.vendor.toString() === userId.toString();
+
+      if (!isOwner || !isVendorWorkOrder) {
+        return sendError(
+          res,
+          "Deletion is not allowed because this document was not uploaded by you.",
+          403
+        );
+      }
+    }
+
+    // Internal team can delete ANY document → no restrictions
     // Delete the physical file
     await deleteFile(document.fileUrl);
 

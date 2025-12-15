@@ -485,7 +485,7 @@ exports.getVendorWorkOrders = async (req, res) => {
     const workOrders = await WorkOrder.find(filter)
       .populate(
         "building",
-        "formData.address formData.fullAddress formData.city buildingAbbreviation status"
+        "formData.address formData.fullAddress formData.city formData.keyNumber formData.lockCode buildingAbbreviation status"
       )
       .populate("category", "name")
       .populate("dynamicStatus", "name")
@@ -872,7 +872,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
         const metadata = invoiceMeta[i] || {};
 
         const fileType = getFileType(file.mimetype);
-        const invoiceUrl = await uploadFile(file, "uploads/Repair/invoices");
+        const invoiceUrl = await uploadFile(file, "uploads/documents");
 
         await Document.create({
           fileName: metadata.fileName || file.originalname,
@@ -973,7 +973,7 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
       const metadata = invoiceMeta[i] || {};
 
       const fileType = getFileType(file.mimetype);
-      const invoiceUrl = await uploadFile(file, "uploads/Repair/invoices");
+      const invoiceUrl = await uploadFile(file, "uploads/documents");
 
       await Document.create({
         fileName: metadata.fileName || file.originalname,
