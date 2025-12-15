@@ -34,6 +34,9 @@ const {
   vendorBulkUpdateWorkOrderStatus,
   markWorkOrderCompleted,
   vendorUploadInvoiceLater,
+  vendorDeclineWorkOrder,
+  vendorAcceptWorkOrder,
+  getVendorNewWorkOrderCount,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -80,6 +83,13 @@ router.get(
 
 router.get("/work-orders/:id", protect, getWorkOrder);
 
+router.get(
+  "/vendor/new-count",
+  protect,
+  authorize("Vendor"),
+  getVendorNewWorkOrderCount
+);
+
 router.put(
   "/work-orders/:id",
   protect,
@@ -93,6 +103,21 @@ router.put(
   protect,
   authorize(...ALLOWED_ROLES),
   updateWorkOrderStatus
+);
+
+// Vendor Accept/Decline Work Order
+router.put(
+  "/vendor/work-orders/:id/accept",
+  protect,
+  authorize("Vendor"),
+  vendorAcceptWorkOrder
+);
+
+router.put(
+  "/vendor/work-orders/:id/decline",
+  protect,
+  authorize("Vendor"),
+  vendorDeclineWorkOrder
 );
 
 // Vendor Update Work Order
