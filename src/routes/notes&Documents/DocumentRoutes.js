@@ -79,7 +79,7 @@ router.get("/:id", protect, authorize(...ALLOWED_ROLES), getDocumentById);
 router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateDocument);
 
 // Delete document
-router.delete("/:id", protect, authorize(...ALLOWED_ROLES), deleteDocument);
+router.delete("/:id", protect, authorize(...ALLOWED_ROLES, "Vendor"), deleteDocument);
 
 // Download document
 router.get(
