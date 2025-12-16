@@ -1044,6 +1044,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
     await completeWorkOrder(workOrder, {
       invoiceUploaded: invoiceOption === "upload_now",
       keyReturnOption,
+      validateKey: true,
     });
 
     await workOrder.save();
@@ -1120,7 +1121,10 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
     }
 
     //  CENTRALIZED STATE TRANSITION
-    await completeWorkOrder(workOrder, { invoiceUploaded: true });
+    await completeWorkOrder(workOrder, {
+      invoiceUploaded: true,
+      validateKey: false,
+    });
     await workOrder.save();
 
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });

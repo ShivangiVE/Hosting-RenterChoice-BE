@@ -2,14 +2,14 @@ const WODynamicStatus = require("../models/WODynamicStatus");
 
 async function completeWorkOrder(
   workOrder,
-  { invoiceUploaded, keyReturnOption }
+  { invoiceUploaded, keyReturnOption, validateKey = true }
 ) {
   const completedStatus = await WODynamicStatus.findOne({ name: "Completed" });
   if (!completedStatus) {
     throw new Error("Completed status missing");
   }
 
-  if (workOrder.keyIssued === true) {
+  if (validateKey && workOrder.keyIssued === true) {
     if (!keyReturnOption) {
       throw new Error(
         "Key return selection is mandatory because a key was issued"

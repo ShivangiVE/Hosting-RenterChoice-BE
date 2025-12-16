@@ -85,7 +85,7 @@ router.delete("/:id", protect, authorize(...ALLOWED_ROLES, "Vendor"), deleteDocu
 router.get(
   "/:id/download",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...ALLOWED_ROLES,"Vendor"),
   downloadDocument
 );
 
