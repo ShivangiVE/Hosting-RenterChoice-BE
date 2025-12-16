@@ -32,6 +32,13 @@ const fileFilter = (req, file, cb) => {
     "image/gif",
     "image/webp",
     "image/bmp",
+
+    // Videos
+    "video/mp4",
+    "video/webm",
+    "video/ogg",
+    "video/quicktime",
+
     // PDFs
     "application/pdf",
     // Excel
@@ -61,7 +68,9 @@ const fileFilter = (req, file, cb) => {
 const documentUpload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max per file
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100 MB
+  },
 });
 
 module.exports = documentUpload;
