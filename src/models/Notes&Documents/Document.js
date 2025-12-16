@@ -24,7 +24,7 @@ const documentSchema = new mongoose.Schema(
     fileType: {
       type: String,
       required: true,
-      enum: ["pdf", "image", "excel", "word", "other"],
+      enum: ["pdf", "image", "video", "excel", "word", "other"],
     },
     mimeType: {
       type: String,

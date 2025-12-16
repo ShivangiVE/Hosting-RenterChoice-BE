@@ -16,6 +16,7 @@ const WorkOrder = require("../../models/WorkOrder");
 // Helper function to determine file type from mime type
 const getFileType = (mimeType) => {
   if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
   if (mimeType === "application/pdf") return "pdf";
   if (
     mimeType === "application/vnd.ms-excel" ||

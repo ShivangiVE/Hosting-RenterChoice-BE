@@ -1,3 +1,4 @@
+const { completeWorkOrder } = require("../../domain/workOrderState");
 const Building = require("../../models/Building");
 const InspectionRequest = require("../../models/InspectionRequest");
 const Document = require("../../models/Notes&Documents/Document");
@@ -929,16 +930,23 @@ exports.markWorkOrderCompleted = async (req, res) => {
     }
 
     // HANDLE KEY RETURN LOGIC
-    let finalKeyOption = workOrder.keyIssued ? keyReturnOption : null;
-
-    if (workOrder.keyIssued) {
-      if (finalKeyOption === "returned_now") {
-        workOrder.keyIssued = false;
-        workOrder.keyReturnStatus = "Returned";
-      } else if (finalKeyOption === "return_later") {
-        workOrder.keyReturnStatus = "Return Later";
-      }
+    // let finalKeyOption = workOrder.keyIssued ? keyReturnOption : null;
+    if (workOrder.keyIssued === true && !keyReturnOption) {
+      return sendError(
+        res,
+        "Key return selection is mandatory because a key was issued",
+        400
+      );
     }
+
+    // if (workOrder.keyIssued) {
+    //   if (finalKeyOption === "returned_now") {
+    //     workOrder.keyIssued = false;
+    //     workOrder.keyReturnStatus = "Returned";
+    //   } else if (finalKeyOption === "return_later") {
+    //     workOrder.keyReturnStatus = "Return Later";
+    //   }
+    // }
 
     //  HANDLE INVOICE UPLOAD NOW
     let invoiceUrl = null;
@@ -985,6 +993,11 @@ exports.markWorkOrderCompleted = async (req, res) => {
       workOrder.invoicePending = true;
     }
 
+    if (invoiceOption === "upload_now") {
+      workOrder.invoicePending = false;
+      workOrder.invoiceUploaded = true;
+    }
+
     //  COMPLETION NOTE → USE VENDOR CATEGORY
     if (note) {
       let vendorCategory = await NoteCategory.findOne({ name: "Vendor" });
@@ -1011,11 +1024,16 @@ exports.markWorkOrderCompleted = async (req, res) => {
     if (!completedStatus)
       return sendError(res, "Completed status missing", 400);
 
-    workOrder.dynamicStatus = completedStatus._id;
-    workOrder.completeDate = new Date();
+    // workOrder.dynamicStatus = completedStatus._id;
+    // workOrder.completeDate = new Date();
 
-    // Primary status logic
-    workOrder.status = invoiceOption === "upload_now" ? "closed" : "open";
+    // // Primary status logic
+    // workOrder.status = invoiceOption === "upload_now" ? "closed" : "open";
+
+    await completeWorkOrder(workOrder, {
+      invoiceUploaded: invoiceOption === "upload_now",
+      keyReturnOption,
+    });
 
     await workOrder.save();
 
@@ -1029,22 +1047,36 @@ exports.markWorkOrderCompleted = async (req, res) => {
 exports.vendorUploadInvoiceLater = async (req, res) => {
   try {
     const { id } = req.params;
-    const { invoiceDescription } = req.body;
-    const workOrder = await WorkOrder.findById(id);
+
+    const workOrder = await WorkOrder.findById(id).populate(
+      "dynamicStatus",
+      "name"
+    );
+
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
-    if (req.user.role === "Vendor") {
-      if (
-        !workOrder.vendor ||
-        workOrder.vendor.toString() !== req.user._id.toString()
-      ) {
-        return sendError(res, "Not authorized", 403);
-      }
+    //  Vendor security
+    if (
+      req.user.role === "Vendor" &&
+      (!workOrder.vendor ||
+        workOrder.vendor.toString() !== req.user._id.toString())
+    ) {
+      return sendError(res, "Not authorized", 403);
     }
 
-    if (!req.files || req.files.length === 0)
-      return sendError(res, "At least one invoice file is required", 400);
+    if (workOrder.dynamicStatus?.name !== "Completed") {
+      return sendError(
+        res,
+        "Invoice can only be uploaded after work order is completed",
+        400
+      );
+    }
 
+    if (!req.files || req.files.length === 0) {
+      return sendError(res, "At least one invoice file is required", 400);
+    }
+
+    // Ensure Invoice category
     let invoiceCategory = await NoteCategory.findOne({ name: "Invoice" });
     if (!invoiceCategory) {
       invoiceCategory = await NoteCategory.create({
@@ -1076,9 +1108,8 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
       });
     }
 
-    workOrder.invoiceUploaded = true;
-    workOrder.invoicePending = false;
-    workOrder.status = "closed";
+    //  CENTRALIZED STATE TRANSITION
+    await completeWorkOrder(workOrder, { invoiceUploaded: true });
     await workOrder.save();
 
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
@@ -1109,9 +1140,10 @@ exports.getVendorNewWorkOrderCount = async (req, res) => {
 exports.deleteWorkOrder = async (req, res) => {
   try {
     const { id } = req.params;
-    const workOrder = await WorkOrder.findByIdAndDelete(id);
+    const workOrder = await WorkOrder.findById(id);
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
+
     if (workOrder.fileUrl) await deleteFile(workOrder.fileUrl);
 
     await WorkOrder.findByIdAndDelete(id);

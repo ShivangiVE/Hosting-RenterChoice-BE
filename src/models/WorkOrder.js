@@ -52,4 +52,14 @@ const workOrderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+workOrderSchema.pre("save", function (next) {
+  if (this.status === "closed" && !this.invoiceUploaded) {
+    return next(new Error("Cannot close work order without uploading invoice"));
+  }
+  if (this.invoiceUploaded === true) {
+    this.invoicePending = false;
+  }
+  next();
+});
+
 module.exports = mongoose.model("WorkOrder", workOrderSchema);
