@@ -929,6 +929,17 @@ exports.markWorkOrderCompleted = async (req, res) => {
       }
     }
 
+    //  INVOICE VALIDATION
+    if (invoiceOption === "upload_now") {
+      if (!req.files || req.files.length === 0) {
+        return sendError(
+          res,
+          "Invoice upload is mandatory when 'Upload Now' is selected",
+          400
+        );
+      }
+    }
+
     // HANDLE KEY RETURN LOGIC
     // let finalKeyOption = workOrder.keyIssued ? keyReturnOption : null;
     if (workOrder.keyIssued === true && !keyReturnOption) {
