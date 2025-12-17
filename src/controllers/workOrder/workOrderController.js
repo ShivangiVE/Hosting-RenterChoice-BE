@@ -602,7 +602,8 @@ exports.getWorkOrder = async (req, res) => {
     const workOrder = await WorkOrder.findById(id)
       .populate({
         path: "building",
-        select: "buildingAbbreviation formData.address portfolio status",
+        select:
+          "buildingAbbreviation formData.address formData.keyNumber formData.lockCode portfolio status",
         populate: {
           path: "portfolio",
           select: "portfolioAbbreviation formData.name",
