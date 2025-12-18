@@ -10,6 +10,7 @@ const {
   getNotesByPortfolio,
   vendorCreateNote,
   getNotesByWorkOrder,
+  internalCreateNoteForWorkOrder,
 } = require("../../controllers/notes&Documents/NoteController");
 
 const router = express.Router();
@@ -29,6 +30,13 @@ const ALLOWED_ROLES = [
 
 // All routes are protected
 router.post("/create", protect, authorize(...ALLOWED_ROLES), createNote);
+
+router.post(
+  "/internal-create/:workOrderId",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  internalCreateNoteForWorkOrder
+);
 
 // Notes Created by vendor
 router.post(
@@ -62,8 +70,13 @@ router.get(
   getNotesByWorkOrder
 );
 
-router.get("/:id", protect, authorize(...ALLOWED_ROLES), getNoteById);
-router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateNote);
-router.delete("/:id", protect, authorize(...ALLOWED_ROLES), deleteNote);
+router.get("/:id", protect, authorize(...ALLOWED_ROLES, "Vendor"), getNoteById);
+router.put("/:id", protect, authorize(...ALLOWED_ROLES, "Vendor"), updateNote);
+router.delete(
+  "/:id",
+  protect,
+  authorize(...ALLOWED_ROLES, "Vendor"),
+  deleteNote
+);
 
 module.exports = router;
