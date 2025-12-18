@@ -75,6 +75,64 @@ exports.createNote = async (req, res) => {
   }
 };
 
+// Create Note by Internal Team for Work Order
+exports.internalCreateNoteForWorkOrder = async (req, res) => {
+  try {
+    const { workOrderId } = req.params;
+    const { subject, description, category } = req.body;
+
+    // Validation
+    if (!subject || !subject.trim()) {
+      return sendError(res, "Subject is required", 400);
+    }
+
+    if (!description || !description.trim()) {
+      return sendError(res, "Description is required", 400);
+    }
+
+    if (!category) {
+      return sendError(res, "Category is required", 400);
+    }
+
+    // Check Work Order exists
+    const workOrder = await WorkOrder.findById(workOrderId);
+    if (!workOrder) {
+      return sendError(res, "Work order not found", 404);
+    }
+
+    // Check category exists
+    const categoryExists = await NoteCategory.findById(category);
+    if (!categoryExists) {
+      return sendError(res, "Category not found", 404);
+    }
+
+    // Create note
+    const note = await Note.create({
+      subject: subject.trim(),
+      description: description.trim(),
+      category,
+      workOrder: workOrderId,
+      building: workOrder.building || null,
+      portfolio: workOrder.portfolio || null,
+      createdBy: req.user._id,
+    });
+
+    // Populate response
+    await note.populate([
+      { path: "category", select: "name" },
+      {
+        path: "createdBy",
+        select: "preferredName technicianName companyName email",
+      },
+    ]);
+
+    return sendSuccess(res, "Note added to work order", { note }, 201);
+  } catch (err) {
+    console.error("Internal work order note error:", err);
+    return sendError(res, err.message || "Failed to add note", 500);
+  }
+};
+
 // Create Note by Vendor
 exports.vendorCreateNote = async (req, res) => {
   try {
@@ -390,12 +448,29 @@ exports.getNoteById = async (req, res) => {
 exports.updateNote = async (req, res) => {
   try {
     const { id } = req.params;
-    const { subject, description, category, building, portfolio } = req.body;
 
     const note = await Note.findById(id);
     if (!note) {
       return sendError(res, "Note not found", 404);
     }
+
+    // AUTHORIZATION CHECK
+    if (
+      req.user.role === "Vendor" &&
+      note.createdBy.toString() !== req.user._id.toString()
+    ) {
+      return sendError(res, "You are not allowed to edit this note", 403);
+    }
+
+    //  HARDENING: Vendors can update ONLY description
+    if (req.user.role === "Vendor") {
+      delete req.body.subject;
+      delete req.body.category;
+      delete req.body.building;
+      delete req.body.portfolio;
+    }
+
+    const { subject, description, category, building, portfolio } = req.body;
 
     // Check if category exists (if being updated)
     if (category) {
@@ -457,6 +532,13 @@ exports.deleteNote = async (req, res) => {
     const note = await Note.findById(id);
     if (!note) {
       return sendError(res, "Note not found", 404);
+    }
+
+    if (
+      req.user.role === "Vendor" &&
+      note.createdBy.toString() !== req.user._id.toString()
+    ) {
+      return sendError(res, "You are not allowed to delete this note", 403);
     }
 
     await note.deleteOne();

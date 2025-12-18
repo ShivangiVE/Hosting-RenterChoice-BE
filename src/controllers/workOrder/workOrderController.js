@@ -13,6 +13,7 @@ const { findDynamicStatus } = require("../../utils/dynamicStatus");
 const { TYPE_MAP, normalize } = require("../../utils/inspectionType");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
+const { getIO } = require("../../../socket");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -120,12 +121,15 @@ exports.createWorkOrder = async (req, res) => {
       createdBy: req.user._id,
     });
 
-    return sendSuccess(
-      res,
-      "Work order created successfully",
-      { workOrder },
-      201
-    );
+    sendSuccess(res, "Work order created successfully", { workOrder }, 201);
+
+    // Emit socket event AFTER creation
+    if (vendor) {
+      getIO().to(`vendor:${vendor.toString()}`).emit("vendor:new-work-order", {
+        workOrderId: workOrder._id,
+        workOrderNumber: workOrder.workOrderNumber,
+      });
+    }
   } catch (err) {
     return sendError(res, err.message || "Failed to create work order", 500);
   }
