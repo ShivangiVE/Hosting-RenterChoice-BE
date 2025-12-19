@@ -914,6 +914,130 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
   }
 };
 
+// Vendor Request Due Date Extension
+exports.vendorRequestDueDateExtension = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { requestedDate, reason } = req.body;
+
+    if (!requestedDate) {
+      return sendError(res, "Requested due date is required", 400);
+    }
+
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    // Ownership check
+    if (workOrder.vendor?.toString() !== req.user._id.toString()) {
+      return sendError(res, "Not authorized", 403);
+    }
+
+    // Status check
+    const dyn = await WODynamicStatus.findById(workOrder.dynamicStatus);
+    if (["Completed", "Declined"].includes(dyn?.name)) {
+      return sendError(
+        res,
+        "Cannot request extension for completed or declined work order",
+        400
+      );
+    }
+
+    // Prevent multiple pending requests
+    if (
+      workOrder.dueDateExtension?.status === "pending" &&
+      workOrder.dueDateExtension?.requestedDate
+    ) {
+      return sendError(
+        res,
+        "An extension request is already pending approval",
+        400
+      );
+    }
+
+    workOrder.dueDateExtension = {
+      requestedBy: req.user._id,
+      requestedDate: new Date(requestedDate),
+      reason,
+      status: "pending",
+    };
+
+    await workOrder.save();
+
+    // Socket / Notification
+    getIO().emit("work-order:due-date-extension-requested", {
+      workOrderId: workOrder._id,
+      workOrderNumber: workOrder.workOrderNumber,
+    });
+
+    return sendSuccess(res, "Due date extension requested", { workOrder });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
+// Approve / Reject Due Date Extension by internal staff
+exports.reviewDueDateExtension = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body; // "approved" | "rejected"
+
+    //  DEFENSE-IN-DEPTH ROLE CHECK
+    if (!["Admin", "OfficeAdmin", "RepairsTeam"].includes(req.user.role)) {
+      return sendError(
+        res,
+        "You are not authorized to review due date extensions",
+        403
+      );
+    }
+
+    if (!["approved", "rejected"].includes(action)) {
+      return sendError(res, "Invalid action", 400);
+    }
+
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder || !workOrder.dueDateExtension) {
+      return sendError(res, "No extension request found", 404);
+    }
+
+    if (workOrder.dueDateExtension.status !== "pending") {
+      return sendError(res, "Request already reviewed", 400);
+    }
+
+    workOrder.dueDateExtension.status = action;
+    workOrder.dueDateExtension.reviewedBy = req.user._id;
+    workOrder.dueDateExtension.reviewedAt = new Date();
+
+    if (action === "approved") {
+      const newDueDate = workOrder.dueDateExtension.requestedDate;
+
+      if (!newDueDate) {
+        return sendError(res, "Requested due date missing", 400);
+      }
+
+      workOrder.dueDate = new Date(newDueDate);
+
+      workOrder.dueDateExtension.status = "approved";
+    }
+
+    workOrder.markModified("dueDate");
+    workOrder.markModified("dueDateExtension");
+    await workOrder.save();
+
+    // Notify vendor
+    getIO()
+      .to(`vendor:${workOrder.vendor}`)
+      .emit("work-order:due-date-extension-reviewed", {
+        workOrderId: workOrder._id,
+        status: action,
+        newDueDate: workOrder.dueDate,
+      });
+
+    return sendSuccess(res, `Request ${action}`, { workOrder });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
 // Vendor Mark Work Orders as Completed
 exports.markWorkOrderCompleted = async (req, res) => {
   try {
