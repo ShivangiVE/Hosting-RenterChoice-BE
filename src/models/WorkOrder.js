@@ -18,6 +18,26 @@ const workOrderSchema = new mongoose.Schema(
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     keyIssued: { type: Boolean, default: false },
     dueDate: { type: Date },
+
+    dueDateExtension: {
+      requestedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      requestedDate: { type: Date }, 
+      reason: { type: String },
+      status: {
+        type: String,
+        enum: ["pending", "approved", "rejected"],
+        default: "pending",
+      },
+      reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      reviewedAt: { type: Date },
+    },
+
     fileUrl: { type: String },
     keyReturnStatus: { type: String },
     invoicePending: { type: Boolean, default: false },

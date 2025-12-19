@@ -37,6 +37,8 @@ const {
   vendorDeclineWorkOrder,
   vendorAcceptWorkOrder,
   getVendorNewWorkOrderCount,
+  vendorRequestDueDateExtension,
+  reviewDueDateExtension,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -134,6 +136,22 @@ router.post(
   protect,
   authorize("Vendor"),
   vendorBulkUpdateWorkOrderStatus
+);
+
+// Vendor Request Due Date Extension
+router.post(
+  "/:id/request-extension",
+  protect,
+  authorize("Vendor"),
+  vendorRequestDueDateExtension
+);
+
+// Internal Team Review Due Date Extension
+router.put(
+  "/:id/review-extension",
+  protect,
+  authorize("Admin", "OfficeAdmin", "RepairsTeam"),
+  reviewDueDateExtension
 );
 
 // Vendor Mark Work Orders as Completed
