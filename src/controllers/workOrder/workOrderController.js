@@ -927,9 +927,31 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
-    // Ownership check
-    if (workOrder.vendor?.toString() !== req.user._id.toString()) {
-      return sendError(res, "Not authorized", 403);
+    //  Work order must be assigned to a vendor
+    if (!workOrder.vendor) {
+      return sendError(
+        res,
+        "This work order is not assigned to any vendor",
+        403
+      );
+    }
+
+    // Logged-in vendor must be the assigned vendor
+    if (workOrder.vendor.toString() !== req.user._id.toString()) {
+      return sendError(
+        res,
+        "You can request an extension only for work orders assigned to you",
+        403
+      );
+    }
+
+    //  BLOCK CLOSED WORK ORDERS
+    if (workOrder.status === "closed") {
+      return sendError(
+        res,
+        "Cannot request due date extension for a closed work order",
+        400
+      );
     }
 
     // Status check
