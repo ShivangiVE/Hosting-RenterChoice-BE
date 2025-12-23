@@ -25,6 +25,7 @@ const documentRoutes = require("./src/routes/notes&Documents/DocumentRoutes");
 const auditRoutes = require("./src/routes/auditRoutes/auditRoutes");
 const advertisingRoutes = require("./src/routes/advertising/advertisingRoutes");
 const exportRoutes = require("./src/routes/exportRoutes/exportRoutes");
+const notificationRoutes = require("./src/routes/notificationRoutes/notificationRoutes");
 
 const app = express();
 app.use(cors());
@@ -59,6 +60,7 @@ app.use("/api/documents", documentRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/advertising", advertisingRoutes);
 app.use("/api/download", exportRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.use(errorHandler);
 

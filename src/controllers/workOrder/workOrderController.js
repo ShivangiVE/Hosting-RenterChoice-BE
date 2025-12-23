@@ -14,6 +14,7 @@ const { TYPE_MAP, normalize } = require("../../utils/inspectionType");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const { getIO } = require("../../../socket");
+const { createNotification } = require("../../services/notificationService");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -65,6 +66,13 @@ const getFileType = (mimeType) => {
     return "word";
   }
   return "other";
+};
+
+// Helper to add months to a date
+const addMonths = (date, months) => {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
 };
 
 // Create Work Order
@@ -125,6 +133,15 @@ exports.createWorkOrder = async (req, res) => {
 
     // Emit socket event AFTER creation
     if (vendor) {
+      await createNotification({
+        user: vendor,
+        role: "Vendor",
+        type: "WORK_ORDER_ASSIGNED",
+        title: "New Work Order Assigned",
+        message: `You have a new work order request (${workOrder.workOrderNumber}). Please Accept or Decline.`,
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+      });
       getIO().to(`vendor:${vendor.toString()}`).emit("vendor:new-work-order", {
         workOrderId: workOrder._id,
         workOrderNumber: workOrder.workOrderNumber,
@@ -927,9 +944,50 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
-    // Ownership check
-    if (workOrder.vendor?.toString() !== req.user._id.toString()) {
-      return sendError(res, "Not authorized", 403);
+    const currentDueDate = workOrder.dueDate;
+    const requested = new Date(requestedDate);
+
+    if (!currentDueDate) {
+      return sendError(
+        res,
+        "Cannot request extension because due date is not set",
+        400
+      );
+    }
+    const maxAllowedDate = addMonths(currentDueDate, 3);
+    if (requested > maxAllowedDate) {
+      return sendError(
+        res,
+        "Extension request cannot exceed 3 months from the current due date",
+        400
+      );
+    }
+
+    //  Work order must be assigned to a vendor
+    if (!workOrder.vendor) {
+      return sendError(
+        res,
+        "This work order is not assigned to any vendor",
+        403
+      );
+    }
+
+    // Logged-in vendor must be the assigned vendor
+    if (workOrder.vendor.toString() !== req.user._id.toString()) {
+      return sendError(
+        res,
+        "You can request an extension only for work orders assigned to you",
+        403
+      );
+    }
+
+    //  BLOCK CLOSED WORK ORDERS
+    if (workOrder.status === "closed") {
+      return sendError(
+        res,
+        "Cannot request due date extension for a closed work order",
+        400
+      );
     }
 
     // Status check
@@ -1131,6 +1189,16 @@ exports.markWorkOrderCompleted = async (req, res) => {
     if (invoiceOption === "upload_later") {
       workOrder.invoiceUploaded = false;
       workOrder.invoicePending = true;
+
+      await createNotification({
+        user: workOrder.vendor,
+        role: "Vendor",
+        type: "INVOICE_UPLOAD_PENDING",
+        title: "Invoice Upload Pending",
+        message: `Please upload invoice for ${workOrder.workOrderNumber}`,
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+      });
     }
 
     if (invoiceOption === "upload_now") {
