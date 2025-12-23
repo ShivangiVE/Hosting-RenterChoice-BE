@@ -34,9 +34,11 @@ module.exports = {
       console.log("Socket connected:", socket.user._id.toString());
 
       // Vendor joins personal room
-      if (socket.user.role === "Vendor") {
-        socket.join(`vendor:${socket.user._id}`);
-      }
+      // if (socket.user.role === "Vendor") {
+      //   socket.join(`vendor:${socket.user._id}`);
+      // }
+
+      socket.join(`user:${socket.user._id}`);
 
       socket.on("disconnect", () => {
         console.log("Socket disconnected:", socket.user._id.toString());
