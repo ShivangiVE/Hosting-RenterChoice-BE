@@ -16,7 +16,13 @@ const workOrderSchema = new mongoose.Schema(
     },
     description: { type: String, required: true },
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    keyIssued: { type: Boolean, default: false },
+    // keyIssued: { type: Boolean, default: false },
+    keyIssued: {
+      type: Boolean,
+      default: false,
+      immutable: true,
+    },
+
     dueDate: { type: Date },
 
     dueDateExtension: {
@@ -24,8 +30,13 @@ const workOrderSchema = new mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
       },
-      requestedDate: { type: Date }, 
-      reason: { type: String },
+      requestedDate: { type: Date },
+      requestedAt: { type: Date, default: Date.now },
+      reason: {
+        type: String,
+        trim: true,
+        maxlength: 500,
+      },
       status: {
         type: String,
         enum: ["pending", "approved", "rejected"],
@@ -36,10 +47,28 @@ const workOrderSchema = new mongoose.Schema(
         ref: "User",
       },
       reviewedAt: { type: Date },
+      reviewRemarks: {
+        type: String,
+        trim: true,
+        maxlength: 500,
+      },
     },
 
     fileUrl: { type: String },
-    keyReturnStatus: { type: String },
+    keyReturn: {
+      status: {
+        type: String,
+        enum: ["not_applicable", "pending", "returned"],
+        default: "not_applicable",
+      },
+      returnedAt: Date,
+      returnedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+      consentCapturedAt: Date,
+    },
+
     invoicePending: { type: Boolean, default: false },
     invoiceUploaded: { type: Boolean, default: false },
 

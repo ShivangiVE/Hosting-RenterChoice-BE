@@ -39,6 +39,9 @@ const {
   getVendorNewWorkOrderCount,
   vendorRequestDueDateExtension,
   reviewDueDateExtension,
+  vendorConfirmKeyReturn,
+  vendorBulkConfirmKeyReturn,
+  getWorkOrderTimeline,
 } = require("../../controllers/workOrder/workOrderController");
 
 const router = express.Router();
@@ -170,6 +173,29 @@ router.put(
   authorize("Vendor"),
   upload.workOrderUpload.array("files", 5),
   vendorUploadInvoiceLater
+);
+
+// Key return Later
+router.put(
+  "/vendor/work-orders/:id/return-key",
+  protect,
+  authorize("Vendor"),
+  vendorConfirmKeyReturn
+);
+
+// Bulk Key return later
+router.put(
+  "/vendor/work-orders/return-key/bulk",
+  protect,
+  authorize("Vendor"),
+  vendorBulkConfirmKeyReturn
+);
+
+router.get(
+  "/work-orders/:workOrderId/timeline",
+  protect,
+  authorize(...Extra_Roles),
+  getWorkOrderTimeline
 );
 
 router.put(
