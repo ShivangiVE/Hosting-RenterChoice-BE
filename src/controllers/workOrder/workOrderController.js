@@ -941,6 +941,10 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(res, "Requested due date is required", 400);
     }
 
+    if (!reason || !reason.trim()) {
+      return sendError(res, "Extension reason is required", 400);
+    }
+
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
@@ -1015,6 +1019,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
     workOrder.dueDateExtension = {
       requestedBy: req.user._id,
       requestedDate: new Date(requestedDate),
+      requestedAt: new Date(),
       reason,
       status: "pending",
     };
@@ -1037,7 +1042,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
 exports.reviewDueDateExtension = async (req, res) => {
   try {
     const { id } = req.params;
-    const { action } = req.body; // "approved" | "rejected"
+    const { action, remarks } = req.body; // "approved" | "rejected"
 
     //  DEFENSE-IN-DEPTH ROLE CHECK
     if (!["Admin", "OfficeAdmin", "RepairsTeam"].includes(req.user.role)) {
@@ -1052,6 +1057,15 @@ exports.reviewDueDateExtension = async (req, res) => {
       return sendError(res, "Invalid action", 400);
     }
 
+    //  Mandatory remarks on rejection
+    if (action === "rejected" && (!remarks || !remarks.trim())) {
+      return sendError(
+        res,
+        "Remarks are mandatory when rejecting an extension request",
+        400
+      );
+    }
+
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder || !workOrder.dueDateExtension) {
       return sendError(res, "No extension request found", 404);
@@ -1064,6 +1078,7 @@ exports.reviewDueDateExtension = async (req, res) => {
     workOrder.dueDateExtension.status = action;
     workOrder.dueDateExtension.reviewedBy = req.user._id;
     workOrder.dueDateExtension.reviewedAt = new Date();
+    workOrder.dueDateExtension.reviewRemarks = remarks || null;
 
     if (action === "approved") {
       const newDueDate = workOrder.dueDateExtension.requestedDate;
@@ -1088,6 +1103,7 @@ exports.reviewDueDateExtension = async (req, res) => {
         workOrderId: workOrder._id,
         status: action,
         newDueDate: workOrder.dueDate,
+        remarks: workOrder.dueDateExtension.reviewRemarks,
       });
 
     return sendSuccess(res, `Request ${action}`, { workOrder });
@@ -1327,6 +1343,207 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
   } catch (err) {
     return sendError(res, err.message || "Failed to upload invoice", 500);
+  }
+};
+
+exports.vendorConfirmKeyReturn = async (req, res) => {
+  const { id } = req.params;
+
+  const workOrder = await WorkOrder.findById(id).populate(
+    "dynamicStatus",
+    "name"
+  );
+  if (!workOrder) return sendError(res, "Work order not found", 404);
+
+  if (
+    !workOrder.vendor ||
+    workOrder.vendor.toString() !== req.user._id.toString()
+  ) {
+    return sendError(res, "Unauthorized", 403);
+  }
+
+  if (workOrder.dynamicStatus?.name !== "Completed") {
+    return sendError(res, "Work order not completed", 400);
+  }
+
+  if (workOrder.keyReturn?.status !== "pending") {
+    return sendError(res, "No pending key return", 400);
+  }
+
+  // workOrder.keyIssued = false;
+  workOrder.keyReturn.status = "returned";
+  workOrder.keyReturn.returnedAt = new Date();
+  workOrder.keyReturn.returnedBy = req.user._id;
+
+  await workOrder.save();
+
+  return sendSuccess(res, "Key return confirmed", { workOrder });
+};
+
+exports.vendorBulkConfirmKeyReturn = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return sendError(res, "Work order IDs are required", 400);
+    }
+
+    const workOrders = await WorkOrder.find({
+      _id: { $in: ids },
+      vendor: vendorId,
+    }).populate("dynamicStatus", "name");
+
+    if (workOrders.length !== ids.length) {
+      return sendError(
+        res,
+        "One or more work orders are invalid or unauthorized",
+        403
+      );
+    }
+
+    const errors = [];
+    const eligibleIds = [];
+
+    for (const wo of workOrders) {
+      if (wo.dynamicStatus?.name !== "Completed") {
+        errors.push({
+          workOrderId: wo._id,
+          reason: "Work order not completed",
+        });
+        continue;
+      }
+
+      if (wo.keyReturn?.status !== "pending") {
+        errors.push({
+          workOrderId: wo._id,
+          reason: "No pending key return",
+        });
+        continue;
+      }
+
+      eligibleIds.push(wo._id);
+    }
+
+    if (eligibleIds.length === 0) {
+      return sendError(res, "No eligible work orders for key return", 400);
+    }
+
+    await WorkOrder.updateMany(
+      { _id: { $in: eligibleIds } },
+      {
+        $set: {
+          // keyIssued: false,
+          "keyReturn.status": "returned",
+          "keyReturn.returnedAt": new Date(),
+          "keyReturn.returnedBy": vendorId,
+        },
+      }
+    );
+
+    // getIO().to(`vendor:${vendorId}`).emit("work-order:key-returned", {
+    //   workOrderIds: eligibleIds,
+    // });
+
+    return sendSuccess(res, "Key return confirmed", {
+      totalRequested: ids.length,
+      successCount: eligibleIds.length,
+      failedCount: errors.length,
+      failures: errors,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to confirm key return", 500);
+  }
+};
+
+// Get Work Order Timeline (Notes + Extension Activities)
+exports.getWorkOrderTimeline = async (req, res) => {
+  try {
+    const { workOrderId } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    // Fetch work order with extension data
+    const workOrder = await WorkOrder.findById(workOrderId)
+      .populate("dueDateExtension.requestedBy", "preferredName email")
+      .populate("dueDateExtension.reviewedBy", "preferredName email")
+      .select("dueDateExtension createdAt");
+
+    if (!workOrder) {
+      return sendError(res, "Work order not found", 404);
+    }
+
+    // Fetch notes
+    const notes = await Note.find({ workOrder: workOrderId })
+      .populate("category", "name")
+      .populate("createdBy", "preferredName technicianName companyName email")
+      .sort({ createdAt: -1 })
+      .select("subject description category createdBy createdAt");
+
+    // Build timeline items
+    let timelineItems = [];
+
+    // Add notes as timeline items
+    notes.forEach((note) => {
+      timelineItems.push({
+        _id: note._id,
+        type: "note",
+        description: note.description,
+        subject: note.subject,
+        category: note.category,
+        createdBy: note.createdBy,
+        createdAt: note.createdAt,
+      });
+    });
+
+    // Add extension request if exists
+    if (workOrder.dueDateExtension?.reason) {
+      timelineItems.push({
+        _id: `extension_request_${workOrderId}`,
+        type: "extension_request",
+        description: workOrder.dueDateExtension.reason,
+        requestedDate: workOrder.dueDateExtension.requestedDate,
+        status: workOrder.dueDateExtension.status,
+        createdBy: workOrder.dueDateExtension.requestedBy,
+        createdAt:
+          workOrder.dueDateExtension.requestedBy?.createdAt ||
+          workOrder.createdAt,
+      });
+    }
+
+    // Add extension review if exists
+    if (
+      workOrder.dueDateExtension?.reviewRemarks &&
+      workOrder.dueDateExtension?.status !== "pending"
+    ) {
+      timelineItems.push({
+        _id: `extension_review_${workOrderId}`,
+        type: "extension_review",
+        description: workOrder.dueDateExtension.reviewRemarks,
+        status: workOrder.dueDateExtension.status,
+        reviewedAt: workOrder.dueDateExtension.reviewedAt,
+        createdBy: workOrder.dueDateExtension.reviewedBy,
+        createdAt: workOrder.dueDateExtension.reviewedAt,
+      });
+    }
+
+    // Sort by date (most recent first)
+    timelineItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    // Pagination
+    const total = timelineItems.length;
+    const paginatedItems = timelineItems.slice(skip, skip + limit);
+
+    return sendSuccess(res, "Timeline fetched successfully", {
+      timeline: paginatedItems,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    console.error("Error fetching timeline:", err);
+    return sendError(res, err.message || "Failed to fetch timeline", 500);
   }
 };
 

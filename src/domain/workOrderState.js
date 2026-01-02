@@ -20,13 +20,36 @@ async function completeWorkOrder(
       throw new Error("Invalid key return option");
     }
 
-    if (keyReturnOption === "returned_now") {
-      workOrder.keyIssued = false;
-      workOrder.keyReturnStatus = "Returned";
-    }
+    if (validateKey && workOrder.keyIssued === true) {
+      if (!keyReturnOption) {
+        throw new Error(
+          "Key return selection is mandatory because a key was issued"
+        );
+      }
 
-    if (keyReturnOption === "return_later") {
-      workOrder.keyReturnStatus = "Return Later";
+      if (!["returned_now", "return_later"].includes(keyReturnOption)) {
+        throw new Error("Invalid key return option");
+      }
+
+      if (keyReturnOption === "returned_now") {
+        workOrder.keyIssued = false;
+        workOrder.keyReturn = {
+          status: "returned",
+          returnedAt: new Date(),
+          returnedBy: workOrder.vendor,
+        };
+      }
+
+      if (keyReturnOption === "return_later") {
+        workOrder.keyReturn = {
+          status: "pending",
+          consentCapturedAt: new Date(),
+        };
+      }
+    } else {
+      workOrder.keyReturn = {
+        status: "not_applicable",
+      };
     }
   }
 
