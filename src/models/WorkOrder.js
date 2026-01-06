@@ -1,5 +1,37 @@
 const mongoose = require("mongoose");
 
+const extensionSchema = new mongoose.Schema(
+  {
+    requestedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    requestedDate: { type: Date },
+    requestedAt: { type: Date, default: Date.now }, // When the request was made
+    reason: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    reviewedAt: { type: Date },
+    reviewRemarks: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+    },
+  },
+  { _id: false }
+);
+
 const workOrderSchema = new mongoose.Schema(
   {
     workOrderNumber: { type: String, required: true, unique: true },
@@ -25,34 +57,11 @@ const workOrderSchema = new mongoose.Schema(
 
     dueDate: { type: Date },
 
-    dueDateExtension: {
-      requestedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-      requestedDate: { type: Date },
-      requestedAt: { type: Date, default: Date.now },
-      reason: {
-        type: String,
-        trim: true,
-        maxlength: 500,
-      },
-      status: {
-        type: String,
-        enum: ["pending", "approved", "rejected"],
-        default: "pending",
-      },
-      reviewedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
-      reviewedAt: { type: Date },
-      reviewRemarks: {
-        type: String,
-        trim: true,
-        maxlength: 500,
-      },
-    },
+    // Current/Active extension request
+    dueDateExtension: extensionSchema,
+
+    // History of all extension requests
+    dueDateExtensionHistory: [extensionSchema],
 
     fileUrl: { type: String },
     keyReturn: {

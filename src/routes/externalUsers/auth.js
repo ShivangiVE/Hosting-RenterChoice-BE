@@ -10,12 +10,14 @@ const {
   forgotPassword,
   resetPassword,
   verifyOtp,
+  uploadProfileImage,
 } = require("../../controllers/externlusers/authController");
 const {
   registerValidator,
   loginValidator,
 } = require("../../validators/authValidator");
 const validate = require("../../middleware/validate");
+const profileUpload = require("../../middleware/profileUpload");
 
 // Public
 router.post("/register", registerValidator, validate, register);
@@ -28,6 +30,12 @@ router.post("/reset", resetPassword);
 
 // Protected routes
 router.put("/profile", protect, updateProfile);
+router.post(
+  "/profile/avatar",
+  protect,
+  profileUpload.single("avatar"),
+  uploadProfileImage
+);
 router.put("/change-password", protect, changePassword);
 
 module.exports = router;

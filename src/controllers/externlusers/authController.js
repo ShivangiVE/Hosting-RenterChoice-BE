@@ -7,6 +7,7 @@ const {
   sendForgotPasswordOTPEmail,
 } = require("../../services/emailService");
 const { sendError, sendSuccess } = require("../../utils/response");
+const { uploadFile, deleteFile } = require("../../utils/storageService");
 
 // Allowed roles
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
@@ -159,6 +160,37 @@ exports.updateProfile = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+exports.uploadProfileImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return sendError(res, "No image file provided", 400);
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return sendError(res, "User not found", 404);
+    }
+
+    // Delete old avatar if exists
+    if (user.profileImage) {
+      await deleteFile(user.profileImage);
+    }
+
+    // Upload new avatar
+    const imageUrl = await uploadFile(req.file, "uploads/avatars");
+
+    user.profileImage = imageUrl;
+    await user.save();
+
+    return sendSuccess(res, "Profile image updated", {
+      profileImage: imageUrl,
+    });
+  } catch (err) {
+    console.error(err);
+    return sendError(res, "Failed to upload profile image", 500);
   }
 };
 
