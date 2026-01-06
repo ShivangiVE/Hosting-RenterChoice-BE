@@ -1,25 +1,33 @@
 const fs = require("fs");
-const path = require("path");
 const multer = require("multer");
+const path = require("path");
 
-// Ensure the uploads folder exists
-const uploadDir = path.resolve("uploads"); // Always resolves to project root
+// Ensure uploads/avatars directory exists
+const uploadDir = path.join(process.cwd(), "uploads", "avatars");
+
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true }); // Ensures parent folders are created if not exist
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Configure where and how the files will be stored
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir); // Use the absolute path
-  },
-  filename: function (req, file, cb) {
+  destination: uploadDir,
+  filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
-    cb(null, `${Date.now()}-${file.fieldname}${ext}`);
+    cb(null, `avatar-${req.user.id}-${Date.now()}${ext}`);
   },
 });
 
-// Optional: Add file filter or limits if needed
-const profileUpload = multer({ storage });
+const fileFilter = (req, file, cb) => {
+  if (!file.mimetype.startsWith("image/")) {
+    return cb(new Error("Only image files are allowed"), false);
+  }
+  cb(null, true);
+};
+
+const profileUpload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+});
 
 module.exports = profileUpload;

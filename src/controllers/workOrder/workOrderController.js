@@ -958,6 +958,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
         400
       );
     }
+
     const maxAllowedDate = addMonths(currentDueDate, 3);
     if (requested > maxAllowedDate) {
       return sendError(
@@ -967,7 +968,6 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       );
     }
 
-    //  Work order must be assigned to a vendor
     if (!workOrder.vendor) {
       return sendError(
         res,
@@ -976,7 +976,6 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       );
     }
 
-    // Logged-in vendor must be the assigned vendor
     if (workOrder.vendor.toString() !== req.user._id.toString()) {
       return sendError(
         res,
@@ -985,7 +984,6 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       );
     }
 
-    //  BLOCK CLOSED WORK ORDERS
     if (workOrder.status === "closed") {
       return sendError(
         res,
@@ -994,7 +992,6 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       );
     }
 
-    // Status check
     const dyn = await WODynamicStatus.findById(workOrder.dynamicStatus);
     if (["Completed", "Declined"].includes(dyn?.name)) {
       return sendError(
@@ -1016,6 +1013,25 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       );
     }
 
+    // Save previous extension to history if it exists
+    if (workOrder.dueDateExtension?.reason) {
+      if (!workOrder.dueDateExtensionHistory) {
+        workOrder.dueDateExtensionHistory = [];
+      }
+
+      workOrder.dueDateExtensionHistory.push({
+        requestedBy: workOrder.dueDateExtension.requestedBy,
+        requestedDate: workOrder.dueDateExtension.requestedDate,
+        requestedAt: workOrder.dueDateExtension.requestedAt,
+        reason: workOrder.dueDateExtension.reason,
+        status: workOrder.dueDateExtension.status,
+        reviewedBy: workOrder.dueDateExtension.reviewedBy,
+        reviewedAt: workOrder.dueDateExtension.reviewedAt,
+        reviewRemarks: workOrder.dueDateExtension.reviewRemarks,
+      });
+    }
+
+    // Create new extension request
     workOrder.dueDateExtension = {
       requestedBy: req.user._id,
       requestedDate: new Date(requestedDate),
@@ -1024,6 +1040,8 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       status: "pending",
     };
 
+    workOrder.markModified("dueDateExtension");
+    workOrder.markModified("dueDateExtensionHistory");
     await workOrder.save();
 
     // Socket / Notification
@@ -1042,9 +1060,8 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
 exports.reviewDueDateExtension = async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, remarks } = req.body; // "approved" | "rejected"
+    const { action, remarks } = req.body;
 
-    //  DEFENSE-IN-DEPTH ROLE CHECK
     if (!["Admin", "OfficeAdmin", "RepairsTeam"].includes(req.user.role)) {
       return sendError(
         res,
@@ -1057,7 +1074,6 @@ exports.reviewDueDateExtension = async (req, res) => {
       return sendError(res, "Invalid action", 400);
     }
 
-    //  Mandatory remarks on rejection
     if (action === "rejected" && (!remarks || !remarks.trim())) {
       return sendError(
         res,
@@ -1088,12 +1104,30 @@ exports.reviewDueDateExtension = async (req, res) => {
       }
 
       workOrder.dueDate = new Date(newDueDate);
-
-      workOrder.dueDateExtension.status = "approved";
     }
+
+    // Move reviewed extension to history
+    if (!workOrder.dueDateExtensionHistory) {
+      workOrder.dueDateExtensionHistory = [];
+    }
+
+    workOrder.dueDateExtensionHistory.push({
+      requestedBy: workOrder.dueDateExtension.requestedBy,
+      requestedDate: workOrder.dueDateExtension.requestedDate,
+      requestedAt: workOrder.dueDateExtension.requestedAt,
+      reason: workOrder.dueDateExtension.reason,
+      status: workOrder.dueDateExtension.status,
+      reviewedBy: workOrder.dueDateExtension.reviewedBy,
+      reviewedAt: workOrder.dueDateExtension.reviewedAt,
+      reviewRemarks: workOrder.dueDateExtension.reviewRemarks,
+    });
+
+    // Clear current extension (it's now in history)
+    workOrder.dueDateExtension = undefined;
 
     workOrder.markModified("dueDate");
     workOrder.markModified("dueDateExtension");
+    workOrder.markModified("dueDateExtensionHistory");
     await workOrder.save();
 
     // Notify vendor
@@ -1103,7 +1137,7 @@ exports.reviewDueDateExtension = async (req, res) => {
         workOrderId: workOrder._id,
         status: action,
         newDueDate: workOrder.dueDate,
-        remarks: workOrder.dueDateExtension.reviewRemarks,
+        remarks: remarks,
       });
 
     return sendSuccess(res, `Request ${action}`, { workOrder });
@@ -1460,21 +1494,20 @@ exports.vendorBulkConfirmKeyReturn = async (req, res) => {
 exports.getWorkOrderTimeline = async (req, res) => {
   try {
     const { workOrderId } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
-    const skip = (page - 1) * limit;
 
     // Fetch work order with extension data
     const workOrder = await WorkOrder.findById(workOrderId)
       .populate("dueDateExtension.requestedBy", "preferredName email")
       .populate("dueDateExtension.reviewedBy", "preferredName email")
-      .select("dueDateExtension createdAt");
+      .populate("dueDateExtensionHistory.requestedBy", "preferredName email")
+      .populate("dueDateExtensionHistory.reviewedBy", "preferredName email")
+      .select("dueDateExtension dueDateExtensionHistory createdAt");
 
     if (!workOrder) {
       return sendError(res, "Work order not found", 404);
     }
 
-    // Fetch notes
+    // Fetch ALL notes at once (no limit)
     const notes = await Note.find({ workOrder: workOrderId })
       .populate("category", "name")
       .populate("createdBy", "preferredName technicianName companyName email")
@@ -1484,7 +1517,7 @@ exports.getWorkOrderTimeline = async (req, res) => {
     // Build timeline items
     let timelineItems = [];
 
-    // Add notes as timeline items
+    // Add notes
     notes.forEach((note) => {
       timelineItems.push({
         _id: note._id,
@@ -1497,49 +1530,53 @@ exports.getWorkOrderTimeline = async (req, res) => {
       });
     });
 
-    // Add extension request if exists
+    // Add current extension request
     if (workOrder.dueDateExtension?.reason) {
       timelineItems.push({
-        _id: `extension_request_${workOrderId}`,
+        _id: `extension_request_current`,
         type: "extension_request",
         description: workOrder.dueDateExtension.reason,
         requestedDate: workOrder.dueDateExtension.requestedDate,
         status: workOrder.dueDateExtension.status,
         createdBy: workOrder.dueDateExtension.requestedBy,
         createdAt:
-          workOrder.dueDateExtension.requestedBy?.createdAt ||
-          workOrder.createdAt,
+          workOrder.dueDateExtension.requestedAt || workOrder.createdAt,
       });
     }
 
-    // Add extension review if exists
-    if (
-      workOrder.dueDateExtension?.reviewRemarks &&
-      workOrder.dueDateExtension?.status !== "pending"
-    ) {
-      timelineItems.push({
-        _id: `extension_review_${workOrderId}`,
-        type: "extension_review",
-        description: workOrder.dueDateExtension.reviewRemarks,
-        status: workOrder.dueDateExtension.status,
-        reviewedAt: workOrder.dueDateExtension.reviewedAt,
-        createdBy: workOrder.dueDateExtension.reviewedBy,
-        createdAt: workOrder.dueDateExtension.reviewedAt,
+    // Add historical extensions
+    if (workOrder.dueDateExtensionHistory?.length > 0) {
+      workOrder.dueDateExtensionHistory.forEach((ext, index) => {
+        timelineItems.push({
+          _id: `extension_request_history_${index}`,
+          type: "extension_request",
+          description: ext.reason,
+          requestedDate: ext.requestedDate,
+          status: ext.status,
+          createdBy: ext.requestedBy,
+          createdAt: ext.requestedAt || workOrder.createdAt,
+        });
+
+        if (ext.reviewRemarks && ext.status !== "pending") {
+          timelineItems.push({
+            _id: `extension_review_history_${index}`,
+            type: "extension_review",
+            description: ext.reviewRemarks,
+            status: ext.status,
+            reviewedAt: ext.reviewedAt,
+            createdBy: ext.reviewedBy,
+            createdAt: ext.reviewedAt,
+          });
+        }
       });
     }
 
     // Sort by date (most recent first)
     timelineItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    // Pagination
-    const total = timelineItems.length;
-    const paginatedItems = timelineItems.slice(skip, skip + limit);
-
     return sendSuccess(res, "Timeline fetched successfully", {
-      timeline: paginatedItems,
-      total,
-      page,
-      pages: Math.ceil(total / limit),
+      timeline: timelineItems,
+      total: timelineItems.length,
     });
   } catch (err) {
     console.error("Error fetching timeline:", err);
