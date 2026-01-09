@@ -43,6 +43,15 @@ const {
   vendorBulkConfirmKeyReturn,
   getWorkOrderTimeline,
 } = require("../../controllers/workOrder/workOrderController");
+const {
+  createAppointment,
+  getVendorAppointments,
+  getEligibleWorkOrdersForScheduling,
+  getAppointmentDetails,
+  rescheduleAppointment,
+  cancelAppointment,
+  getWorkOrderAppointment,
+} = require("../../controllers/workOrder/workOrderAppointmentController");
 
 const router = express.Router();
 
@@ -225,6 +234,63 @@ router.post(
   protect,
   authorize(...ALLOWED_ROLES),
   bulkDeleteWorkOrders
+);
+
+// ========================= RC Schedule (Vendor Appointments) =========================
+
+// Get eligible work orders for scheduling appointment
+router.get(
+  "/eligible-work-orders",
+  protect,
+  authorize("Vendor"),
+  getEligibleWorkOrdersForScheduling
+);
+
+// Create appointment
+router.post(
+  "/vendor/work-orders/appointments",
+  protect,
+  authorize("Vendor"),
+  createAppointment
+);
+
+// Get all appointments for logged-in vendor
+router.get(
+  "/vendor/work-orders/appointments",
+  protect,
+  authorize("Vendor"),
+  getVendorAppointments
+);
+
+// Get single appointment details
+router.get(
+  "/vendor/work-orders/appointments/:id",
+  protect,
+  authorize("Vendor"),
+  getAppointmentDetails
+);
+
+router.get(
+  "/vendor/work-orders/:workOrderId/appointment",
+  protect,
+  authorize("Vendor"),
+  getWorkOrderAppointment
+);
+
+// Reschedule appointment
+router.put(
+  "/vendor/work-orders/appointments/:id/reschedule",
+  protect,
+  authorize("Vendor"),
+  rescheduleAppointment
+);
+
+// Cancel appointment
+router.put(
+  "/vendor/work-orders/appointments/:id/cancel",
+  protect,
+  authorize("Vendor"),
+  cancelAppointment
 );
 
 // ========================= Inspection Requests =========================
