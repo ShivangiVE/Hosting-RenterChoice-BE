@@ -15,6 +15,7 @@ const { sendSuccess, sendError } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const { getIO } = require("../../../socket");
 const { createNotification } = require("../../services/notificationService");
+const { validateFutureOrTodayDate } = require("../../utils/dateValidator");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -95,6 +96,10 @@ exports.createWorkOrder = async (req, res) => {
         "No default dynamic status set. Please configure one.",
         400
       );
+    }
+
+    if (dueDate) {
+      validateFutureOrTodayDate(dueDate, "Due date");
     }
 
     // If a file was uploaded, build a public URL
@@ -658,6 +663,10 @@ exports.updateWorkOrder = async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
+
+    if (updateData.dueDate) {
+      validateFutureOrTodayDate(updateData.dueDate, "Due date");
+    }
 
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder) return sendError(res, "Work order not found", 404);
@@ -1510,7 +1519,10 @@ exports.getWorkOrderTimeline = async (req, res) => {
     // Fetch ALL notes at once (no limit)
     const notes = await Note.find({ workOrder: workOrderId })
       .populate("category", "name")
-      .populate("createdBy", "preferredName technicianName companyName email")
+      .populate(
+        "createdBy",
+        "preferredName technicianName companyName email profileImage"
+      )
       .sort({ createdAt: -1 })
       .select("subject description category createdBy createdAt");
 
@@ -1742,6 +1754,10 @@ exports.createInspectionRequest = async (req, res) => {
       dueDate,
       inspectionColour,
     } = req.body;
+
+    if (dueDate) {
+      validateFutureOrTodayDate(dueDate, "Due date");
+    }
 
     // Generate inspection number
     const sequence = await getNextSequence("inspection");
@@ -2054,6 +2070,10 @@ exports.updateInspectionRequest = async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
+
+    if (updateData.dueDate) {
+      validateFutureOrTodayDate(updateData.dueDate, "Due date");
+    }
 
     // If scheduleDate is provided, mark status as scheduled
     if (updateData.scheduleDate) {

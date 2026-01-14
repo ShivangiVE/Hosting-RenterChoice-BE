@@ -501,9 +501,22 @@ exports.getVendorAppointments = async (req, res) => {
     { $sort: { scheduledDate: 1 } },
   ]);
 
-  return sendSuccess(res, "Appointments fetched", { appointments });
-};
+  const appointmentsWithPermissions = appointments.map((apt) => {
+    const isPast = isAppointmentInPast(apt.scheduledDate, apt.timeSlot);
 
+    return {
+      ...apt,
+      isPast,
+      canReschedule:
+        !isPast && ["scheduled", "rescheduled"].includes(apt.status),
+      canCancel: !isPast && ["scheduled", "rescheduled"].includes(apt.status),
+    };
+  });
+
+  return sendSuccess(res, "Appointments fetched", {
+    appointments: appointmentsWithPermissions,
+  });
+};
 
 /**
  * Get single appointment details
