@@ -48,6 +48,12 @@ module.exports = {
         socket.join(`vendor:${userId}`);
       }
 
+      // JOIN WORK ORDER ROOM (Timeline updates)
+      socket.on("join_workorder", (workOrderId) => {
+        if (!workOrderId) return;
+        socket.join(`workorder:${workOrderId}`);
+      });
+
       // CHAT EVENTS START HERE
       // 1️ JOIN CONVERSATION ROOM
       socket.on("join_conversation", (conversationId) => {

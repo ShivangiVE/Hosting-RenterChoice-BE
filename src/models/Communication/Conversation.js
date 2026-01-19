@@ -11,7 +11,7 @@ const conversationSchema = new mongoose.Schema(
     workOrder: { type: mongoose.Schema.Types.ObjectId, ref: "WorkOrder" },
     lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Conversation", conversationSchema);

@@ -22,7 +22,7 @@ const getNextSequence = async (sequenceName) => {
   const counter = await Counter.findByIdAndUpdate(
     sequenceName,
     { $inc: { sequence_value: 1 } },
-    { new: true, upsert: true }
+    { new: true, upsert: true },
   );
   return counter.sequence_value;
 };
@@ -76,6 +76,8 @@ const addMonths = (date, months) => {
   return d;
 };
 
+const DEFAULT_LIMIT = 15;
+
 // Create Work Order
 exports.createWorkOrder = async (req, res) => {
   try {
@@ -94,7 +96,7 @@ exports.createWorkOrder = async (req, res) => {
       return sendError(
         res,
         "No default dynamic status set. Please configure one.",
-        400
+        400,
       );
     }
 
@@ -221,7 +223,7 @@ exports.getWorkOrders = async (req, res) => {
       filter.building = filter.building
         ? {
             $in: buildingIdsByPortfolio.filter(
-              (id) => id.toString() === filter.building.toString()
+              (id) => id.toString() === filter.building.toString(),
             ),
           }
         : { $in: buildingIdsByPortfolio };
@@ -236,7 +238,7 @@ exports.getWorkOrders = async (req, res) => {
       if (filter.building && filter.building.$in) {
         // intersect with existing building filter
         filter.building.$in = filter.building.$in.filter((id) =>
-          buildingIdsByCity.includes(id)
+          buildingIdsByCity.includes(id),
         );
       } else if (filter.building) {
         filter.building = buildingIdsByCity.includes(filter.building)
@@ -519,7 +521,7 @@ exports.getVendorWorkOrders = async (req, res) => {
     const workOrders = await WorkOrder.find(filter)
       .populate(
         "building",
-        "formData.address formData.fullAddress formData.city formData.keyNumber formData.lockCode buildingAbbreviation status"
+        "formData.address formData.fullAddress formData.city formData.keyNumber formData.lockCode buildingAbbreviation status",
       )
       .populate("category", "name")
       .populate("dynamicStatus", "name")
@@ -538,7 +540,7 @@ exports.getVendorWorkOrders = async (req, res) => {
         },
         {
           $set: { vendorSeenAt: new Date() },
-        }
+        },
       );
     }
 
@@ -616,7 +618,7 @@ exports.getWorkOrdersByBuilding = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch work orders by building",
-      500
+      500,
     );
   }
 };
@@ -680,13 +682,13 @@ exports.updateWorkOrder = async (req, res) => {
       if (workOrder.fileUrl) await deleteFile(workOrder.fileUrl);
       updateData.fileUrl = await uploadFile(
         req.file,
-        "uploads/Repair/workOrders"
+        "uploads/Repair/workOrders",
       );
     }
 
     if (updateData.dynamicStatus) {
       const statusExists = await WODynamicStatus.findById(
-        updateData.dynamicStatus
+        updateData.dynamicStatus,
       );
       if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
     }
@@ -752,7 +754,7 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
     return sendError(
       res,
       "You are not allowed to decline this work order",
-      403
+      403,
     );
   }
 
@@ -780,7 +782,7 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
     // Only dynamicStatus is allowed
     const allowed = ["dynamicStatus"];
     const invalid = Object.keys(updates).filter(
-      (key) => !allowed.includes(key)
+      (key) => !allowed.includes(key),
     );
     if (invalid.length > 0) {
       return sendError(res, `You cannot update: ${invalid.join(", ")}`, 400);
@@ -799,7 +801,7 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
         return sendError(
           res,
           `Vendors are not allowed to change status to ${newStatus.name}`,
-          403
+          403,
         );
       }
     }
@@ -824,7 +826,7 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
       return sendError(
         res,
         `You cannot change dynamic status because it is already marked as ${currentStatusName}`,
-        400
+        400,
       );
     }
 
@@ -833,7 +835,7 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
       return sendError(
         res,
         "You cannot update status because the work order is already closed",
-        400
+        400,
       );
     }
 
@@ -850,7 +852,7 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
 
     const updated = await WorkOrder.findById(id).populate(
       "dynamicStatus",
-      "name description"
+      "name description",
     );
 
     return sendSuccess(res, "Work order updated", { workOrder: updated });
@@ -884,7 +886,7 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
       return sendError(
         res,
         `You are not allowed to update status to ${statusExists.name}`,
-        403
+        403,
       );
     }
 
@@ -898,7 +900,7 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
       return sendError(
         res,
         "One or more work orders do not belong to this vendor",
-        403
+        403,
       );
     }
 
@@ -910,7 +912,7 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
         return sendError(
           res,
           `Cannot update Work Order ${wo.workOrderNumber} because its status is already ${dynName}`,
-          400
+          400,
         );
       }
 
@@ -918,7 +920,7 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
         return sendError(
           res,
           `Cannot update Work Order ${wo.workOrderNumber} because it is already closed`,
-          400
+          400,
         );
       }
     }
@@ -964,7 +966,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "Cannot request extension because due date is not set",
-        400
+        400,
       );
     }
 
@@ -973,7 +975,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "Extension request cannot exceed 3 months from the current due date",
-        400
+        400,
       );
     }
 
@@ -981,7 +983,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "This work order is not assigned to any vendor",
-        403
+        403,
       );
     }
 
@@ -989,7 +991,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "You can request an extension only for work orders assigned to you",
-        403
+        403,
       );
     }
 
@@ -997,7 +999,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "Cannot request due date extension for a closed work order",
-        400
+        400,
       );
     }
 
@@ -1006,7 +1008,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "Cannot request extension for completed or declined work order",
-        400
+        400,
       );
     }
 
@@ -1018,7 +1020,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "An extension request is already pending approval",
-        400
+        400,
       );
     }
 
@@ -1059,6 +1061,21 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
       workOrderNumber: workOrder.workOrderNumber,
     });
 
+    getIO()
+      .to(`workorder:${workOrder._id}`)
+      .emit("timeline:new-item", {
+        workOrderId: workOrder._id,
+        item: {
+          _id: "extension_current",
+          type: "extension_request",
+          description: reason,
+          requestedDate,
+          status: "pending",
+          createdBy: req.user._id,
+          createdAt: new Date(),
+        },
+      });
+
     return sendSuccess(res, "Due date extension requested", { workOrder });
   } catch (err) {
     return sendError(res, err.message, 500);
@@ -1075,7 +1092,7 @@ exports.reviewDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "You are not authorized to review due date extensions",
-        403
+        403,
       );
     }
 
@@ -1087,7 +1104,7 @@ exports.reviewDueDateExtension = async (req, res) => {
       return sendError(
         res,
         "Remarks are mandatory when rejecting an extension request",
-        400
+        400,
       );
     }
 
@@ -1149,6 +1166,20 @@ exports.reviewDueDateExtension = async (req, res) => {
         remarks: remarks,
       });
 
+    getIO()
+      .to(`workorder:${workOrder._id}`)
+      .emit("timeline:new-item", {
+        workOrderId: workOrder._id,
+        item: {
+          _id: `extension_review_${Date.now()}`,
+          type: "extension_review",
+          description: remarks,
+          status: action, // approved | rejected
+          createdBy: req.user._id,
+          createdAt: new Date(),
+        },
+      });
+
     return sendSuccess(res, `Request ${action}`, { workOrder });
   } catch (err) {
     return sendError(res, err.message, 500);
@@ -1181,7 +1212,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
         return sendError(
           res,
           "Invoice upload is mandatory when 'Upload Now' is selected",
-          400
+          400,
         );
       }
     }
@@ -1192,7 +1223,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
       return sendError(
         res,
         "Key return selection is mandatory because a key was issued",
-        400
+        400,
       );
     }
 
@@ -1284,6 +1315,19 @@ exports.markWorkOrderCompleted = async (req, res) => {
       });
     }
 
+    getIO()
+      .to(`workorder:${id}`)
+      .emit("timeline:new-item", {
+        workOrderId: id,
+        item: {
+          _id: createdNote._id,
+          type: "note",
+          description: createdNote.description,
+          createdBy: req.user._id,
+          createdAt: createdNote.createdAt,
+        },
+      });
+
     // UPDATE WORK ORDER STATUS
     const completedStatus = await WODynamicStatus.findOne({
       name: "Completed",
@@ -1318,7 +1362,7 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
 
     const workOrder = await WorkOrder.findById(id).populate(
       "dynamicStatus",
-      "name"
+      "name",
     );
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
@@ -1336,7 +1380,7 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
       return sendError(
         res,
         "Invoice can only be uploaded after work order is completed",
-        400
+        400,
       );
     }
 
@@ -1394,7 +1438,7 @@ exports.vendorConfirmKeyReturn = async (req, res) => {
 
   const workOrder = await WorkOrder.findById(id).populate(
     "dynamicStatus",
-    "name"
+    "name",
   );
   if (!workOrder) return sendError(res, "Work order not found", 404);
 
@@ -1441,7 +1485,7 @@ exports.vendorBulkConfirmKeyReturn = async (req, res) => {
       return sendError(
         res,
         "One or more work orders are invalid or unauthorized",
-        403
+        403,
       );
     }
 
@@ -1481,7 +1525,7 @@ exports.vendorBulkConfirmKeyReturn = async (req, res) => {
           "keyReturn.returnedAt": new Date(),
           "keyReturn.returnedBy": vendorId,
         },
-      }
+      },
     );
 
     // getIO().to(`vendor:${vendorId}`).emit("work-order:key-returned", {
@@ -1503,79 +1547,85 @@ exports.vendorBulkConfirmKeyReturn = async (req, res) => {
 exports.getWorkOrderTimeline = async (req, res) => {
   try {
     const { workOrderId } = req.params;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || DEFAULT_LIMIT;
+    const skip = (page - 1) * limit;
+    const includeMeta = req.query.includeMeta === "true";
 
-    // Fetch work order with extension data
     const workOrder = await WorkOrder.findById(workOrderId)
-      .populate("dueDateExtension.requestedBy", "preferredName email")
-      .populate("dueDateExtension.reviewedBy", "preferredName email")
-      .populate("dueDateExtensionHistory.requestedBy", "preferredName email")
-      .populate("dueDateExtensionHistory.reviewedBy", "preferredName email")
-      .select("dueDateExtension dueDateExtensionHistory createdAt");
+      .populate(
+        "dueDateExtension.requestedBy",
+        "preferredName email profileImage",
+      )
+      .populate(
+        "dueDateExtension.reviewedBy",
+        "preferredName email profileImage",
+      )
+      .populate(
+        "dueDateExtensionHistory.requestedBy",
+        "preferredName email profileImage",
+      )
+      .populate(
+        "dueDateExtensionHistory.reviewedBy",
+        "preferredName email profileImage",
+      );
 
     if (!workOrder) {
       return sendError(res, "Work order not found", 404);
     }
 
-    // Fetch ALL notes at once (no limit)
+    // NOTES — PAGINATED
     const notes = await Note.find({ workOrder: workOrderId })
       .populate("category", "name")
-      .populate(
-        "createdBy",
-        "preferredName technicianName companyName email profileImage"
-      )
+      .populate("createdBy", "preferredName technicianName email profileImage")
       .sort({ createdAt: -1 })
-      .select("subject description category createdBy createdAt");
+      .skip(skip)
+      .limit(limit);
 
-    // Build timeline items
     let timelineItems = [];
 
-    // Add notes
     notes.forEach((note) => {
       timelineItems.push({
         _id: note._id,
         type: "note",
         description: note.description,
-        subject: note.subject,
         category: note.category,
         createdBy: note.createdBy,
         createdAt: note.createdAt,
       });
     });
 
-    // Add current extension request
-    if (workOrder.dueDateExtension?.reason) {
-      timelineItems.push({
-        _id: `extension_request_current`,
-        type: "extension_request",
-        description: workOrder.dueDateExtension.reason,
-        requestedDate: workOrder.dueDateExtension.requestedDate,
-        status: workOrder.dueDateExtension.status,
-        createdBy: workOrder.dueDateExtension.requestedBy,
-        createdAt:
-          workOrder.dueDateExtension.requestedAt || workOrder.createdAt,
-      });
-    }
-
-    // Add historical extensions
-    if (workOrder.dueDateExtensionHistory?.length > 0) {
-      workOrder.dueDateExtensionHistory.forEach((ext, index) => {
+    // EXTENSIONS (only once – first page)
+    if (page === 1 && includeMeta) {
+      if (workOrder.dueDateExtension?.reason) {
         timelineItems.push({
-          _id: `extension_request_history_${index}`,
+          _id: "extension_current",
+          type: "extension_request",
+          description: workOrder.dueDateExtension.reason,
+          requestedDate: workOrder.dueDateExtension.requestedDate,
+          status: workOrder.dueDateExtension.status,
+          createdBy: workOrder.dueDateExtension.requestedBy,
+          createdAt: workOrder.dueDateExtension.requestedAt,
+        });
+      }
+
+      workOrder.dueDateExtensionHistory?.forEach((ext, index) => {
+        timelineItems.push({
+          _id: `extension_request_${index}`,
           type: "extension_request",
           description: ext.reason,
           requestedDate: ext.requestedDate,
           status: ext.status,
           createdBy: ext.requestedBy,
-          createdAt: ext.requestedAt || workOrder.createdAt,
+          createdAt: ext.requestedAt,
         });
 
-        if (ext.reviewRemarks && ext.status !== "pending") {
+        if (ext.reviewRemarks) {
           timelineItems.push({
-            _id: `extension_review_history_${index}`,
+            _id: `extension_review_${index}`,
             type: "extension_review",
             description: ext.reviewRemarks,
             status: ext.status,
-            reviewedAt: ext.reviewedAt,
             createdBy: ext.reviewedBy,
             createdAt: ext.reviewedAt,
           });
@@ -1583,15 +1633,19 @@ exports.getWorkOrderTimeline = async (req, res) => {
       });
     }
 
-    // Sort by date (most recent first)
+    const totalNotes = await Note.countDocuments({ workOrder: workOrderId });
+
     timelineItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    return sendSuccess(res, "Timeline fetched successfully", {
+    return sendSuccess(res, "Timeline fetched", {
       timeline: timelineItems,
-      total: timelineItems.length,
+      pagination: {
+        page,
+        limit,
+        hasMore: skip + notes.length < totalNotes,
+      },
     });
   } catch (err) {
-    console.error("Error fetching timeline:", err);
     return sendError(res, err.message || "Failed to fetch timeline", 500);
   }
 };
@@ -1646,7 +1700,7 @@ exports.bulkDeleteWorkOrders = async (req, res) => {
     const result = await WorkOrder.deleteMany({ _id: { $in: ids } });
     return sendSuccess(
       res,
-      `${result.deletedCount} work orders deleted successfully`
+      `${result.deletedCount} work orders deleted successfully`,
     );
   } catch (err) {
     return sendError(res, err.message || "Failed to delete work orders", 500);
@@ -1726,7 +1780,7 @@ exports.bulkCloseWorkOrders = async (req, res) => {
           completeDate: new Date(),
           ...(comments ? { closingComments: comments } : {}),
         },
-      }
+      },
     );
 
     return res.json({
@@ -1779,13 +1833,13 @@ exports.createInspectionRequest = async (req, res) => {
       res,
       "Inspection request created successfully",
       { inspectionRequest },
-      201
+      201,
     );
   } catch (err) {
     return sendError(
       res,
       err.message || "Failed to create inspection request",
-      500
+      500,
     );
   }
 };
@@ -1891,7 +1945,7 @@ exports.getInspectionRequests = async (req, res) => {
 
         filter.building = {
           $in: buildingIdsByCity.filter((id) =>
-            buildingIdsByAddress.includes(id)
+            buildingIdsByAddress.includes(id),
           ),
         };
         delete filter["building.formData.address"];
@@ -1973,7 +2027,7 @@ exports.getInspectionRequests = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch inspection requests",
-      500
+      500,
     );
   }
 };
@@ -2060,7 +2114,7 @@ exports.getInspectionRequestsByBuilding = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch inspection requests by building",
-      500
+      500,
     );
   }
 };
@@ -2083,7 +2137,7 @@ exports.updateInspectionRequest = async (req, res) => {
     const inspectionRequest = await InspectionRequest.findByIdAndUpdate(
       id,
       updateData,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!inspectionRequest)
@@ -2096,7 +2150,7 @@ exports.updateInspectionRequest = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to update inspection request",
-      500
+      500,
     );
   }
 };
@@ -2150,7 +2204,7 @@ exports.bulkCloseInspectionRequests = async (req, res) => {
           completeDate: new Date(),
           ...(comments ? { closingComments: comments } : {}),
         },
-      }
+      },
     );
 
     return res.json({
@@ -2182,7 +2236,7 @@ exports.deleteInspectionRequest = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to delete inspection request",
-      500
+      500,
     );
   }
 };
@@ -2252,13 +2306,13 @@ exports.createServiceAgreement = async (req, res) => {
       res,
       "Service agreement created successfully",
       { serviceAgreement },
-      201
+      201,
     );
   } catch (err) {
     return sendError(
       res,
       err.message || "Failed to create service agreement",
-      500
+      500,
     );
   }
 };
@@ -2304,7 +2358,7 @@ exports.getServiceAgreements = async (req, res) => {
     //  Vendor Status (via User collection lookup)
     if (vendorStatus && vendorStatus !== "All") {
       const vendorIds = await User.find({ status: vendorStatus }).distinct(
-        "_id"
+        "_id",
       );
       filter.vendor = { $in: vendorIds };
     }
@@ -2380,7 +2434,7 @@ exports.getServiceAgreements = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch service agreements",
-      500
+      500,
     );
   }
 };
@@ -2427,7 +2481,7 @@ exports.getServiceAgreementsByBuilding = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch service agreements by building",
-      500
+      500,
     );
   }
 };
@@ -2460,7 +2514,7 @@ exports.updateServiceAgreement = async (req, res) => {
       if (serviceAgreement.fileUrl) await deleteFile(serviceAgreement.fileUrl);
       updateData.fileUrl = await uploadFile(
         req.file,
-        "uploads/Repair/serviceAgreements"
+        "uploads/Repair/serviceAgreements",
       );
     }
 
@@ -2476,7 +2530,7 @@ exports.updateServiceAgreement = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to update service agreement",
-      500
+      500,
     );
   }
 };
@@ -2501,7 +2555,7 @@ exports.deleteServiceAgreement = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to delete service agreement",
-      500
+      500,
     );
   }
 };
@@ -2521,13 +2575,13 @@ exports.bulkDeleteServiceAgreements = async (req, res) => {
     const result = await ServiceAgreement.deleteMany({ _id: { $in: ids } });
     return sendSuccess(
       res,
-      `${result.deletedCount} service agreements deleted successfully`
+      `${result.deletedCount} service agreements deleted successfully`,
     );
   } catch (err) {
     return sendError(
       res,
       err.message || "Failed to bulk delete service agreements",
-      500
+      500,
     );
   }
 };
@@ -2583,7 +2637,7 @@ exports.bulkCloseServiceAgreements = async (req, res) => {
           closedAt: new Date(),
           ...(comments ? { closingComments: comments } : {}),
         },
-      }
+      },
     );
 
     return res.json({
@@ -2608,7 +2662,7 @@ exports.updateWorkOrderStatus = async (req, res) => {
     const workOrder = await WorkOrder.findByIdAndUpdate(
       id,
       { status },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
@@ -2620,7 +2674,7 @@ exports.updateWorkOrderStatus = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to update work order status",
-      500
+      500,
     );
   }
 };
