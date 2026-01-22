@@ -1668,6 +1668,29 @@ exports.getVendorNewWorkOrderCount = async (req, res) => {
   }
 };
 
+// Vendor Chat Work Orders
+exports.getVendorChatWorkOrders = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+
+    const workOrders = await WorkOrder.find({
+      vendor: vendorId,
+    })
+      .select("_id workOrderNumber status")
+      .populate({
+        path: "building",
+        select: "formData.address",
+      })
+      .sort({ createdAt: -1 });
+
+    return sendSuccess(res, "Chat work orders fetched", {
+      workOrders,
+    });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
 // Delete Work Order
 exports.deleteWorkOrder = async (req, res) => {
   try {
