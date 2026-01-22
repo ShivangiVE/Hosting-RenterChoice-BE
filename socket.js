@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 const User = require("./src/models/User");
 const Message = require("./src/models/Communication/Message");
 const Conversation = require("./src/models/Communication/Conversation");
+const WorkOrder = require("./src/models/WorkOrder");
+const { canSendMessage } = require("./src/domain/chatPolicy");
 
 let io;
 
@@ -63,19 +65,76 @@ module.exports = {
       // 2️ SEND MESSAGE
       socket.on("send_message", async ({ conversationId, text }) => {
         try {
+          const sender = socket.user;
+
+          if (!text || !text.trim()) {
+            return socket.emit("chat_error", {
+              message: "Message cannot be empty",
+            });
+          }
+
+          const convo = await Conversation.findById(conversationId);
+
+          if (!convo) {
+            return socket.emit("chat_error", {
+              message: "Conversation not found",
+            });
+          }
+
+          // 🔐 Ensure sender is participant
+          if (!convo.participants.includes(sender._id)) {
+            return socket.emit("chat_error", {
+              message: "Unauthorized",
+            });
+          }
+
+          // 👉 Fetch participant roles
+          const participants = await User.find({
+            _id: { $in: convo.participants },
+          }).select("role");
+
+          const receiverRoles = participants
+            .filter((p) => p._id.toString() !== sender._id.toString())
+            .map((p) => p.role);
+
+          // 👉 Fetch work order status (if linked)
+          let workOrderStatus = null;
+          if (convo.workOrder) {
+            const wo = await WorkOrder.findById(convo.workOrder).select(
+              "status",
+            );
+            workOrderStatus = wo?.status || null;
+          }
+
+          // 🔐 DOMAIN RULE CHECK
+          const allowed = canSendMessage({
+            senderRole: sender.role,
+            receiverRoles,
+            workOrderStatus,
+          });
+
+          if (!allowed) {
+            return socket.emit("chat_error", {
+              code: "CHAT_BLOCKED",
+              message:
+                "Chat with tenant is closed after work order closure. You can still contact Repairs Team.",
+            });
+          }
+
+          // ✅ Save message
           const msg = await Message.create({
             conversation: conversationId,
-            sender: socket.user._id,
-            content: text,
+            sender: sender._id,
+            content: text.trim(),
           });
 
-          await Conversation.findByIdAndUpdate(conversationId, {
-            lastMessage: msg._id,
-          });
+          convo.lastMessage = msg._id;
+          await convo.save();
 
+          // ✅ Emit to room
           io.to(`conversation:${conversationId}`).emit("new_message", msg);
         } catch (err) {
-          console.error("Send message error:", err);
+          console.error("Socket send_message error:", err);
           socket.emit("chat_error", {
             message: "Failed to send message",
           });
