@@ -25,9 +25,22 @@ exports.sendMessage = async (req, res) => {
       return res.status(404).json({ message: "Conversation not found" });
     }
 
-    //  Ensure sender is part of conversation
-    if (!conversation.participants.includes(sender._id)) {
+    // Proper ObjectId comparison
+    const isParticipant = conversation.participants.some(
+      (participantId) => participantId.toString() === sender._id.toString(),
+    );
+
+    //  Admin bypass option (Optional - remove if you don't want this)
+    const isAdmin = sender.role === "Admin" || sender.role === "OfficeAdmin";
+
+    if (!isParticipant && !isAdmin) {
       return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    //  If admin is joining for first time, add them to participants
+    if (isAdmin && !isParticipant) {
+      conversation.participants.push(sender._id);
+      await conversation.save();
     }
 
     /**
@@ -71,6 +84,9 @@ exports.sendMessage = async (req, res) => {
     // update last message
     conversation.lastMessage = message._id;
     await conversation.save();
+
+    // Populate sender for real-time display
+    await message.populate("sender", "preferredName role profileImage");
 
     // EMIT REALTIME EVENT
     getIO().to(`conversation:${conversationId}`).emit("new_message", message);

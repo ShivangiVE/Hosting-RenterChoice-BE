@@ -294,7 +294,7 @@ router.put(
   cancelAppointment,
 );
 
-// ========================= Service Agreements =========================
+// ========================= Vendor Chat Work Orders =========================
 router.get(
   "/vendor/chat",
   protect,
