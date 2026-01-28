@@ -36,19 +36,35 @@ module.exports = {
       }
     });
 
+
     io.on("connection", (socket) => {
       const userId = socket.user._id.toString();
 
       console.log("Socket connected:", userId);
 
-      //  MARK USER ONLINE
       onlineUsers.set(userId, socket.id);
-
       socket.join(`user:${userId}`);
 
-      if (socket.user.role === "Vendor") {
-        socket.join(`vendor:${userId}`);
-      }
+      // ========================================
+      // JOIN ALL GROUP CONVERSATIONS ON CONNECT
+      // ========================================
+      (async () => {
+        try {
+          const userConversations = await Conversation.find({
+            participants: socket.user._id,
+          }).select("_id type");
+
+          userConversations.forEach((conv) => {
+            socket.join(`conversation:${conv._id}`);
+          });
+
+          console.log(
+            `User ${userId} joined ${userConversations.length} conversations`,
+          );
+        } catch (err) {
+          console.error("Error joining conversations:", err);
+        }
+      })();
 
       // JOIN WORK ORDER ROOM (Timeline updates)
       socket.on("join_workorder", (workOrderId) => {
@@ -56,13 +72,12 @@ module.exports = {
         socket.join(`workorder:${workOrderId}`);
       });
 
-      // CHAT EVENTS START HERE
-      // 1️ JOIN CONVERSATION ROOM
+      // JOIN CONVERSATION ROOM
       socket.on("join_conversation", (conversationId) => {
         socket.join(`conversation:${conversationId}`);
       });
 
-      // 2️ SEND MESSAGE
+      // SEND MESSAGE 
       socket.on("send_message", async ({ conversationId, text }) => {
         try {
           const sender = socket.user;
@@ -81,23 +96,23 @@ module.exports = {
             });
           }
 
-          // 🔐 Ensure sender is participant
+          // Ensure sender is participant
           if (!convo.participants.includes(sender._id)) {
             return socket.emit("chat_error", {
               message: "Unauthorized",
             });
           }
 
-          // 👉 Fetch participant roles
+          // Fetch participant roles
           const participants = await User.find({
             _id: { $in: convo.participants },
-          }).select("role");
+          }).select("role preferredName");
 
           const receiverRoles = participants
             .filter((p) => p._id.toString() !== sender._id.toString())
             .map((p) => p.role);
 
-          // 👉 Fetch work order status (if linked)
+          // Fetch work order status (if linked)
           let workOrderStatus = null;
           if (convo.workOrder) {
             const wo = await WorkOrder.findById(convo.workOrder).select(
@@ -106,7 +121,7 @@ module.exports = {
             workOrderStatus = wo?.status || null;
           }
 
-          // 🔐 DOMAIN RULE CHECK
+          // DOMAIN RULE CHECK
           const allowed = canSendMessage({
             senderRole: sender.role,
             receiverRoles,
@@ -121,7 +136,7 @@ module.exports = {
             });
           }
 
-          // ✅ Save message
+          // Save message
           const msg = await Message.create({
             conversation: conversationId,
             sender: sender._id,
@@ -131,8 +146,12 @@ module.exports = {
           convo.lastMessage = msg._id;
           await convo.save();
 
-          // ✅ Emit to room
+          // Populate sender for real-time display
+          await msg.populate("sender", "preferredName role profileImage");
+
+          // Emit to ALL participants in the conversation room
           io.to(`conversation:${conversationId}`).emit("new_message", msg);
+
         } catch (err) {
           console.error("Socket send_message error:", err);
           socket.emit("chat_error", {
@@ -141,7 +160,7 @@ module.exports = {
         }
       });
 
-      // 3 TYPING INDICATOR
+      // TYPING INDICATOR
       socket.on("typing", (conversationId) => {
         socket.to(`conversation:${conversationId}`).emit("typing", {
           userId: socket.user._id,
@@ -149,7 +168,6 @@ module.exports = {
         });
       });
 
-      // CHAT EVENTS END HERE
       socket.on("disconnect", () => {
         const userId = socket.user._id.toString();
         onlineUsers.delete(userId);
