@@ -25,7 +25,7 @@ module.exports = {
         if (!token) return next(new Error("Authentication error"));
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id).select("_id role");
+        const user = await User.findById(decoded.id).select("_id role preferredName profileImage");
 
         if (!user) return next(new Error("User not found"));
 
