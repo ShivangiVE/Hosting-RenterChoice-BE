@@ -16,6 +16,7 @@ const { uploadFile, deleteFile } = require("../../utils/storageService");
 const { getIO } = require("../../../socket");
 const { createNotification } = require("../../services/notificationService");
 const { validateFutureOrTodayDate } = require("../../utils/dateValidator");
+const { assertVendorAccepted } = require("../../utils/vendorGuards");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -813,6 +814,7 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
     if (workOrder.vendor.toString() !== req.user._id.toString()) {
       return sendError(res, "Unauthorized vendor", 403);
     }
+    assertVendorAccepted(workOrder);
 
     const currentDyn = workOrder.dynamicStatus?.toString();
     let currentStatusName = "";
@@ -994,6 +996,7 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
         403,
       );
     }
+    assertVendorAccepted(workOrder);
 
     if (workOrder.status === "closed") {
       return sendError(
@@ -1204,6 +1207,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
       ) {
         return sendError(res, "Not authorized", 403);
       }
+      assertVendorAccepted(workOrder);
     }
 
     //  INVOICE VALIDATION
@@ -1306,27 +1310,40 @@ exports.markWorkOrderCompleted = async (req, res) => {
         });
       }
 
-      await Note.create({
-        workOrder: id,
-        category: vendorCategory._id,
-        subject: "Completion Note",
-        description: note,
-        createdBy: req.user._id,
-      });
-    }
+      let createdNote = null;
 
-    getIO()
-      .to(`workorder:${id}`)
-      .emit("timeline:new-item", {
-        workOrderId: id,
-        item: {
-          _id: createdNote._id,
-          type: "note",
-          description: createdNote.description,
+      if (note) {
+        let vendorCategory = await NoteCategory.findOne({ name: "Vendor" });
+        if (!vendorCategory) {
+          vendorCategory = await NoteCategory.create({
+            name: "Vendor",
+            createdBy: req.user._id,
+          });
+        }
+
+        createdNote = await Note.create({
+          workOrder: id,
+          category: vendorCategory._id,
+          subject: "Completion Note",
+          description: note,
           createdBy: req.user._id,
-          createdAt: createdNote.createdAt,
-        },
-      });
+        });
+
+        // Timeline socket event (SAFE)
+        getIO()
+          .to(`workorder:${id}`)
+          .emit("timeline:new-item", {
+            workOrderId: id,
+            item: {
+              _id: createdNote._id,
+              type: "note",
+              description: createdNote.description,
+              createdBy: req.user._id,
+              createdAt: createdNote.createdAt,
+            },
+          });
+      }
+    }
 
     // UPDATE WORK ORDER STATUS
     const completedStatus = await WODynamicStatus.findOne({
@@ -1762,6 +1779,7 @@ exports.closeWorkOrder = async (req, res) => {
           message: "You are not allowed to close this work order",
         });
       }
+      assertVendorAccepted(workOrder);
     }
 
     workOrder.status = "closed";

@@ -9,7 +9,8 @@ exports.getNotifications = async (req, res) => {
 
   const notifications = await Notification.find({
     user: req.user._id,
-    readAt: null,
+    deletedAt: null,
+    actionTakenAt: null,
   })
     .sort({ createdAt: -1 })
     .skip(skip)
@@ -18,6 +19,8 @@ exports.getNotifications = async (req, res) => {
   const unreadCount = await Notification.countDocuments({
     user: req.user._id,
     readAt: null,
+    deletedAt: null,
+    actionTakenAt: null,
   });
 
   return sendSuccess(res, "Notifications fetched", {
@@ -30,7 +33,7 @@ exports.getNotifications = async (req, res) => {
 exports.markNotificationRead = async (req, res) => {
   await Notification.findOneAndUpdate(
     { _id: req.params.id, user: req.user._id },
-    { readAt: new Date() }
+    { readAt: new Date() },
   );
 
   return sendSuccess(res, "Notification marked as read");
@@ -40,8 +43,36 @@ exports.markNotificationRead = async (req, res) => {
 exports.markAllNotificationsRead = async (req, res) => {
   await Notification.updateMany(
     { user: req.user._id, readAt: null },
-    { $set: { readAt: new Date() } }
+    { $set: { readAt: new Date() } },
   );
 
   return sendSuccess(res, "All notifications marked as read");
+};
+
+// MARK single notification action taken
+exports.markNotificationActionTaken = async (req, res) => {
+  await Notification.findOneAndUpdate(
+    {
+      _id: req.params.id,
+      user: req.user._id,
+      actionTakenAt: null,
+    },
+    {
+      $set: {
+        readAt: new Date(),
+        actionTakenAt: new Date(),
+      },
+    },
+  );
+  return sendSuccess(res, "Notification action handled");
+};
+
+// DeLETE single notification (soft delete)
+exports.deleteNotification = async (req, res) => {
+  await Notification.findOneAndUpdate(
+    { _id: req.params.id, user: req.user._id },
+    { deletedAt: new Date() },
+  );
+
+  return sendSuccess(res, "Notification deleted");
 };

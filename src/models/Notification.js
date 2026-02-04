@@ -40,10 +40,12 @@ const notificationSchema = new mongoose.Schema(
     metadata: {
       type: Object, // flexible (invoiceId, dueDate, status, etc)
     },
+    deletedAt: { type: Date, default: null },
+    actionTakenAt: { type: Date, default: null },
 
     readAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Notification", notificationSchema);
