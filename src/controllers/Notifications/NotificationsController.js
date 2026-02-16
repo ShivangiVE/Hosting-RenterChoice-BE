@@ -69,10 +69,18 @@ exports.markNotificationActionTaken = async (req, res) => {
 
 // DeLETE single notification (soft delete)
 exports.deleteNotification = async (req, res) => {
-  await Notification.findOneAndUpdate(
+  const deleted = await Notification.findOneAndUpdate(
     { _id: req.params.id, user: req.user._id },
-    { deletedAt: new Date() },
+    { $set: { deletedAt: new Date() } },
+    { new: true },
   );
+
+  if (!deleted) {
+    return res.status(404).json({
+      success: false,
+      message: "Notification not found",
+    });
+  }
 
   return sendSuccess(res, "Notification deleted");
 };
