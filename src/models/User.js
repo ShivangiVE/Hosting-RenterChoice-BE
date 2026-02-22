@@ -53,15 +53,20 @@ const userSchema = new mongoose.Schema(
     },
     profileImage: {
       type: String,
-      default: "", // default placeholder (can also use a service like Gravatar or random avatar)
+      default: "",
+    },
+    defaultRepairTab: {
+      type: String,
+      enum: ["Work Order", "Tasks"],
+      default: "Work Order",
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // who created this user
-    managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // optional: who manages this external user
+    managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, 
     // resetPasswordToken: { type: String },
     resetPasswordOTP: { type: String }, // 4-digit code
     resetPasswordExpires: { type: Date }, // OTP expiration time
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Hash password before save

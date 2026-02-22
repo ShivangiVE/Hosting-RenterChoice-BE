@@ -28,6 +28,7 @@ const exportRoutes = require("./src/routes/exportRoutes/exportRoutes");
 const notificationRoutes = require("./src/routes/notificationRoutes/notificationRoutes");
 const conversationRoutes = require("./src/routes/communication/conversationRoutes");
 const messageRoutes = require("./src/routes/communication/messageRoutes");
+const userPreferenceRoutes = require("./src/routes/userPreferenceRoutes/userPreferenceRoutes");
 
 const app = express();
 app.use(cors());
@@ -65,6 +66,7 @@ app.use("/api/download", exportRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/conversations", conversationRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/user-preferences", userPreferenceRoutes);
 
 app.use(errorHandler);
 
