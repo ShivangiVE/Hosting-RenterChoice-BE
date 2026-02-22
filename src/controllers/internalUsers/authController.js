@@ -43,6 +43,7 @@ exports.loginInternal = async (req, res, next) => {
       profileImage: user.profileImage,
       email: user.email,
       role: user.role,
+      defaultRepairTab: user.defaultRepairTab,
       token: generateToken(user),
     };
 
