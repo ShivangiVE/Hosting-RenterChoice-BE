@@ -60,8 +60,13 @@ const userSchema = new mongoose.Schema(
       enum: ["Work Order", "Tasks"],
       default: "Work Order",
     },
+    itemsPerPagePreference: {
+      type: Number,
+      enum: [10, 25, 50, 100],
+      default: 10,
+    },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // who created this user
-    managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, 
+    managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     // resetPasswordToken: { type: String },
     resetPasswordOTP: { type: String }, // 4-digit code
     resetPasswordExpires: { type: Date }, // OTP expiration time

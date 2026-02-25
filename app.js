@@ -66,7 +66,7 @@ app.use("/api/download", exportRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/conversations", conversationRoutes);
 app.use("/api/messages", messageRoutes);
-app.use("/api/user-preferences", userPreferenceRoutes);
+app.use("/api", userPreferenceRoutes);
 
 app.use(errorHandler);
 
