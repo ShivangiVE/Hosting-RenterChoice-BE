@@ -1,22 +1,35 @@
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 
-exports.updateRepairPreference = async (req, res) => {
+exports.updateUserPreferences = async (req, res) => {
   try {
-    const { defaultRepairTab } = req.body;
+    const { defaultRepairTab, itemsPerPagePreference } = req.body;
 
-    if (!["Work Order", "Tasks"].includes(defaultRepairTab)) {
-      return sendError(res, "Invalid tab", 400);
+    const updateData = {};
+
+    // Repair tab validation
+    if (defaultRepairTab) {
+      if (!["Work Order", "Tasks"].includes(defaultRepairTab)) {
+        return sendError(res, "Invalid tab", 400);
+      }
+      updateData.defaultRepairTab = defaultRepairTab;
     }
 
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { defaultRepairTab },
-      { new: true },
-    );
+    // Pagination validation
+    if (itemsPerPagePreference) {
+      if (![10, 25, 50, 100].includes(itemsPerPagePreference)) {
+        return sendError(res, "Invalid items per page", 400);
+      }
+      updateData.itemsPerPagePreference = itemsPerPagePreference;
+    }
 
-    return sendSuccess(res, "Preference updated", {
+    const user = await User.findByIdAndUpdate(req.user._id, updateData, {
+      new: true,
+    });
+
+    return sendSuccess(res, "Preferences updated", {
       defaultRepairTab: user.defaultRepairTab,
+      itemsPerPagePreference: user.itemsPerPagePreference,
     });
   } catch (err) {
     return sendError(res, err.message);

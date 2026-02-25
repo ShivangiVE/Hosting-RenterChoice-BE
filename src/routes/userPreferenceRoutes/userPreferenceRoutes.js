@@ -1,10 +1,10 @@
 const express = require("express");
 const { protect } = require("../../middleware/authMiddleware");
 const {
-  updateRepairPreference,
+  updateUserPreferences,
 } = require("../../controllers/UserPreferences/userPreferences");
 const router = express.Router();
 
-router.patch("/repair-tab", protect, updateRepairPreference);
+router.patch("/user-preferences", protect, updateUserPreferences);
 
 module.exports = router;
