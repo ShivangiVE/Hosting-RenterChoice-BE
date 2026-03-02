@@ -1,0 +1,132 @@
+const Company = require("../../models/ContactCards/Company");
+const VendorType = require("../../models/ContactCards/VendorType");
+const User = require("../../models/User");
+const { generateAccountNumber } = require("../../utils/generateAccountNumber");
+const { sendSuccess, sendError } = require("../../utils/response");
+
+// Create Company
+exports.createCompany = async (req, res) => {
+  try {
+    const {
+      companyName,
+      vendorType,
+      paymentName,
+      companyEmail,
+      companyPhone,
+      contactName,
+      contactEmail,
+      contactPhone,
+      notes,
+    } = req.body;
+
+    // Validation
+    if (!companyName?.trim()) {
+      return sendError(res, "Company name is required", 400);
+    }
+
+    if (!vendorType) {
+      return sendError(res, "Vendor type is required", 400);
+    }
+
+    //  Verify vendor type exists
+    const vendorExists = await VendorType.findById(vendorType);
+    if (!vendorExists) {
+      return sendError(res, "Invalid vendor type", 400);
+    }
+
+    //  ATOMIC ACCOUNT NUMBER
+    const accountNumber = await generateAccountNumber({
+      counterId: "companyAccountNumber",
+      startFrom: 100,
+      minDigits: 3,
+      maxDigits: 4,
+    });
+
+    const company = await Company.create({
+      companyName: companyName.trim(),
+      vendorType,
+      paymentName,
+      companyEmail,
+      companyPhone,
+      contactName,
+      contactEmail,
+      contactPhone,
+      notes,
+      companyAccountNumber: accountNumber,
+      createdBy: req.user?._id,
+    });
+
+    return sendSuccess(res, "Company created successfully", { company }, 201);
+  } catch (err) {
+    if (err.code === 11000) {
+      return sendError(res, "Company already exists", 400);
+    }
+    return sendError(res, err.message, 500);
+  }
+};
+
+// List of Companies
+exports.listCompanies = async (req, res) => {
+  try {
+    const { search = "", page = 1, limit = 50 } = req.query;
+
+    const query = {
+      isActive: true,
+    };
+
+    if (search) {
+      query.companyNameNormalized = {
+        $regex: search.toLowerCase(),
+        $options: "i",
+      };
+    }
+
+    const companies = await Company.find(query)
+      .populate("vendorType", "name")
+      .sort({ companyName: 1 })
+      .limit(Number(limit))
+      .skip((page - 1) * limit)
+      .lean();
+
+    return sendSuccess(res, "Companies fetched", { companies });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
+// Get single company details
+exports.getCompanyDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { includeVendors } = req.query;
+
+    //  fetch company
+    const company = await Company.findById(id)
+      .populate("vendorType", "name")
+      .lean();
+
+    if (!company) {
+      return sendError(res, "Company not found", 404);
+    }
+
+    let vendors = [];
+
+    // optionally fetch vendors
+    if (includeVendors === "true") {
+      vendors = await User.find({
+        role: "Vendor",
+        company: id,
+      })
+        .select("technicianName email accountNumber createdAt")
+        .sort({ createdAt: -1 })
+        .lean();
+    }
+
+    return sendSuccess(res, "Company fetched", {
+      company,
+      vendors,
+    });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};

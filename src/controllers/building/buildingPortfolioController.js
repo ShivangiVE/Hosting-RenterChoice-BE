@@ -3,9 +3,7 @@ const FormTemplate = require("../../models/FormTemplate");
 const Portfolio = require("../../models/Portfolio");
 const User = require("../../models/User");
 const AuditService = require("../../services/auditService");
-const {
-  generatePortfolioAccountNumber,
-} = require("../../utils/portfolioCounter");
+const { generateAccountNumber } = require("../../utils/generateAccountNumber");
 const { sendSuccess, sendError } = require("../../utils/response");
 
 /**
@@ -135,7 +133,7 @@ exports.createBuilding = async (req, res) => {
       return sendError(
         res,
         "Building Abbreviation is required for Multi Family properties",
-        400
+        400,
       );
     }
 
@@ -198,7 +196,7 @@ exports.getBuildingDetails = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch building details",
-      500
+      500,
     );
   }
 };
@@ -266,7 +264,7 @@ exports.updateBuilding = async (req, res) => {
       return sendError(
         res,
         "Building Abbreviation is required for Multi Family properties",
-        400
+        400,
       );
     }
 
@@ -283,13 +281,13 @@ exports.updateBuilding = async (req, res) => {
       if (inspectionTemplate) {
         const inspectionErrors = validateAgainstTemplate(
           inspectionTemplate,
-          inspectionData
+          inspectionData,
         );
         if (inspectionErrors.length) {
           return sendError(
             res,
             "Inspection data errors: " + inspectionErrors.join(", "),
-            400
+            400,
           );
         }
         building.inspectionData = inspectionData;
@@ -306,13 +304,13 @@ exports.updateBuilding = async (req, res) => {
       if (marketingTemplate) {
         const marketingErrors = validateAgainstTemplate(
           marketingTemplate,
-          marketingData
+          marketingData,
         );
         if (marketingErrors.length) {
           return sendError(
             res,
             "Marketing data errors: " + marketingErrors.join(", "),
-            400
+            400,
           );
         }
         building.marketingData = marketingData;
@@ -329,15 +327,15 @@ exports.updateBuilding = async (req, res) => {
     building.formData = { ...building.formData, ...formData };
     await building.save();
 
-     await AuditService.logActivity({
-      entityType: 'building',
+    await AuditService.logActivity({
+      entityType: "building",
       entityId: id,
-      action: 'updated',
+      action: "updated",
       actionDetails: `Building ${building.buildingAbbreviation} updated`,
       changes,
       performedBy: req.user._id,
       ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
+      userAgent: req.get("User-Agent"),
     });
 
     return sendSuccess(res, "Building updated successfully", {
@@ -410,7 +408,7 @@ exports.bulkUpdateBuildings = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to bulk update buildings",
-      500
+      500,
     );
   }
 };
@@ -466,7 +464,7 @@ exports.getBuildingWithInspection = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch building details",
-      500
+      500,
     );
   }
 };
@@ -505,7 +503,7 @@ exports.getBuildingWithMarketing = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch building details",
-      500
+      500,
     );
   }
 };
@@ -529,13 +527,13 @@ exports.updateBuildingInspection = async (req, res) => {
       if (inspectionTemplate) {
         const inspectionErrors = validateAgainstTemplate(
           inspectionTemplate,
-          inspectionData
+          inspectionData,
         );
         if (inspectionErrors.length) {
           return sendError(
             res,
             "Inspection data errors: " + inspectionErrors.join(", "),
-            400
+            400,
           );
         }
         building.inspectionData = inspectionData;
@@ -543,7 +541,7 @@ exports.updateBuildingInspection = async (req, res) => {
         // Check if form is complete (all required fields filled)
         const isFormComplete = checkFormCompletion(
           inspectionTemplate,
-          inspectionData
+          inspectionData,
         );
 
         // If form is complete and requestId is provided, update inspection request
@@ -579,7 +577,7 @@ exports.updateBuildingInspection = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to update building inspection",
-      500
+      500,
     );
   }
 };
@@ -603,13 +601,13 @@ exports.updateBuildingMarketing = async (req, res) => {
       if (marketingTemplate) {
         const marketingErrors = validateAgainstTemplate(
           marketingTemplate,
-          marketingData
+          marketingData,
         );
         if (marketingErrors.length) {
           return sendError(
             res,
             "Marketing data errors: " + marketingErrors.join(", "),
-            400
+            400,
           );
         }
         building.marketingData = marketingData;
@@ -617,7 +615,7 @@ exports.updateBuildingMarketing = async (req, res) => {
         // Check if form is complete (all required fields filled)
         const isFormComplete = checkFormCompletion(
           marketingTemplate,
-          marketingData
+          marketingData,
         );
 
         // If form is complete and requestId is provided, update inspection request
@@ -647,7 +645,7 @@ exports.updateBuildingMarketing = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to update building marketing",
-      500
+      500,
     );
   }
 };
@@ -711,14 +709,19 @@ exports.createPortfolio = async (req, res) => {
         return sendError(
           res,
           "One or more owners not found or invalid role",
-          400
+          400,
         );
       }
       validOwners = owners.map((owner) => owner._id);
     }
 
     // Generate portfolio account number
-    const portfolioAccountNumber = await generatePortfolioAccountNumber();
+    const portfolioAccountNumber = await generateAccountNumber({
+      counterId: "portfolioAccountNumber",
+      startFrom: 10000,
+      minDigits: 5,
+      maxDigits: 6,
+    });
 
     // Create portfolio with owners
     const portfolio = await Portfolio.create({
@@ -733,14 +736,14 @@ exports.createPortfolio = async (req, res) => {
     // Populate owners for response
     await portfolio.populate(
       "owners",
-      "firstName lastName email preferredName"
+      "firstName lastName email preferredName",
     );
 
     return sendSuccess(
       res,
       "Portfolio created successfully",
       { portfolio },
-      201
+      201,
     );
   } catch (err) {
     // Handle duplicate account number error
@@ -748,7 +751,7 @@ exports.createPortfolio = async (req, res) => {
       return sendError(
         res,
         "Duplicate portfolio account number generated. Please try again.",
-        500
+        500,
       );
     }
     return sendError(res, err.message || "Failed to create portfolio", 500);
@@ -785,7 +788,7 @@ exports.getPortfolioDetails = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch portfolio details",
-      500
+      500,
     );
   }
 };
@@ -854,7 +857,7 @@ exports.getAllPortfolios = async (req, res) => {
           assignedlandlorkClerk:
             portfolio.formData?.assignedlandlorkClerk || "",
         };
-      })
+      }),
     );
 
     let filteredPortfolios = portfoliosWithCounts;
@@ -862,7 +865,7 @@ exports.getAllPortfolios = async (req, res) => {
     // Filter by building count (exact match)
     if (buildingCount) {
       filteredPortfolios = filteredPortfolios.filter(
-        (portfolio) => portfolio.buildingCount === parseInt(buildingCount)
+        (portfolio) => portfolio.buildingCount === parseInt(buildingCount),
       );
     }
 
@@ -1011,7 +1014,7 @@ exports.updatePortfolio = async (req, res) => {
         return sendError(
           res,
           "One or more owners not found or invalid role",
-          400
+          400,
         );
       }
       portfolio.owners = owners.map((owner) => owner._id);
@@ -1031,7 +1034,7 @@ exports.updatePortfolio = async (req, res) => {
     // Populate owners for response
     await portfolio.populate(
       "owners",
-      "firstName lastName email preferredName"
+      "firstName lastName email preferredName",
     );
 
     return sendSuccess(res, "Portfolio updated successfully", { portfolio });
@@ -1098,7 +1101,7 @@ exports.bulkUpdatePortfolios = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to bulk update portfolios",
-      500
+      500,
     );
   }
 };
@@ -1177,14 +1180,14 @@ exports.addOwnersToPortfolio = async (req, res) => {
       return sendError(
         res,
         "One or more owners not found or invalid role",
-        400
+        400,
       );
     }
 
     const portfolio = await Portfolio.findByIdAndUpdate(
       portfolioId,
       { $addToSet: { owners: { $each: ownerIds } } },
-      { new: true }
+      { new: true },
     ).populate("owners", "preferredName email");
 
     if (!portfolio) return sendError(res, "Portfolio not found", 404);
@@ -1203,7 +1206,7 @@ exports.removeOwnerFromPortfolio = async (req, res) => {
     const portfolio = await Portfolio.findByIdAndUpdate(
       portfolioId,
       { $pull: { owners: ownerId } },
-      { new: true }
+      { new: true },
     ).populate("owners", "preferredName email");
 
     if (!portfolio) return sendError(res, "Portfolio not found", 404);

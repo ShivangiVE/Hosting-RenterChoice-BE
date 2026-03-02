@@ -8,6 +8,7 @@ const {
 } = require("../../services/emailService");
 const { sendError, sendSuccess } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
+const Company = require("../../models/ContactCards/Company");
 
 // Allowed roles
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
@@ -34,16 +35,32 @@ exports.register = async (req, res, next) => {
       role,
     } = req.body;
 
+    // Role validation
     if (!EXTERNAL_ROLES.includes(role)) {
       return sendError(
         res,
         "Invalid role. Allowed roles: Vendor, Owner, Tenant",
-        400
+        400,
       );
     }
 
-    if (!accountNumber) {
-      return sendError(res, "Account number is required for registration", 400);
+    // ===== Vendor Flow (ACCOUNT NUMBER VERIFICATION) =====
+    let companyDoc = null;
+
+    if (role === "Vendor") {
+      if (!accountNumber) {
+        return sendError(res, "Company account number is required", 400);
+      }
+
+      //  Verify company exists
+      companyDoc = await Company.findOne({
+        companyAccountNumber: accountNumber,
+        isActive: true,
+      }).lean();
+
+      if (!companyDoc) {
+        return sendError(res, "Invalid company account number", 400);
+      }
     }
 
     const userExists = await User.findOne({ email });
@@ -54,7 +71,7 @@ exports.register = async (req, res, next) => {
     const user = await User.create({
       accountNumber,
       preferredName,
-      companyName: role === "Vendor" ? companyName : undefined,
+      company: role === "Vendor" ? companyDoc._id : undefined,
       technicianName: role === "Vendor" ? technicianName : undefined,
       email,
       password,
@@ -72,10 +89,32 @@ exports.register = async (req, res, next) => {
         role: user.role,
         token: generateToken(user),
       },
-      201
+      201,
     );
   } catch (err) {
     next(err);
+  }
+};
+
+// Verfiy Company Account Number
+exports.verifyCompanyAccount = async (req, res) => {
+  try {
+    const { accountNumber } = req.params;
+
+    const company = await Company.findOne({
+      companyAccountNumber: accountNumber,
+      isActive: true,
+    })
+      .select("companyName companyAccountNumber")
+      .lean();
+
+    if (!company) {
+      return sendError(res, "Invalid account number", 404);
+    }
+
+    return sendSuccess(res, "Valid account", { company });
+  } catch (err) {
+    return sendError(res, err.message, 500);
   }
 };
 
@@ -93,7 +132,7 @@ exports.login = async (req, res, next) => {
       return sendError(
         res,
         "Invalid role. Allowed roles: Vendor, Owner, Tenant",
-        400
+        400,
       );
     }
 
@@ -111,7 +150,7 @@ exports.login = async (req, res, next) => {
       return sendError(
         res,
         `Role mismatch. You are registered as ${user.role}. Please log in using the correct role.`,
-        403
+        403,
       );
     }
 
