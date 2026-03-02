@@ -29,6 +29,8 @@ const notificationRoutes = require("./src/routes/notificationRoutes/notification
 const conversationRoutes = require("./src/routes/communication/conversationRoutes");
 const messageRoutes = require("./src/routes/communication/messageRoutes");
 const userPreferenceRoutes = require("./src/routes/userPreferenceRoutes/userPreferenceRoutes");
+const companyRoutes = require("./src/routes/contactCards/companyRoutes");
+const vendorTypeRoutes = require("./src/routes/contactCards/vendorTypeRoutes");
 
 const app = express();
 app.use(cors());
@@ -67,6 +69,8 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/conversations", conversationRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api", userPreferenceRoutes);
+app.use("/api/companies", companyRoutes);
+app.use("/api/vendor-types", vendorTypeRoutes);
 
 app.use(errorHandler);
 

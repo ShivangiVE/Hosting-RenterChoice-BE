@@ -30,7 +30,11 @@ const userSchema = new mongoose.Schema(
     },
     password: { type: String, required: true },
     accountNumber: { type: String }, // Optional for Owners/Tenants/Vendors
-    companyName: { type: String }, // Only for Vendor
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      index: true,
+    }, // Only for Vendor
     technicianName: { type: String }, // Only for Vendor
     role: {
       type: String,

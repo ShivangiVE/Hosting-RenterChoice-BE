@@ -11,6 +11,7 @@ const {
   resetPassword,
   verifyOtp,
   uploadProfileImage,
+  verifyCompanyAccount,
 } = require("../../controllers/externlusers/authController");
 const {
   registerValidator,
@@ -21,6 +22,7 @@ const profileUpload = require("../../middleware/profileUpload");
 
 // Public
 router.post("/register", registerValidator, validate, register);
+router.get("/verify-account/:accountNumber", verifyCompanyAccount);
 router.post("/login", loginValidator, validate, login);
 
 // Forgot / Reset
@@ -34,7 +36,7 @@ router.post(
   "/profile/avatar",
   protect,
   profileUpload.single("avatar"),
-  uploadProfileImage
+  uploadProfileImage,
 );
 router.put("/change-password", protect, changePassword);
 
