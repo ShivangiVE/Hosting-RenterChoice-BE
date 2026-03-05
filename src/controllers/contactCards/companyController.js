@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Company = require("../../models/ContactCards/Company");
 const VendorType = require("../../models/ContactCards/VendorType");
 const User = require("../../models/User");
@@ -68,17 +69,21 @@ exports.createCompany = async (req, res) => {
 // List of Companies
 exports.listCompanies = async (req, res) => {
   try {
-    const { search = "", page = 1, limit = 50 } = req.query;
+    const { search = "", vendorType = "", page = 1, limit = 50 } = req.query;
 
     const query = {
       isActive: true,
     };
 
     if (search) {
-      query.companyNameNormalized = {
-        $regex: search.toLowerCase(),
+      query.companyName = {
+        $regex: search.trim(),
         $options: "i",
       };
+    }
+
+    if (vendorType && mongoose.Types.ObjectId.isValid(vendorType)) {
+      query.vendorType = vendorType;
     }
 
     const companies = await Company.find(query)
@@ -103,6 +108,7 @@ exports.getCompanyDetails = async (req, res) => {
     //  fetch company
     const company = await Company.findById(id)
       .populate("vendorType", "name")
+      .populate("lastUpdatedBy", "preferredName email")
       .lean();
 
     if (!company) {
@@ -126,6 +132,72 @@ exports.getCompanyDetails = async (req, res) => {
       company,
       vendors,
     });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
+// Update Company
+exports.updateCompany = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      companyName,
+      vendorType,
+      paymentName,
+      companyEmail,
+      companyPhone,
+      contactName,
+      contactEmail,
+      contactPhone,
+      notes,
+    } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
+
+    if (!companyName?.trim()) {
+      return sendError(res, "Company name is required", 400);
+    }
+
+    if (!vendorType) {
+      return sendError(res, "Vendor type is required", 400);
+    }
+
+    // verify vendor type
+    const vendorExists = await VendorType.findById(vendorType);
+    if (!vendorExists) {
+      return sendError(res, "Invalid vendor type", 400);
+    }
+
+    const company = await Company.findByIdAndUpdate(
+      id,
+      {
+        companyName: companyName.trim(),
+        vendorType,
+        paymentName,
+        companyEmail,
+        companyPhone,
+        contactName,
+        contactEmail,
+        contactPhone,
+        notes,
+        lastUpdatedBy: req.user?._id,
+        lastUpdatedAt: new Date(),
+      },
+      { new: true },
+    ).populate([
+      { path: "vendorType", select: "preferredName" },
+      { path: "lastUpdatedBy", select: "preferredName email" },
+    ]);
+
+    if (!company) {
+      return sendError(res, "Company not found", 404);
+    }
+
+    return sendSuccess(res, "Company updated successfully", { company });
   } catch (err) {
     return sendError(res, err.message, 500);
   }

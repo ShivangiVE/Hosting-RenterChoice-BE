@@ -12,6 +12,7 @@ const companySchema = new mongoose.Schema(
     companyNameNormalized: {
       type: String,
       unique: true,
+      sparse: true,
       index: true,
     },
 
@@ -48,7 +49,16 @@ const companySchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    lastUpdatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+
+    lastUpdatedAt: {
+      type: Date,
+    },
   },
+
   { timestamps: true },
 );
 
