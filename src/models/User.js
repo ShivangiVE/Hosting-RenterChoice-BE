@@ -33,6 +33,9 @@ const userSchema = new mongoose.Schema(
     company: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
+      required: function () {
+        return this.role === "Vendor";
+      },
       index: true,
     }, // Only for Vendor
     technicianName: { type: String }, // Only for Vendor
