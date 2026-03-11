@@ -136,9 +136,20 @@ exports.login = async (req, res, next) => {
       );
     }
 
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    const user = await User.findOne({
+      email: email.toLowerCase().trim(),
+    });
+    
     if (!user) {
       return sendError(res, "Invalid credentials", 401);
+    }
+
+    if (!user.isActive) {
+      return sendError(
+        res,
+        "Your account has been deactivated, Please contact RenterChoice",
+        403,
+      );
     }
 
     const isMatch = await user.matchPassword(password);

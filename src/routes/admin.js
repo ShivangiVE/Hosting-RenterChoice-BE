@@ -17,7 +17,7 @@ const {
 router.use(protect, authorize("Admin"));
 
 // Dedicated OfficeAdmin route
-router.post("/create-office-admin", createOfficeAdmin);
+router.post("/create-office-admin", authorize("Admin"), createOfficeAdmin);
 
 // Generic internal team creation
 router.post("/create-internal", createInternalUser);

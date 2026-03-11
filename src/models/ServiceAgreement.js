@@ -11,7 +11,11 @@ const serviceAgreementSchema = new mongoose.Schema(
     },
     description: { type: String, required: true },
     initialDueDate: { type: Date },
-    recurringSchedule: { type: String },
+    recurringSchedule: {
+      type: String,
+      enum: ["Weekly", "Monthly", "Quarterly", "Bi-Annually", "Annually"],
+      default: null,
+    },
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     fileUrl: { type: String },
     status: {
@@ -27,7 +31,7 @@ const serviceAgreementSchema = new mongoose.Schema(
     closingComments: { type: String },
     closedAt: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("ServiceAgreement", serviceAgreementSchema);

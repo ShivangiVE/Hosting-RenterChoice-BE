@@ -53,6 +53,37 @@ exports.loginInternal = async (req, res, next) => {
   }
 };
 
+// Impersonate Vendor
+exports.impersonateVendor = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    const vendor = await User.findById(vendorId);
+
+    if (!vendor || vendor.role !== "Vendor") {
+      return sendError(res, "Vendor not found", 404);
+    }
+
+    if (!vendor.isActive) {
+      return sendError(res, "Vendor account is inactive", 403);
+    }
+
+    const token = generateToken(vendor);
+
+    return sendSuccess(res, "Vendor impersonation successful", {
+      token,
+      user: {
+        _id: vendor._id,
+        email: vendor.email,
+        technicianName: vendor.technicianName,
+        role: vendor.role,
+      },
+    });
+  } catch (error) {
+    return sendError(res, "Vendor impersonation failed", 500);
+  }
+};
+
 // Change Password (logged-in)
 exports.changePassword = async (req, res, next) => {
   try {
