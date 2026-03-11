@@ -122,6 +122,7 @@ exports.getCompanyDetails = async (req, res) => {
       vendors = await User.find({
         role: "Vendor",
         company: id,
+        isActive: true,
       })
         .select("technicianName email accountNumber createdAt")
         .sort({ createdAt: -1 })
@@ -198,6 +199,34 @@ exports.updateCompany = async (req, res) => {
     }
 
     return sendSuccess(res, "Company updated successfully", { company });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
+// Remove Vendor From Company
+exports.removeVendorFromCompany = async (req, res) => {
+  try {
+    const { companyId, vendorId } = req.params;
+
+    const vendor = await User.findOneAndUpdate(
+      {
+        _id: vendorId,
+        company: companyId,
+        role: "Vendor",
+        isActive: true,
+      },
+      {
+        isActive: false,
+      },
+      { new: true },
+    );
+
+    if (!vendor) {
+      return sendError(res, "Vendor not found in this company", 404);
+    }
+
+    return sendSuccess(res, "Vendor removed successfully");
   } catch (err) {
     return sendError(res, err.message, 500);
   }

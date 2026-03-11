@@ -1,19 +1,39 @@
 const express = require("express");
 const router = express.Router();
 
-const { protect } = require("../../middleware/authMiddleware");
+const { protect, authorize } = require("../../middleware/authMiddleware");
 const {
   loginInternal,
   forgotPassword,
   resetPassword,
   updateProfile,
   changePassword,
+  impersonateVendor,
 } = require("../../controllers/internalUsers/authController");
 const validate = require("../../middleware/validate");
 const { loginValidator } = require("../../validators/authValidator");
 
-// Public
+const INTERNAL_ROLES = [
+  "Admin",
+  "OfficeAdmin",
+  "AccountsTeam",
+  "RepairsTeam",
+  "LeaseTeam",
+  "MarketingTeam",
+  "LandlordsTeam",
+  "InspectionClerk",
+];
+
 router.post("/login", loginValidator, validate, loginInternal);
+
+// impersonate vendor
+router.post(
+  "/impersonate-vendor/:vendorId",
+  protect,
+  authorize(...INTERNAL_ROLES),
+  impersonateVendor,
+);
+
 router.post("/forgot", validate, forgotPassword);
 router.post("/reset", validate, resetPassword);
 

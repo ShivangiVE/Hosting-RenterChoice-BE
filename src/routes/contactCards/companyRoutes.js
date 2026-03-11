@@ -5,6 +5,7 @@ const {
   listCompanies,
   getCompanyDetails,
   updateCompany,
+  removeVendorFromCompany,
 } = require("../../controllers/contactCards/companyController");
 
 const router = express.Router();
@@ -31,5 +32,13 @@ router.get("/:id", protect, authorize(...ALLOWED_ROLES), getCompanyDetails);
 
 // Update the Company Details
 router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateCompany);
+
+// Remove Vendor from Company
+router.delete(
+  "/:companyId/vendors/:vendorId",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  removeVendorFromCompany,
+);
 
 module.exports = router;
