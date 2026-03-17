@@ -43,6 +43,11 @@ const {
   vendorBulkConfirmKeyReturn,
   getWorkOrderTimeline,
   getVendorChatWorkOrders,
+  reopenWorkOrder,
+  getServiceAgreementById,
+  getInspectionRequest,
+  reopenServiceAgreement,
+  reopenInspectionRequest,
 } = require("../../controllers/workOrder/workOrderController");
 const {
   createAppointment,
@@ -215,6 +220,14 @@ router.put(
   closeWorkOrder,
 );
 
+// Reopen Work order
+router.put(
+  "/work-orders/:id/reopen",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  reopenWorkOrder,
+);
+
 // Bulk Close Work Orders
 router.post(
   "/work-orders/bulk-close",
@@ -312,6 +325,14 @@ router.post(
 
 router.get("/inspection-requests", protect, getInspectionRequests);
 
+// Get Inspection request by Id
+router.get(
+  "/inspection-requests/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getInspectionRequest,
+);
+
 // Get Inspection Request by Building
 router.get(
   "/inspection-requests/by-building",
@@ -342,6 +363,14 @@ router.post(
   bulkCloseInspectionRequests,
 );
 
+// Reopen Inspection Request
+router.put(
+  "/inspection-requests/:id/reopen",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  reopenInspectionRequest,
+);
+
 router.delete(
   "/inspection-requests/:id",
   protect,
@@ -366,6 +395,13 @@ router.post(
 );
 
 router.get("/service-agreements", protect, getServiceAgreements);
+
+router.get(
+  "/service-agreements/:id",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getServiceAgreementById,
+);
 
 // Get Service agreement by Building
 router.get(
@@ -396,6 +432,14 @@ router.post(
   protect,
   authorize(...ALLOWED_ROLES),
   bulkCloseServiceAgreements,
+);
+
+// Reopen Service Agreement
+router.put(
+  "/service-agreements/:id/reopen",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  reopenServiceAgreement,
 );
 
 router.delete(
