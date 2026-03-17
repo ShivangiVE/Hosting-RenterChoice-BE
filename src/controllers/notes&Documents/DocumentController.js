@@ -42,7 +42,7 @@ exports.uploadDocuments = async (req, res) => {
       return sendError(res, "No files uploaded", 400);
     }
 
-    const { building, portfolio, documents } = req.body;
+    const { building, portfolio, documents, workOrder } = req.body;
 
     // Validate building if provided
     if (building) {
@@ -63,6 +63,15 @@ exports.uploadDocuments = async (req, res) => {
           fs.unlinkSync(file.path);
         });
         return sendError(res, "Portfolio not found", 404);
+      }
+    }
+
+    // Validate workorder if provided
+    if (workOrder) {
+      const workOrderExists = await WorkOrder.findById(workOrder);
+      if (!workOrderExists) {
+        req.files.forEach((file) => fs.unlinkSync(file.path));
+        return sendError(res, "Work order not found", 404);
       }
     }
 
@@ -122,6 +131,7 @@ exports.uploadDocuments = async (req, res) => {
         fileUrl,
         building: building || null,
         portfolio: portfolio || null,
+        workOrder: workOrder || null,
         uploadedBy: req.user._id,
       });
 
@@ -139,7 +149,7 @@ exports.uploadDocuments = async (req, res) => {
       res,
       "Documents uploaded successfully",
       { documents: uploadedDocuments },
-      201
+      201,
     );
   } catch (err) {
     console.error("Error uploading documents:", err);
@@ -185,7 +195,7 @@ exports.vendorUploadDocuments = async (req, res) => {
       return sendError(
         res,
         "You are not allowed to upload documents for this work order",
-        403
+        403,
       );
     }
 
@@ -200,7 +210,7 @@ exports.vendorUploadDocuments = async (req, res) => {
       return sendError(
         res,
         "You cannot upload documents because this work order is Declined",
-        403
+        403,
       );
     }
 
@@ -213,7 +223,7 @@ exports.vendorUploadDocuments = async (req, res) => {
       return sendError(
         res,
         "No building is associated with this work order",
-        400
+        400,
       );
     }
 
@@ -286,7 +296,7 @@ exports.vendorUploadDocuments = async (req, res) => {
       res,
       "Vendor documents uploaded successfully",
       { documents: uploadedDocuments },
-      201
+      201,
     );
   } catch (err) {
     console.error("Error uploading vendor documents:", err);
@@ -302,7 +312,7 @@ exports.vendorUploadDocuments = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to upload vendor documents",
-      500
+      500,
     );
   }
 };
@@ -367,7 +377,7 @@ exports.getDocuments = async (req, res) => {
         .populate("category", "name")
         .populate(
           "uploadedBy",
-          "preferredName technicianName companyName email"
+          "preferredName technicianName companyName email",
         )
         .populate("building", "buildingAbbreviation formData.address")
         .populate("portfolio", "portfolioAbbreviation formData.name")
@@ -429,7 +439,7 @@ exports.getDocumentsByBuilding = async (req, res) => {
         .populate("category", "name") // Populate category
         .populate(
           "uploadedBy",
-          "preferredName technicianName companyName email"
+          "preferredName technicianName companyName email",
         )
         .populate("building", "buildingAbbreviation formData.address")
         .populate("portfolio", "portfolioAbbreviation formData.name")
@@ -450,7 +460,7 @@ exports.getDocumentsByBuilding = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch documents by building",
-      500
+      500,
     );
   }
 };
@@ -513,7 +523,7 @@ exports.getDocumentsByPortfolio = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch documents by portfolio",
-      500
+      500,
     );
   }
 };
@@ -522,24 +532,50 @@ exports.getDocumentsByPortfolio = async (req, res) => {
 exports.getDocumentsByWorkOrder = async (req, res) => {
   try {
     const { workOrderId } = req.params;
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const { category, startDate, endDate } = req.query;
+
+    let filter = { workOrder: workOrderId };
+
+    // Category filter
+    if (category && category !== "All") {
+      filter.category = category;
+    }
+
+    // Date filter
+    if (startDate || endDate) {
+      filter.createdAt = {};
+
+      if (startDate) {
+        filter.createdAt.$gte = new Date(startDate);
+      }
+
+      if (endDate) {
+        const endOfDay = new Date(endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endOfDay;
+      }
+    }
+
     const [documents, total] = await Promise.all([
-      Document.find({ workOrder: workOrderId })
+      Document.find(filter)
         .populate("category", "name")
         .populate(
           "uploadedBy",
-          "preferredName technicianName companyName email"
+          "preferredName technicianName companyName email",
         )
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .select(
-          "fileName description fileType mimeType fileUrl category uploadedBy createdAt"
+          "fileName description fileType mimeType fileUrl category uploadedBy createdAt",
         ),
-      Document.countDocuments({ workOrder: workOrderId }),
+
+      Document.countDocuments(filter),
     ]);
 
     return sendSuccess(res, "Work order documents fetched", {
@@ -549,6 +585,7 @@ exports.getDocumentsByWorkOrder = async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (err) {
+    console.error("Error fetching work order documents:", err);
     return sendError(res, err.message || "Failed to fetch documents", 500);
   }
 };
@@ -651,7 +688,7 @@ exports.deleteDocument = async (req, res) => {
 
     const document = await Document.findById(id).populate(
       "workOrder",
-      "vendor"
+      "vendor",
     );
     if (!document) {
       return sendError(res, "Document not found", 404);
@@ -672,7 +709,7 @@ exports.deleteDocument = async (req, res) => {
         return sendError(
           res,
           "Deletion is not allowed because this document was not uploaded by you.",
-          403
+          403,
         );
       }
     }
@@ -706,11 +743,11 @@ exports.downloadDocument = async (req, res) => {
 
     res.setHeader(
       "Content-Type",
-      document.mimeType || "application/octet-stream"
+      document.mimeType || "application/octet-stream",
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${encodeURIComponent(document.fileName)}"`
+      `attachment; filename="${encodeURIComponent(document.fileName)}"`,
     );
     res.setHeader("Content-Transfer-Encoding", "binary");
     res.setHeader("Accept-Ranges", "bytes");

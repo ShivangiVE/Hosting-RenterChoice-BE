@@ -12,11 +12,12 @@ exports.createNote = async (req, res) => {
       return sendError(
         res,
         "Vendors cannot create notes using this endpoint",
-        403
+        403,
       );
     }
 
-    const { subject, description, category, building, portfolio } = req.body;
+    const { subject, description, category, building, portfolio, workOrder } =
+      req.body;
 
     // Validation
     if (!subject || !subject.trim()) {
@@ -51,12 +52,21 @@ exports.createNote = async (req, res) => {
       }
     }
 
+    // Validate Work order if provided
+    if (workOrder) {
+      const workOrderExists = await WorkOrder.findById(workOrder);
+      if (!workOrderExists) {
+        return sendError(res, "Work order not found", 404);
+      }
+    }
+
     const note = await Note.create({
       subject: subject.trim(),
       description: description.trim(),
       category,
       building: building || null,
       portfolio: portfolio || null,
+      workOrder: workOrder || null,
       createdBy: req.user._id,
     });
 
@@ -66,6 +76,7 @@ exports.createNote = async (req, res) => {
       { path: "createdBy", select: "preferredName email" },
       { path: "building", select: "buildingAbbreviation formData.address" },
       { path: "portfolio", select: "portfolioAbbreviation formData.name" },
+      { path: "workOrder", select: "workOrderNumber" },
     ]);
 
     return sendSuccess(res, "Note created successfully", { note }, 201);
@@ -156,7 +167,7 @@ exports.vendorCreateNote = async (req, res) => {
       return sendError(
         res,
         "You are not allowed to add notes for this work order",
-        403
+        403,
       );
     }
 
@@ -164,7 +175,7 @@ exports.vendorCreateNote = async (req, res) => {
       return sendError(
         res,
         "You cannot add notes because this work order is Declined",
-        403
+        403,
       );
     }
 
@@ -323,7 +334,7 @@ exports.getNotesByBuilding = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch notes by building",
-      500
+      500,
     );
   }
 };
@@ -384,7 +395,7 @@ exports.getNotesByPortfolio = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch notes by portfolio",
-      500
+      500,
     );
   }
 };
@@ -393,22 +404,47 @@ exports.getNotesByPortfolio = async (req, res) => {
 exports.getNotesByWorkOrder = async (req, res) => {
   try {
     const { workOrderId } = req.params;
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const { category, startDate, endDate } = req.query;
+
+    let filter = { workOrder: workOrderId };
+
+    // Category filter
+    if (category && category !== "All") {
+      filter.category = category;
+    }
+
+    // Date range filter
+    if (startDate || endDate) {
+      filter.createdAt = {};
+
+      if (startDate) {
+        filter.createdAt.$gte = new Date(startDate);
+      }
+
+      if (endDate) {
+        const endOfDay = new Date(endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endOfDay;
+      }
+    }
+
     const [notes, total] = await Promise.all([
-      Note.find({ workOrder: workOrderId })
+      Note.find(filter)
         .populate("category", "name")
         .populate("createdBy", "preferredName technicianName companyName email")
-
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .select(
-          "subject description category createdBy building portfolio workOrder createdAt"
+          "subject description category createdBy building portfolio workOrder createdAt",
         ),
-      Note.countDocuments({ workOrder: workOrderId }),
+
+      Note.countDocuments(filter),
     ]);
 
     return sendSuccess(res, "Work order notes fetched", {
@@ -418,6 +454,7 @@ exports.getNotesByWorkOrder = async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (err) {
+    console.error("Error fetching work order notes:", err);
     return sendError(res, err.message || "Failed to fetch notes", 500);
   }
 };

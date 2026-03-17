@@ -1,9 +1,11 @@
+const mongoose = require("mongoose");
 const { completeWorkOrder } = require("../../domain/workOrderState");
 const Building = require("../../models/Building");
 const InspectionRequest = require("../../models/InspectionRequest");
 const Document = require("../../models/Notes&Documents/Document");
 const Note = require("../../models/Notes&Documents/Note");
 const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
+const Category = require("../../models/repairCategories");
 const ServiceAgreement = require("../../models/ServiceAgreement");
 const User = require("../../models/User");
 const WODynamicStatus = require("../../models/WODynamicStatus");
@@ -628,6 +630,7 @@ exports.getWorkOrdersByBuilding = async (req, res) => {
 exports.getWorkOrder = async (req, res) => {
   try {
     const { id } = req.params;
+
     const workOrder = await WorkOrder.findById(id)
       .populate({
         path: "building",
@@ -639,12 +642,27 @@ exports.getWorkOrder = async (req, res) => {
         },
       })
       .populate("vendor", "companyName technicianName email")
-      .populate("category", "name")
       .populate("createdBy", "preferredName email")
       .populate("dynamicStatus", "name description isDefault")
       .populate("assignedTo", "preferredName email");
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    let categoryName = null;
+    if (workOrder.category) {
+      if (mongoose.Types.ObjectId.isValid(workOrder.category)) {
+        const cat = await Category.findById(workOrder.category).select("name");
+        categoryName = cat?.name || null;
+      } else {
+        categoryName = workOrder.category;
+      }
+    }
+    const woObj = workOrder.toObject();
+    const assignedToDisplay =
+      woObj.assignedTo?.preferredName ||
+      woObj.vendor?.technicianName ||
+      woObj.vendor?.companyName ||
+      null;
 
     const dyn = workOrder.dynamicStatus?.name ?? "";
     const canEdit =
@@ -652,7 +670,9 @@ exports.getWorkOrder = async (req, res) => {
 
     return sendSuccess(res, "Work order fetched successfully", {
       workOrder: {
-        ...workOrder.toObject(),
+        ...woObj,
+        categoryName,
+        assignedToDisplay,
         canEditStatus: canEdit,
       },
     });
@@ -1802,6 +1822,34 @@ exports.closeWorkOrder = async (req, res) => {
   }
 };
 
+// Reopen Work Order
+exports.reopenWorkOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const workOrder = await WorkOrder.findById(id);
+
+    if (!workOrder) {
+      return sendError(res, "Work order not found", 404);
+    }
+
+    if (workOrder.status !== "closed") {
+      return sendError(res, "Only closed work orders can be reopened", 400);
+    }
+
+    workOrder.status = "open";
+    workOrder.completeDate = null;
+
+    await workOrder.save();
+
+    return sendSuccess(res, "Work order reopened successfully", {
+      workOrder,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to reopen work order", 500);
+  }
+};
+
 // Bulk Close Work Orders
 exports.bulkCloseWorkOrders = async (req, res) => {
   try {
@@ -2073,6 +2121,40 @@ exports.getInspectionRequests = async (req, res) => {
   }
 };
 
+// Get single Inspection Request
+exports.getInspectionRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const inspectionRequest = await InspectionRequest.findById(id)
+      .populate({
+        path: "building",
+        select:
+          "buildingAbbreviation formData.address formData.city formData.fullAddress portfolio",
+        populate: {
+          path: "portfolio",
+          select: "portfolioAbbreviation formData.name",
+        },
+      })
+      .populate("assignedTo", "preferredName email")
+      .populate("createdBy", "preferredName email");
+
+    if (!inspectionRequest) {
+      return sendError(res, "Inspection request not found", 404);
+    }
+
+    return sendSuccess(res, "Inspection request fetched successfully", {
+      inspectionRequest,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch inspection request",
+      500,
+    );
+  }
+};
+
 // Get Inspection Requests by Building
 exports.getInspectionRequestsByBuilding = async (req, res) => {
   try {
@@ -2258,6 +2340,43 @@ exports.bulkCloseInspectionRequests = async (req, res) => {
       success: false,
       message: "Failed to close inspection requests",
     });
+  }
+};
+
+// Reopen Inspection request
+exports.reopenInspectionRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const inspection = await InspectionRequest.findById(id);
+
+    if (!inspection) {
+      return sendError(res, "Inspection request not found", 404);
+    }
+
+    if (inspection.status !== "closed") {
+      return sendError(
+        res,
+        "Only closed inspection requests can be reopened",
+        400,
+      );
+    }
+
+    inspection.status = "open";
+    inspection.completeDate = null;
+    inspection.closingComments = null;
+
+    await inspection.save();
+
+    return sendSuccess(res, "Inspection request reopened successfully", {
+      inspectionRequest: inspection,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to reopen inspection request",
+      500,
+    );
   }
 };
 
@@ -2480,6 +2599,67 @@ exports.getServiceAgreements = async (req, res) => {
   }
 };
 
+// Get Service Agreement by ID
+exports.getServiceAgreementById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const serviceAgreement = await ServiceAgreement.findById(id)
+      .populate({
+        path: "building",
+        select:
+          "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio",
+        populate: {
+          path: "portfolio",
+          select: "portfolioAbbreviation formData.name",
+        },
+      })
+      .populate("vendor", "companyName technicianName email")
+      .populate("createdBy", "preferredName email");
+
+    if (!serviceAgreement) {
+      return sendError(res, "Service agreement not found", 404);
+    }
+
+    let categoryName = null;
+    let categoryId = null;
+
+    if (serviceAgreement.category) {
+      if (mongoose.Types.ObjectId.isValid(serviceAgreement.category)) {
+        // Stored as ObjectId string
+        const cat = await Category.findById(serviceAgreement.category).select(
+          "name",
+        );
+        categoryName = cat?.name || null;
+        categoryId = serviceAgreement.category;
+      } else {
+        // Stored as plain name string (legacy)
+        categoryName = serviceAgreement.category;
+        // Try to find the _id so FE can pre-select it in the edit modal
+        const cat = await Category.findOne({
+          name: serviceAgreement.category,
+        }).select("_id name");
+        categoryId = cat?._id?.toString() || null;
+      }
+    }
+
+    return sendSuccess(res, "Service agreement fetched successfully", {
+      serviceAgreement: {
+        ...serviceAgreement.toObject(),
+        categoryName,
+        categoryId,
+      },
+    });
+  } catch (err) {
+    console.error("getServiceAgreementById error:", err.message);
+    return sendError(
+      res,
+      err.message || "Failed to fetch service agreement",
+      500,
+    );
+  }
+};
+
 // Get Service Agreements by Building
 exports.getServiceAgreementsByBuilding = async (req, res) => {
   try {
@@ -2691,6 +2871,35 @@ exports.bulkCloseServiceAgreements = async (req, res) => {
       success: false,
       message: "Failed to close service agreements",
     });
+  }
+};
+
+// Reopen Service Agreement 
+exports.reopenServiceAgreement = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const serviceAgreement = await ServiceAgreement.findById(id);
+
+    if (!serviceAgreement) {
+      return sendError(res, "Service agreement not found", 404);
+    }
+
+    if (serviceAgreement.status !== "closed") {
+      return sendError(res, "Only closed service agreements can be reopened", 400);
+    }
+
+    serviceAgreement.status = "open";
+    serviceAgreement.closedAt = null;
+    serviceAgreement.closingComments = null;
+
+    await serviceAgreement.save();
+
+    return sendSuccess(res, "Service agreement reopened successfully", {
+      serviceAgreement,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to reopen service agreement", 500);
   }
 };
 
