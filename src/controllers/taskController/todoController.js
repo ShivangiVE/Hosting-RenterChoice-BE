@@ -10,7 +10,7 @@ const getNextSequence = async (sequenceName) => {
   const counter = await Counter.findByIdAndUpdate(
     sequenceName,
     { $inc: { sequence_value: 1 } },
-    { new: true, upsert: true }
+    { new: true, upsert: true },
   );
   return counter.sequence_value;
 };
@@ -64,8 +64,8 @@ exports.createTodo = async (req, res) => {
           fileType: file.mimetype.startsWith("image")
             ? "image"
             : file.mimetype.startsWith("video")
-            ? "video"
-            : "document",
+              ? "video"
+              : "document",
         });
       }
     }
@@ -253,7 +253,9 @@ exports.getTodoDetails = async (req, res) => {
       category: todo.category ? todo.category : { name: "" },
     };
 
-    return sendSuccess(res, "Todo details fetched successfully", mappedTodo);
+    return sendSuccess(res, "Todo details fetched successfully", {
+      todo: mappedTodo,
+    });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch todo details", 500);
   }
@@ -274,7 +276,7 @@ exports.updateTodo = async (req, res) => {
         return sendError(
           res,
           "Invalid category. Must be a todo category.",
-          400
+          400,
         );
       }
     }
@@ -301,7 +303,7 @@ exports.updateTodo = async (req, res) => {
       Array.isArray(updateData.existingAttachments)
     ) {
       attachments = existingTodo.attachments.filter((att) =>
-        updateData.existingAttachments.includes(att.fileUrl)
+        updateData.existingAttachments.includes(att.fileUrl),
       );
     }
 
@@ -315,14 +317,14 @@ exports.updateTodo = async (req, res) => {
           fileType: file.mimetype.startsWith("image")
             ? "image"
             : file.mimetype.startsWith("video")
-            ? "video"
-            : "document",
+              ? "video"
+              : "document",
         });
       }
     }
 
     const removed = existingTodo.attachments.filter(
-      (att) => !attachments.some((a) => a.fileUrl === att.fileUrl)
+      (att) => !attachments.some((a) => a.fileUrl === att.fileUrl),
     );
     for (const r of removed) await deleteFile(r.fileUrl);
 
@@ -425,6 +427,30 @@ exports.bulkCloseTodos = async (req, res) => {
     return sendSuccess(res, "Bulk close operation completed", { results });
   } catch (err) {
     return sendError(res, err.message || "Failed to bulk close todos", 500);
+  }
+};
+
+// ReOpen Todo
+exports.reopenTodo = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const todo = await Todo.findById(id);
+    if (!todo) return sendError(res, "Todo not found", 404);
+
+    if (todo.status !== "Completed") {
+      return sendError(res, "Only completed todos can be reopened", 400);
+    }
+
+    todo.status = "In Progress";
+    todo.completedAt = null;
+    todo.closingComments = null;
+
+    await todo.save();
+
+    return sendSuccess(res, "Todo reopened successfully", { todo });
+  } catch (err) {
+    return sendError(res, err.message, 500);
   }
 };
 

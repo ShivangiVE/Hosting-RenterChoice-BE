@@ -11,7 +11,7 @@ const getNextSequence = async (sequenceName) => {
   const counter = await Counter.findByIdAndUpdate(
     sequenceName,
     { $inc: { sequence_value: 1 } },
-    { new: true, upsert: true }
+    { new: true, upsert: true },
   );
   return counter.sequence_value;
 };
@@ -67,8 +67,8 @@ exports.createTask = async (req, res) => {
           fileType: file.mimetype.startsWith("image")
             ? "image"
             : file.mimetype.startsWith("video")
-            ? "video"
-            : "document",
+              ? "video"
+              : "document",
         });
       }
     }
@@ -268,7 +268,9 @@ exports.getTaskDetails = async (req, res) => {
       category: task.category ? task.category : { name: "" },
     };
 
-    return sendSuccess(res, "Task details fetched successfully", mappedTask);
+    return sendSuccess(res, "Task details fetched successfully", {
+      task: mappedTask,
+    });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch task details", 500);
   }
@@ -290,7 +292,7 @@ exports.updateTask = async (req, res) => {
         return sendError(
           res,
           "Invalid category. Must be a task category.",
-          400
+          400,
         );
       }
     }
@@ -319,7 +321,7 @@ exports.updateTask = async (req, res) => {
     ) {
       // Filter existing attachments to keep only those in existingAttachments array
       attachments = existingTask.attachments.filter((att) =>
-        updateData.existingAttachments.includes(att.fileUrl)
+        updateData.existingAttachments.includes(att.fileUrl),
       );
     }
 
@@ -333,14 +335,14 @@ exports.updateTask = async (req, res) => {
           fileType: file.mimetype.startsWith("image")
             ? "image"
             : file.mimetype.startsWith("video")
-            ? "video"
-            : "document",
+              ? "video"
+              : "document",
         });
       }
     }
 
     const removed = existingTask.attachments.filter(
-      (att) => !attachments.some((a) => a.fileUrl === att.fileUrl)
+      (att) => !attachments.some((a) => a.fileUrl === att.fileUrl),
     );
     for (const r of removed) {
       await deleteFile(r.fileUrl);
@@ -447,6 +449,30 @@ exports.bulkCloseTasks = async (req, res) => {
     return sendSuccess(res, "Bulk close operation completed", { results });
   } catch (err) {
     return sendError(res, err.message || "Failed to bulk close tasks", 500);
+  }
+};
+
+// ReOpen task
+exports.reopenTask = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const task = await Task.findById(id);
+    if (!task) return sendError(res, "Task not found", 404);
+
+    if (task.status !== "Completed") {
+      return sendError(res, "Only completed tasks can be reopened", 400);
+    }
+
+    task.status = "In Progress";
+    task.completedAt = null;
+    task.closingComments = null;
+
+    await task.save();
+
+    return sendSuccess(res, "Task reopened successfully", { task });
+  } catch (err) {
+    return sendError(res, err.message, 500);
   }
 };
 
@@ -580,7 +606,7 @@ exports.getMyTasks = async (req, res) => {
     }));
 
     const combined = [...mappedTasks, ...mappedTodos].sort(
-      (a, b) => b.createdAt - a.createdAt
+      (a, b) => b.createdAt - a.createdAt,
     );
 
     return res.json({

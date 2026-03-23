@@ -11,6 +11,7 @@ const {
   bulkDeleteTodos,
   getTodoDetails,
   getTodosByTags,
+  reopenTodo,
 } = require("../../controllers/taskController/todoController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { todoUpload } = require("../../middleware/repairUpload");
@@ -32,7 +33,7 @@ router.post(
   protect,
   authorize(...ALLOWED_ROLES),
   todoUpload.array("attachments"),
-  createTodo
+  createTodo,
 );
 
 // Get Todos
@@ -50,7 +51,7 @@ router.put(
   protect,
   authorize(...ALLOWED_ROLES),
   todoUpload.array("attachments"),
-  updateTodo
+  updateTodo,
 );
 // Close Todo
 router.put("/:id/close", protect, authorize(...ALLOWED_ROLES), closeTodo);
@@ -60,7 +61,14 @@ router.post(
   "/bulk-close",
   protect,
   authorize(...ALLOWED_ROLES),
-  bulkCloseTodos
+  bulkCloseTodos,
+);
+
+router.put(
+  "/:id/reopen",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  reopenTodo,
 );
 
 // Delete Todo
@@ -71,7 +79,7 @@ router.post(
   "/bulk-delete",
   protect,
   authorize(...ALLOWED_ROLES),
-  bulkDeleteTodos
+  bulkDeleteTodos,
 );
 
 // ========================= Counter =========================
@@ -79,7 +87,7 @@ router.get(
   "/counter/:type",
   protect,
   authorize(...ALLOWED_ROLES),
-  getNextTodoNumber
+  getNextTodoNumber,
 );
 
 module.exports = router;

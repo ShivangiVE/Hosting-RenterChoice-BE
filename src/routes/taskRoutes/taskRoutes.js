@@ -13,6 +13,7 @@ const {
   getTaskDetails,
   getTasksByTags,
   getMyTasks,
+  reopenTask,
 } = require("../../controllers/taskController/taskController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { taskUpload } = require("../../middleware/repairUpload");
@@ -34,7 +35,7 @@ router.post(
   protect,
   authorize(...ALLOWED_ROLES),
   taskUpload.array("attachments"),
-  createTask
+  createTask,
 );
 
 // Get tasks with filters + pagination
@@ -55,7 +56,7 @@ router.put(
   protect,
   authorize(...ALLOWED_ROLES),
   taskUpload.array("attachments"),
-  updateTask
+  updateTask,
 );
 
 // Close Task
@@ -66,8 +67,11 @@ router.post(
   "/bulk-close",
   protect,
   authorize(...ALLOWED_ROLES),
-  bulkCloseTasks
+  bulkCloseTasks,
 );
+
+// ReOpen Task
+router.put("/:id/reopen", protect, authorize(...ALLOWED_ROLES), reopenTask);
 
 // Delete Task
 router.delete("/:id", protect, authorize(...ALLOWED_ROLES), deleteTask);
@@ -77,7 +81,7 @@ router.post(
   "/bulk-delete",
   protect,
   authorize(...ALLOWED_ROLES),
-  bulkDeleteTasks
+  bulkDeleteTasks,
 );
 
 // ========================= Counter =========================
@@ -85,7 +89,7 @@ router.get(
   "/counter/:type",
   protect,
   authorize(...ALLOWED_ROLES),
-  getNextTaskNumber
+  getNextTaskNumber,
 );
 
 module.exports = router;
