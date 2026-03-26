@@ -42,7 +42,8 @@ exports.uploadDocuments = async (req, res) => {
       return sendError(res, "No files uploaded", 400);
     }
 
-    const { building, portfolio, documents, workOrder } = req.body;
+    const { building, portfolio, documents, workOrder, sourceType, sourceId } =
+      req.body;
 
     // Validate building if provided
     if (building) {
@@ -132,6 +133,8 @@ exports.uploadDocuments = async (req, res) => {
         building: building || null,
         portfolio: portfolio || null,
         workOrder: workOrder || null,
+        sourceType: sourceType || undefined,
+        sourceId: sourceId || undefined,
         uploadedBy: req.user._id,
       });
 
@@ -586,6 +589,69 @@ exports.getDocumentsByWorkOrder = async (req, res) => {
     });
   } catch (err) {
     console.error("Error fetching work order documents:", err);
+    return sendError(res, err.message || "Failed to fetch documents", 500);
+  }
+};
+
+// Get Documents by Entity (serviceAgreement, inspectionRequest, task, todo)
+exports.getDocumentsByEntity = async (req, res) => {
+  try {
+    const { sourceType, sourceId } = req.params;
+    const VALID_TYPES = [
+      "workOrder",
+      "serviceAgreement",
+      "inspectionRequest",
+      "task",
+      "todo",
+    ];
+
+    if (!VALID_TYPES.includes(sourceType)) {
+      return sendError(res, "Invalid sourceType", 400);
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const { category, startDate, endDate } = req.query;
+
+    const filter =
+      sourceType === "workOrder"
+        ? { $or: [{ workOrder: sourceId }, { sourceType, sourceId }] }
+        : { sourceType, sourceId };
+
+    if (category && category !== "All") filter.category = category;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+
+    const [documents, total] = await Promise.all([
+      Document.find(filter)
+        .populate("category", "name")
+        .populate(
+          "uploadedBy",
+          "preferredName technicianName companyName email",
+        )
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select(
+          "fileName description fileType mimeType fileUrl category uploadedBy createdAt sourceType sourceId",
+        ),
+      Document.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Documents fetched successfully", {
+      documents,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
     return sendError(res, err.message || "Failed to fetch documents", 500);
   }
 };

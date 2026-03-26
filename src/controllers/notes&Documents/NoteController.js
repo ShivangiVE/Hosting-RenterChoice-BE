@@ -16,8 +16,16 @@ exports.createNote = async (req, res) => {
       );
     }
 
-    const { subject, description, category, building, portfolio, workOrder } =
-      req.body;
+    const {
+      subject,
+      description,
+      category,
+      building,
+      portfolio,
+      sourceType,
+      sourceId,
+      workOrder,
+    } = req.body;
 
     // Validation
     if (!subject || !subject.trim()) {
@@ -66,7 +74,9 @@ exports.createNote = async (req, res) => {
       category,
       building: building || null,
       portfolio: portfolio || null,
-      workOrder: workOrder || null,
+      workOrder: sourceType === "workOrder" ? sourceId || workOrder : null,
+      sourceType: sourceType || (workOrder ? "workOrder" : undefined),
+      sourceId: sourceId || workOrder || undefined,
       createdBy: req.user._id,
     });
 
@@ -455,6 +465,64 @@ exports.getNotesByWorkOrder = async (req, res) => {
     });
   } catch (err) {
     console.error("Error fetching work order notes:", err);
+    return sendError(res, err.message || "Failed to fetch notes", 500);
+  }
+};
+
+// Get Notes by Entity (Service Agreement/Inspection Request/work order)
+exports.getNotesByEntity = async (req, res) => {
+  try {
+    const { sourceType, sourceId } = req.params;
+    const VALID_TYPES = [
+      "workOrder",
+      "serviceAgreement",
+      "inspectionRequest",
+      "task",
+      "todo",
+    ];
+
+    if (!VALID_TYPES.includes(sourceType)) {
+      return sendError(res, "Invalid sourceType", 400);
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const { category, startDate, endDate } = req.query;
+
+    // Support BOTH old workOrder field and new polymorphic fields
+    const filter =
+      sourceType === "workOrder"
+        ? { $or: [{ workOrder: sourceId }, { sourceType, sourceId }] }
+        : { sourceType, sourceId };
+
+    if (category && category !== "All") filter.category = category;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+
+    const [notes, total] = await Promise.all([
+      Note.find(filter)
+        .populate("category", "name")
+        .populate("createdBy", "preferredName email")
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Note.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Notes fetched successfully", {
+      notes,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (err) {
     return sendError(res, err.message || "Failed to fetch notes", 500);
   }
 };

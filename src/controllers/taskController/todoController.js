@@ -430,30 +430,6 @@ exports.bulkCloseTodos = async (req, res) => {
   }
 };
 
-// ReOpen Todo
-exports.reopenTodo = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const todo = await Todo.findById(id);
-    if (!todo) return sendError(res, "Todo not found", 404);
-
-    if (todo.status !== "Completed") {
-      return sendError(res, "Only completed todos can be reopened", 400);
-    }
-
-    todo.status = "In Progress";
-    todo.completedAt = null;
-    todo.closingComments = null;
-
-    await todo.save();
-
-    return sendSuccess(res, "Todo reopened successfully", { todo });
-  } catch (err) {
-    return sendError(res, err.message, 500);
-  }
-};
-
 // DELETE Todo
 exports.deleteTodo = async (req, res) => {
   try {

@@ -31,6 +31,22 @@ const noteSchema = new mongoose.Schema(
       ref: "WorkOrder",
     },
 
+    sourceType: {
+      type: String,
+      enum: [
+        "workOrder",
+        "serviceAgreement",
+        "inspectionRequest",
+        "task",
+        "todo",
+      ],
+      index: true,
+    },
+    sourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      index: true,
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -39,13 +55,15 @@ const noteSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Index for better query performance
 noteSchema.index({ category: 1 });
 noteSchema.index({ building: 1 });
 noteSchema.index({ portfolio: 1 });
+noteSchema.index({ workOrder: 1 });
+noteSchema.index({ sourceType: 1, sourceId: 1 });
 noteSchema.index({ createdBy: 1 });
 noteSchema.index({ createdAt: -1 });
 
