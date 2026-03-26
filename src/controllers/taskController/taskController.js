@@ -456,6 +456,7 @@ exports.bulkCloseTasks = async (req, res) => {
 exports.reopenTask = async (req, res) => {
   try {
     const { id } = req.params;
+    const { comments } = req.body;
 
     const task = await Task.findById(id);
     if (!task) return sendError(res, "Task not found", 404);
@@ -467,6 +468,10 @@ exports.reopenTask = async (req, res) => {
     task.status = "In Progress";
     task.completedAt = null;
     task.closingComments = null;
+
+    task.reopenComments = comments || "";
+    task.reopenedAt = new Date();
+    task.reopenedBy = req.user._id;
 
     await task.save();
 

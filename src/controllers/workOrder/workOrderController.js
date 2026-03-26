@@ -1826,6 +1826,7 @@ exports.closeWorkOrder = async (req, res) => {
 exports.reopenWorkOrder = async (req, res) => {
   try {
     const { id } = req.params;
+    const { comments } = req.body;
 
     const workOrder = await WorkOrder.findById(id);
 
@@ -1838,6 +1839,9 @@ exports.reopenWorkOrder = async (req, res) => {
     }
 
     workOrder.status = "open";
+    workOrder.reopenComments = comments || null;
+    workOrder.reopenedAt = new Date();
+    workOrder.reopenedBy = req.user._id;
     workOrder.completeDate = null;
 
     await workOrder.save();
@@ -2347,6 +2351,7 @@ exports.bulkCloseInspectionRequests = async (req, res) => {
 exports.reopenInspectionRequest = async (req, res) => {
   try {
     const { id } = req.params;
+    const { comments } = req.body;
 
     const inspection = await InspectionRequest.findById(id);
 
@@ -2362,9 +2367,13 @@ exports.reopenInspectionRequest = async (req, res) => {
       );
     }
 
-    inspection.status = "open";
+    inspection.status = "pending";
     inspection.completeDate = null;
     inspection.closingComments = null;
+
+    inspection.reopenComments = comments || "";
+    inspection.reopenedAt = new Date();
+    inspection.reopenedBy = req.user._id;
 
     await inspection.save();
 
@@ -2874,10 +2883,11 @@ exports.bulkCloseServiceAgreements = async (req, res) => {
   }
 };
 
-// Reopen Service Agreement 
+// Reopen Service Agreement
 exports.reopenServiceAgreement = async (req, res) => {
   try {
     const { id } = req.params;
+    const { comments } = req.body;
 
     const serviceAgreement = await ServiceAgreement.findById(id);
 
@@ -2886,12 +2896,20 @@ exports.reopenServiceAgreement = async (req, res) => {
     }
 
     if (serviceAgreement.status !== "closed") {
-      return sendError(res, "Only closed service agreements can be reopened", 400);
+      return sendError(
+        res,
+        "Only closed service agreements can be reopened",
+        400,
+      );
     }
 
     serviceAgreement.status = "open";
     serviceAgreement.closedAt = null;
     serviceAgreement.closingComments = null;
+
+    serviceAgreement.reopenComments = comments || "";
+    serviceAgreement.reopenedAt = new Date();
+    serviceAgreement.reopenedBy = req.user._id;
 
     await serviceAgreement.save();
 
@@ -2899,7 +2917,11 @@ exports.reopenServiceAgreement = async (req, res) => {
       serviceAgreement,
     });
   } catch (err) {
-    return sendError(res, err.message || "Failed to reopen service agreement", 500);
+    return sendError(
+      res,
+      err.message || "Failed to reopen service agreement",
+      500,
+    );
   }
 };
 

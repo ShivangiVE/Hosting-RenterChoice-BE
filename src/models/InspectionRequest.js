@@ -31,8 +31,11 @@ const inspectionRequestSchema = new mongoose.Schema(
     },
     completeDate: { type: Date },
     closingComments: { type: String },
+    reopenComments: { type: String },
+    reopenedAt: { type: Date },
+    reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("InspectionRequest", inspectionRequestSchema);

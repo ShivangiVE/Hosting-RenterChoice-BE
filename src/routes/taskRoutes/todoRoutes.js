@@ -11,7 +11,6 @@ const {
   bulkDeleteTodos,
   getTodoDetails,
   getTodosByTags,
-  reopenTodo,
 } = require("../../controllers/taskController/todoController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { todoUpload } = require("../../middleware/repairUpload");
@@ -62,13 +61,6 @@ router.post(
   protect,
   authorize(...ALLOWED_ROLES),
   bulkCloseTodos,
-);
-
-router.put(
-  "/:id/reopen",
-  protect,
-  authorize(...ALLOWED_ROLES),
-  reopenTodo,
 );
 
 // Delete Todo
