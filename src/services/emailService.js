@@ -4,6 +4,8 @@ const User = require("../models/User");
 // Nodemailer transporter
 const transporter = nodemailer.createTransport({
   service: "Gmail",
+  port: 465,        // ← change from 587 to 465 for staging
+  secure: true,   // staging
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,

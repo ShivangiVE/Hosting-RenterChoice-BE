@@ -16,6 +16,7 @@ module.exports = {
         origin: "*",
         methods: ["GET", "POST"],
       },
+       transports: ["websocket", "polling"], // added for staging
     });
 
     // JWT AUTH FOR SOCKET
