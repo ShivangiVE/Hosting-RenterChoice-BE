@@ -11,6 +11,7 @@ const {
   vendorCreateNote,
   getNotesByWorkOrder,
   internalCreateNoteForWorkOrder,
+  getNotesByEntity,
 } = require("../../controllers/notes&Documents/NoteController");
 
 const router = express.Router();
@@ -35,7 +36,7 @@ router.post(
   "/internal-create/:workOrderId",
   protect,
   authorize(...ALLOWED_ROLES),
-  internalCreateNoteForWorkOrder
+  internalCreateNoteForWorkOrder,
 );
 
 // Notes Created by vendor
@@ -43,7 +44,7 @@ router.post(
   "/vendor-create/:workOrderId",
   protect,
   authorize("Vendor"),
-  vendorCreateNote
+  vendorCreateNote,
 );
 
 router.get("/", protect, authorize(...ALLOWED_ROLES), getNotes);
@@ -52,14 +53,14 @@ router.get(
   "/building/:buildingId",
   protect,
   authorize(...ALLOWED_ROLES),
-  getNotesByBuilding
+  getNotesByBuilding,
 );
 
 router.get(
   "/portfolio/:portfolioId",
   protect,
   authorize(...ALLOWED_ROLES),
-  getNotesByPortfolio
+  getNotesByPortfolio,
 );
 
 // Get Notes By Work Order
@@ -67,7 +68,15 @@ router.get(
   "/work-order/:workOrderId",
   protect,
   authorize(...ALLOWED_ROLES, "Vendor"),
-  getNotesByWorkOrder
+  getNotesByWorkOrder,
+);
+
+// Get Notes By Entity
+router.get(
+  "/entity/:sourceType/:sourceId",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getNotesByEntity,
 );
 
 router.get("/:id", protect, authorize(...ALLOWED_ROLES, "Vendor"), getNoteById);
@@ -76,7 +85,7 @@ router.delete(
   "/:id",
   protect,
   authorize(...ALLOWED_ROLES, "Vendor"),
-  deleteNote
+  deleteNote,
 );
 
 module.exports = router;

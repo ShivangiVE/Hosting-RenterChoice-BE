@@ -12,6 +12,7 @@ const {
   downloadDocument,
   vendorUploadDocuments,
   getDocumentsByWorkOrder,
+  getDocumentsByEntity,
 } = require("../../controllers/notes&Documents/DocumentController");
 
 const router = express.Router();
@@ -64,13 +65,21 @@ router.get(
   getDocumentsByPortfolio
 );
 
-// Get documents by Vendor
+// Get documents by Work Order
 router.get(
   "/work-order/:workOrderId",
   protect,
   authorize(...ALLOWED_ROLES, "Vendor"),
   getDocumentsByWorkOrder
 );
+
+// Get Documents By Entity
+router.get(
+  "/entity/:sourceType/:sourceId",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getDocumentsByEntity
+)
 
 // Get single document
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getDocumentById);
