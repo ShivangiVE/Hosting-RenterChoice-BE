@@ -30,14 +30,25 @@ const userSchema = new mongoose.Schema(
     },
     password: { type: String, required: true },
     accountNumber: { type: String }, // Optional for Owners/Tenants/Vendors
+
+    // company: {
+    //   type: mongoose.Schema.Types.ObjectId,
+    //   ref: "Company",
+    //   required: function () {
+    //     return this.role === "Vendor";
+    //   },
+    //   index: true,
+    // },
+
     company: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
       required: function () {
-        return this.role === "Vendor";
+        return this.role === "Vendor" && this.isNew;
       },
       index: true,
     }, // Only for Vendor
+
     technicianName: { type: String }, // Only for Vendor
     role: {
       type: String,
