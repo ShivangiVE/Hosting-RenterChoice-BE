@@ -46,6 +46,9 @@ const taskSchema = new mongoose.Schema(
     closingComments: {
       type: String,
     },
+    reopenComments: { type: String },
+    reopenedAt: { type: Date },
+    reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     completedAt: { type: Date },
 
     createdBy: {
@@ -54,7 +57,7 @@ const taskSchema = new mongoose.Schema(
       required: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Task", taskSchema);

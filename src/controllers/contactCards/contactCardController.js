@@ -68,6 +68,8 @@ exports.getContactsList = async (req, res) => {
       status,
       page = 1,
       limit = 10,
+      sortBy = "createdAt",
+      sortOrder = "desc",
     } = req.query;
 
     const skip = (page - 1) * limit;
@@ -150,7 +152,24 @@ exports.getContactsList = async (req, res) => {
     }
 
     // sort
-    contacts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    contacts.sort((a, b) => {
+      const aValue = a[sortBy] || "";
+      const bValue = b[sortBy] || "";
+
+      if (typeof aValue === "string") {
+        return sortOrder === "asc"
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+
+      return sortOrder === "asc"
+        ? aValue > bValue
+          ? 1
+          : -1
+        : aValue < bValue
+          ? 1
+          : -1;
+    });
 
     // pagination
     const total = contacts.length;
@@ -230,6 +249,47 @@ exports.getContactDetails = async (req, res) => {
 
     return sendSuccess(res, "Contact fetched", {
       contact: response,
+    });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
+// Bulk Delete Contacts
+exports.bulkDeleteContacts = async (req, res) => {
+  try {
+    const { items } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return sendError(res, "No items provided", 400);
+    }
+
+    const contactIds = [];
+    const companyIds = [];
+
+    // Separate IDs by type
+    for (const item of items) {
+      if (item.type === "contact") {
+        contactIds.push(item.id);
+      } else if (item.type === "company") {
+        companyIds.push(item.id);
+      }
+    }
+
+    // Soft delete (BEST PRACTICE)
+    const [contactsResult, companiesResult] = await Promise.all([
+      contactIds.length
+        ? Contact.updateMany({ _id: { $in: contactIds } }, { isActive: false })
+        : null,
+
+      companyIds.length
+        ? Company.updateMany({ _id: { $in: companyIds } }, { isActive: false })
+        : null,
+    ]);
+
+    return sendSuccess(res, "Items deleted successfully", {
+      contactsDeleted: contactsResult?.modifiedCount || 0,
+      companiesDeleted: companiesResult?.modifiedCount || 0,
     });
   } catch (err) {
     return sendError(res, err.message, 500);

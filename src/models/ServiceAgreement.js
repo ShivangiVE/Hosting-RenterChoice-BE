@@ -30,6 +30,9 @@ const serviceAgreementSchema = new mongoose.Schema(
     },
     closingComments: { type: String },
     closedAt: { type: Date },
+    reopenComments: { type: String },
+    reopenedAt: { type: Date },
+    reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },
 );

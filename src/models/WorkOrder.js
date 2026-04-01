@@ -29,7 +29,7 @@ const extensionSchema = new mongoose.Schema(
       maxlength: 500,
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const workOrderSchema = new mongoose.Schema(
@@ -106,8 +106,11 @@ const workOrderSchema = new mongoose.Schema(
     completeDate: { type: Date },
     declinedDate: { type: Date },
     closingComments: { type: String },
+    reopenComments: String,
+    reopenedAt: Date,
+    reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 workOrderSchema.pre("save", function (next) {

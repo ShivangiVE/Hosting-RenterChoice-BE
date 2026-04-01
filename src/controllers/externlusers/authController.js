@@ -139,7 +139,7 @@ exports.login = async (req, res, next) => {
     const user = await User.findOne({
       email: email.toLowerCase().trim(),
     });
-    
+
     if (!user) {
       return sendError(res, "Invalid credentials", 401);
     }
