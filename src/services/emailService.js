@@ -6,7 +6,7 @@ const transporter = nodemailer.createTransport({
   port: 465,        // ← change from 587 to 465 for staging
   secure: true,   // staging
   auth: {
-    user: "enterchoicestaging@gmail.com",
+    user: "renterchoicestaging@gmail.com",
     pass: "divjedlizvqgtbnf",
   },
 });
