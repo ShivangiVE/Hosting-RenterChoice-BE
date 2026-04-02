@@ -1,6 +1,6 @@
 const nodemailer = require("nodemailer");
 const User = require("../models/User");
-
+console.log("process.env.EMAIL_USER ",process.env.EMAIL_USER)
 // Nodemailer transporter
 const transporter = nodemailer.createTransport({
   service: "Gmail",
