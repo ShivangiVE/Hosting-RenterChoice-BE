@@ -5,6 +5,9 @@ const transporter = nodemailer.createTransport({
   service: "Gmail",
   port: 465,        // ← change from 587 to 465 for staging
   secure: true,   // staging
+  connectionTimeout: 60000,  // 60s — survives cold start--staging
+  greetingTimeout: 30000,    // 30s --staging
+  socketTimeout: 60000,      // 60s --staging
   auth: {
     user: "renterchoicestaging@gmail.com",
     pass: "divjedlizvqgtbnf",
