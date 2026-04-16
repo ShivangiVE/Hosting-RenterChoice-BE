@@ -16,6 +16,18 @@ const inspectionRequestSchema = new mongoose.Schema(
       required: true,
     },
     keyIssued: { type: Boolean, default: false },
+    keyReturn: {
+      status: {
+        type: String,
+        enum: ["not_applicable", "pending", "returned"],
+        default: "not_issued",
+      },
+      returnedAt: Date,
+      returnedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    },
     dueDate: { type: Date },
     inspectionColour: { type: String },
     status: {
@@ -37,5 +49,16 @@ const inspectionRequestSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+inspectionRequestSchema.pre("save", function (next) {
+  if (this.keyIssued) {
+    if (!this.keyReturn || this.keyReturn.status === "not_issued") {
+      this.keyReturn = { status: "pending" };
+    }
+  } else {
+    this.keyReturn = { status: "not_issued" };
+  }
+  next();
+});
 
 module.exports = mongoose.model("InspectionRequest", inspectionRequestSchema);

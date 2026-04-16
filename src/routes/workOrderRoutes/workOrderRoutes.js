@@ -48,6 +48,8 @@ const {
   getInspectionRequest,
   reopenServiceAgreement,
   reopenInspectionRequest,
+  confirmInspectionKeyReturn,
+  bulkConfirmInspectionKeyReturn,
 } = require("../../controllers/workOrder/workOrderController");
 const {
   createAppointment,
@@ -353,6 +355,20 @@ router.put(
   protect,
   authorize(...ALLOWED_ROLES),
   closeInspectionRequest,
+);
+
+router.put(
+  "/inspection-requests/:id/return-key",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  confirmInspectionKeyReturn,
+);
+
+router.put(
+  "/inspection-requests/return-key/bulk",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  bulkConfirmInspectionKeyReturn,
 );
 
 // Bulk Close Inspection Requests
