@@ -1910,6 +1910,10 @@ exports.createInspectionRequest = async (req, res) => {
     const sequence = await getNextSequence("inspection");
     const inspectionNumber = `I #${sequence.toString().padStart(4, "0")}`;
 
+    let keyReturn = {
+      status: keyIssued ? "pending" : "not_issued",
+    };
+
     const inspectionRequest = await InspectionRequest.create({
       inspectionNumber,
       inspectionType,
@@ -1917,6 +1921,7 @@ exports.createInspectionRequest = async (req, res) => {
       notes,
       assignedTo,
       keyIssued: keyIssued || false,
+      keyReturn,
       dueDate,
       inspectionColour,
       createdBy: req.user._id,
@@ -2261,6 +2266,12 @@ exports.updateInspectionRequest = async (req, res) => {
       updateData.status = "scheduled";
     }
 
+    if (req.body.keyIssued !== undefined) {
+      req.body.keyReturn = {
+        status: req.body.keyIssued ? "pending" : "not_applicable",
+      };
+    }
+
     const inspectionRequest = await InspectionRequest.findByIdAndUpdate(
       id,
       updateData,
@@ -2280,6 +2291,46 @@ exports.updateInspectionRequest = async (req, res) => {
       500,
     );
   }
+};
+
+// Key Return Update for Inspection Request
+exports.confirmInspectionKeyReturn = async (req, res) => {
+  const { id } = req.params;
+
+  const inspection = await InspectionRequest.findById(id);
+  if (!inspection) return sendError(res, "Inspection not found", 404);
+
+  if (inspection.keyReturn?.status === "returned") {
+    return sendError(res, "Key already returned", 400);
+  }
+
+  inspection.keyReturn = {
+    status: "returned",
+    returnedAt: new Date(),
+    returnedBy: req.user._id,
+  };
+
+  await inspection.save();
+
+  return sendSuccess(res, "Key returned successfully", { inspection });
+};
+
+// Bulk Key Return Update for Inspection Requests
+exports.bulkConfirmInspectionKeyReturn = async (req, res) => {
+  const { ids } = req.body;
+
+  await InspectionRequest.updateMany(
+    { _id: { $in: ids } },
+    {
+      $set: {
+        "keyReturn.status": "returned",
+        "keyReturn.returnedAt": new Date(),
+        "keyReturn.returnedBy": req.user._id,
+      },
+    },
+  );
+
+  return sendSuccess(res, "Keys returned successfully");
 };
 
 // Close Inspection Request
