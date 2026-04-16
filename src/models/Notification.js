@@ -23,6 +23,12 @@ const notificationSchema = new mongoose.Schema(
         "DUE_DATE_EXTENSION_REVIEWED",
         "WORK_ORDER_DECLINED",
         "WORK_ORDER_ACCEPTED",
+
+        "INSPECTION_REQUEST_ASSIGNED",
+        "WORK_ORDER_ASSIGNED_CLERK",
+
+        "TASK_ASSIGNED_CLERK",
+        "TODO_ASSIGNED_CLERK",
       ],
       required: true,
     },

@@ -1910,6 +1910,10 @@ exports.createInspectionRequest = async (req, res) => {
     const sequence = await getNextSequence("inspection");
     const inspectionNumber = `I #${sequence.toString().padStart(4, "0")}`;
 
+    let keyReturn = {
+      status: keyIssued ? "pending" : "not_issued",
+    };
+
     const inspectionRequest = await InspectionRequest.create({
       inspectionNumber,
       inspectionType,
@@ -1917,17 +1921,40 @@ exports.createInspectionRequest = async (req, res) => {
       notes,
       assignedTo,
       keyIssued: keyIssued || false,
+      keyReturn,
       dueDate,
       inspectionColour,
       createdBy: req.user._id,
     });
 
-    return sendSuccess(
+    //  Send response FIRST — never let notification delay it
+    sendSuccess(
       res,
       "Inspection request created successfully",
       { inspectionRequest },
       201,
     );
+
+    //  Fire notification AFTER response — non-blocking
+    // assignedTo is the clerk's userId from req.body
+    if (assignedTo) {
+      try {
+        await createNotification({
+          user: assignedTo,
+          role: "InspectionClerk",
+          type: "INSPECTION_REQUEST_ASSIGNED",
+          title: "New Inspection Request Assigned",
+          message: `Inspection request ${inspectionRequest.inspectionNumber} has been assigned to you.`,
+          entityType: "InspectionRequest",
+          entityId: inspectionRequest._id,
+        });
+        // NOTE: createNotification already emits the socket internally,
+        // so no need for a separate getIO().emit() call here
+      } catch (notifErr) {
+        // Log but never crash the request over a notification failure
+        console.error("Failed to send inspection notification:", notifErr);
+      }
+    }
   } catch (err) {
     return sendError(
       res,
@@ -2261,18 +2288,49 @@ exports.updateInspectionRequest = async (req, res) => {
       updateData.status = "scheduled";
     }
 
+    if (req.body.keyIssued !== undefined) {
+      req.body.keyReturn = {
+        status: req.body.keyIssued ? "pending" : "not_applicable",
+      };
+    }
+
+    //  STEP 1: Fetch OLD record BEFORE update to compare assignee
+    const oldRequest = await InspectionRequest.findById(id);
+    if (!oldRequest) return sendError(res, "Inspection request not found", 404);
+
+    //  STEP 2: Check if assignee is actually changing
+    const oldAssignedTo = oldRequest.assignedTo?.toString();
+    const newAssignedTo = updateData.assignedTo?.toString();
+    const assigneeChanged = newAssignedTo && oldAssignedTo !== newAssignedTo;
+
+    //  STEP 3: Do the update
     const inspectionRequest = await InspectionRequest.findByIdAndUpdate(
       id,
       updateData,
       { new: true, runValidators: true },
     );
 
-    if (!inspectionRequest)
-      return sendError(res, "Inspection request not found", 404);
-
-    return sendSuccess(res, "Inspection request updated successfully", {
+    // STEP 4: Send response immediately
+    sendSuccess(res, "Inspection request updated successfully", {
       inspectionRequest,
     });
+
+    // STEP 5: Fire notification after response if assignee changed
+    if (assigneeChanged) {
+      try {
+        await createNotification({
+          user: newAssignedTo,
+          role: "InspectionClerk",
+          type: "INSPECTION_REQUEST_ASSIGNED",
+          title: "Inspection Request Assigned",
+          message: `Inspection request ${inspectionRequest.inspectionNumber} has been assigned to you.`,
+          entityType: "InspectionRequest",
+          entityId: inspectionRequest._id,
+        });
+      } catch (notifErr) {
+        console.error("Failed to send reassignment notification:", notifErr);
+      }
+    }
   } catch (err) {
     return sendError(
       res,
@@ -2280,6 +2338,46 @@ exports.updateInspectionRequest = async (req, res) => {
       500,
     );
   }
+};
+
+// Key Return Update for Inspection Request
+exports.confirmInspectionKeyReturn = async (req, res) => {
+  const { id } = req.params;
+
+  const inspection = await InspectionRequest.findById(id);
+  if (!inspection) return sendError(res, "Inspection not found", 404);
+
+  if (inspection.keyReturn?.status === "returned") {
+    return sendError(res, "Key already returned", 400);
+  }
+
+  inspection.keyReturn = {
+    status: "returned",
+    returnedAt: new Date(),
+    returnedBy: req.user._id,
+  };
+
+  await inspection.save();
+
+  return sendSuccess(res, "Key returned successfully", { inspection });
+};
+
+// Bulk Key Return Update for Inspection Requests
+exports.bulkConfirmInspectionKeyReturn = async (req, res) => {
+  const { ids } = req.body;
+
+  await InspectionRequest.updateMany(
+    { _id: { $in: ids } },
+    {
+      $set: {
+        "keyReturn.status": "returned",
+        "keyReturn.returnedAt": new Date(),
+        "keyReturn.returnedBy": req.user._id,
+      },
+    },
+  );
+
+  return sendSuccess(res, "Keys returned successfully");
 };
 
 // Close Inspection Request

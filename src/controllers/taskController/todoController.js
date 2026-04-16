@@ -4,6 +4,8 @@ const Category = require("../../models/repairCategories");
 const { sendSuccess, sendError } = require("../../utils/response");
 const Counter = require("../../utils/Counter");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
+const { createNotification } = require("../../services/notificationService");
+const { getIO } = require("../../../socket");
 
 //  Increment (used only when creating)
 const getNextSequence = async (sequenceName) => {
@@ -86,7 +88,32 @@ exports.createTodo = async (req, res) => {
       createdBy: req.user._id,
     });
 
-    return sendSuccess(res, "Todo created successfully", { todo }, 201);
+    sendSuccess(res, "Todo created successfully", { todo }, 201);
+
+    //  Notify Inspection Clerk
+    if (assignedTo) {
+      try {
+        const clerk = await User.findById(assignedTo).select("role");
+
+        if (clerk?.role === "InspectionClerk") {
+          await createNotification({
+            user: assignedTo,
+            role: "InspectionClerk",
+            type: "TODO_ASSIGNED_CLERK",
+            title: "New Todo Assigned",
+            message: `Todo ${todo.todoNumber} has been assigned to you.`,
+            entityType: "Todo",
+            entityId: todo._id,
+          });
+
+          getIO().to(`user:${assignedTo}`).emit("clerk:new-todo", {
+            todoId: todo._id,
+          });
+        }
+      } catch (err) {
+        console.error("Todo notification failed:", err);
+      }
+    }
   } catch (err) {
     return sendError(res, err.message || "Failed to create todo", 500);
   }
