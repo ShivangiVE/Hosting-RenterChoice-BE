@@ -5,6 +5,8 @@ const { sendSuccess, sendError } = require("../../utils/response");
 const Counter = require("../../utils/Counter");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const Todo = require("../../models/tasks/Todo");
+const { createNotification } = require("../../services/notificationService");
+const { getIO } = require("../../../socket");
 
 // Increment counter
 const getNextSequence = async (sequenceName) => {
@@ -89,7 +91,33 @@ exports.createTask = async (req, res) => {
       createdBy: req.user._id,
     });
 
-    return sendSuccess(res, "Task created successfully", { task }, 201);
+    sendSuccess(res, "Task created successfully", { task }, 201);
+
+    // Notify Inspection Clerk
+    if (assignedTo) {
+      try {
+        const clerk = await User.findById(assignedTo).select("role");
+
+        if (clerk?.role === "InspectionClerk") {
+          await createNotification({
+            user: assignedTo,
+            role: "InspectionClerk",
+            type: "TASK_ASSIGNED_CLERK",
+            title: "New Task Assigned",
+            message: `Task ${task.taskNumber} has been assigned to you.`,
+            entityType: "Task",
+            entityId: task._id,
+          });
+
+  
+          getIO().to(`user:${assignedTo}`).emit("clerk:new-task", {
+            taskId: task._id,
+          });
+        }
+      } catch (err) {
+        console.error("Task notification failed:", err);
+      }
+    }
   } catch (err) {
     return sendError(res, err.message || "Failed to create task", 500);
   }
