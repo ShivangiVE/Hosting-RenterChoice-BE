@@ -19,7 +19,7 @@ const inspectionRequestSchema = new mongoose.Schema(
     keyReturn: {
       status: {
         type: String,
-        enum: ["not_applicable", "pending", "returned"],
+        enum: ["not_issued", "pending", "returned"],
         default: "not_issued",
       },
       returnedAt: Date,
@@ -52,12 +52,19 @@ const inspectionRequestSchema = new mongoose.Schema(
 
 inspectionRequestSchema.pre("save", function (next) {
   if (this.keyIssued) {
+    // Key issued → must track return
     if (!this.keyReturn || this.keyReturn.status === "not_issued") {
       this.keyReturn = { status: "pending" };
     }
   } else {
-    this.keyReturn = { status: "not_issued" };
+    // Key not issued → always not_issued
+    this.keyReturn = {
+      status: "not_issued",
+      returnedAt: null,
+      returnedBy: null,
+    };
   }
+
   next();
 });
 
