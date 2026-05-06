@@ -33,6 +33,11 @@ const companySchema = new mongoose.Schema(
 
     notes: String,
 
+    isETransferClient: {
+      type: Boolean,
+      default: false,
+    },
+
     //  AUTO GENERATED
     companyAccountNumber: {
       type: String,

@@ -18,6 +18,7 @@ exports.createCompany = async (req, res) => {
       contactEmail,
       contactPhone,
       notes,
+      isETransferClient,
     } = req.body;
 
     // Validation
@@ -53,6 +54,7 @@ exports.createCompany = async (req, res) => {
       contactEmail,
       contactPhone,
       notes,
+      isETransferClient: Boolean(isETransferClient),
       companyAccountNumber: accountNumber,
       createdBy: req.user?._id,
     });
@@ -153,6 +155,7 @@ exports.updateCompany = async (req, res) => {
       contactEmail,
       contactPhone,
       notes,
+      isETransferClient,
     } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -185,6 +188,7 @@ exports.updateCompany = async (req, res) => {
         contactEmail,
         contactPhone,
         notes,
+        isETransferClient: Boolean(isETransferClient),
         lastUpdatedBy: req.user?._id,
         lastUpdatedAt: new Date(),
       },
