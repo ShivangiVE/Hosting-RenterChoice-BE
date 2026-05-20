@@ -3,17 +3,7 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
-
-const INTERNAL_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const { INTERNAL_ROLES } = require("../../constants/roles");
 
 // Generate JWT
 const generateToken = (user) => {

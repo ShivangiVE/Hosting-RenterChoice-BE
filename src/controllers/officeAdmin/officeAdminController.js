@@ -41,7 +41,7 @@ exports.createInternalUser = async (req, res) => {
         email: newUser.email,
         role: newUser.role,
       },
-      201
+      201,
     );
   } catch (err) {
     return sendError(res, "Failed to create internal user", 500);
@@ -74,12 +74,19 @@ exports.getInternalUsers = async (req, res) => {
 
     if (req.user.role === "Admin") {
       // Admin sees all
+    } else if (req.user.role === "BrokerageAdmin") {
+      // BrokerageAdmin sees team members under their own OfficeAdmins
+      const myOfficeAdmins = await User.find({
+        role: "OfficeAdmin",
+        createdBy: req.user._id,
+      }).select("_id");
+
+      filter.createdBy = { $in: myOfficeAdmins.map((a) => a._id) };
     } else if (req.user.role === "OfficeAdmin") {
       // OfficeAdmin sees only their created users
       filter.createdBy = req.user._id;
     } else if (INTERNAL_ROLES.includes(req.user.role)) {
-      // Team member (e.g. AccountsTeam, RepairsTeam, etc.)
-      // Find their office admin (the one who created them)
+      // Team member — find their office admin (the one who created them)
       const self = await User.findById(req.user._id).select("createdBy");
       if (self && self.createdBy) {
         filter.createdBy = self.createdBy;
@@ -92,7 +99,7 @@ exports.getInternalUsers = async (req, res) => {
 
     const users = await User.find(filter)
       .select("-password")
-      .populate("createdBy", "preferredName email role"); // optional: show OfficeAdmin info
+      .populate("createdBy", "preferredName email role");
 
     return sendSuccess(res, "Internal users retrieved successfully", { users });
   } catch (err) {
@@ -123,7 +130,7 @@ exports.updateInternalUserRole = async (req, res) => {
     const updated = await User.findByIdAndUpdate(
       req.params.id,
       { role },
-      { new: true }
+      { new: true },
     ).select("-password");
 
     if (!updated) {
