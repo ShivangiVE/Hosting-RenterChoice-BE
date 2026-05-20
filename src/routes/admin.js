@@ -11,10 +11,18 @@ const {
   getOfficeAdmins,
   getTeamsGroupedByOfficeAdmin,
   impersonateOfficeAdmin,
+  createBrokerageAdmin,
+  getBrokerageAdmins,
 } = require("../controllers/admin/adminController");
 
 // All routes protected AND only for Admin
 router.use(protect, authorize("Admin"));
+
+router.post(
+  "/create-brokerage-admin",
+  authorize("Admin"),
+  createBrokerageAdmin,
+);
 
 // Dedicated OfficeAdmin route
 router.post("/create-office-admin", authorize("Admin"), createOfficeAdmin);
@@ -22,10 +30,12 @@ router.post("/create-office-admin", authorize("Admin"), createOfficeAdmin);
 // Generic internal team creation
 router.post("/create-internal", createInternalUser);
 
+router.get("/brokerage-admins", authorize("Admin"), getBrokerageAdmins);
+
 router.get("/users", getAllUsers);
 
 //Get Office Admins
-router.get("/office-admins", getOfficeAdmins);
+router.get("/office-admins", authorize("Admin"), getOfficeAdmins);
 
 //Get Users as per office admin team
 router.get("/teams-by-office-admin", getTeamsGroupedByOfficeAdmin);

@@ -8,21 +8,10 @@ const {
   deleteInternalUser,
   updateInternalUserRole,
 } = require("../controllers/officeAdmin/officeAdminController");
+const { INTERNAL_ROLES } = require("../constants/roles");
 
 // Allow both Admin and OfficeAdmin
-router.use(
-  protect,
-  authorize(
-    "Admin",
-    "OfficeAdmin",
-    "AccountsTeam",
-    "RepairsTeam",
-    "LeaseTeam",
-    "MarketingTeam",
-    "LandlordsTeam",
-    "InspectionClerk"
-  )
-);
+router.use(protect, authorize(...INTERNAL_ROLES));
 
 // Create a new internal user (team member)
 router.post("/internal-users", createInternalUser);

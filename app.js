@@ -3,6 +3,7 @@ const cors = require("cors");
 const path = require("path");
 
 const adminRoutes = require("./src/routes/admin");
+const brokerageAdminRoutes = require("./src/routes/brokerageAdminRoutes/brokerageAdminRoutes");
 const officeAdminRoutes = require("./src/routes/officeAdminRoutes");
 const authRoutes = require("./src/routes/externalUsers/auth");
 const externalUsers = require("./src/routes/externalUsers/externalUsersRoutes");
@@ -49,6 +50,7 @@ app.use("/api/externalUsers", externalUsers);
 app.use("/api/internalauth", internalAuthRoutes);
 app.use("/api/internalUsers", internalUsers);
 app.use("/api/admin", adminRoutes);
+app.use("/api/brokerageAdmin", brokerageAdminRoutes);
 app.use("/api/officeAdmin", officeAdminRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/forms/templates", formTemplateRoutes);
