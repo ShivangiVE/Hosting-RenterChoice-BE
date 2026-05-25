@@ -6,6 +6,7 @@ const Counter = require("../../utils/Counter");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const { createNotification } = require("../../services/notificationService");
 const { getIO } = require("../../../socket");
+const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
 
 //  Increment (used only when creating)
 const getNextSequence = async (sequenceName) => {
@@ -126,10 +127,20 @@ exports.getTodos = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    if (allowedUserIds !== null) {
+      filter.$or = [
+        { createdBy: { $in: allowedUserIds } },
+        { assignedTo: { $in: allowedUserIds } },
+      ];
+    }
+
     const { category, user, assignedTo, tags, todoColor, status, myView } =
       req.query;
 
-    let filter = {};
     if (category) filter.category = category;
     if (assignedTo) filter.assignedTo = assignedTo;
     if (todoColor) filter.todoColor = todoColor;

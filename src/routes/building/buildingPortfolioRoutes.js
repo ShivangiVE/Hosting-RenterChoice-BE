@@ -22,7 +22,9 @@ const {
   updateBuildingMarketing,
   updateBuildingInspection,
   getPortfoliosList,
+  getBuildingsList,
 } = require("../../controllers/building/buildingPortfolioController");
+const { ALLOWED_INTERNAL_ROLES } = require("../../constants/roles");
 
 // Internal roles allowed
 const INTERNAL_ROLES = [
@@ -37,31 +39,54 @@ const INTERNAL_ROLES = [
 ];
 
 // ========================= Buildings =========================
-router.post("/building", protect, authorize(...INTERNAL_ROLES), createBuilding);
+router.post(
+  "/building",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  createBuilding,
+);
 
-router.get("/buildings", protect, getAllBuildings);
-router.get("/building/:id", protect, getBuildingDetails);
+router.get(
+  "/buildings",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  getAllBuildings,
+);
+
+router.get(
+  "/buildings/list",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  getBuildingsList,
+);
+
+router.get(
+  "/building/:id",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  getBuildingDetails,
+);
 
 router.put(
   "/building/:id",
   protect,
-  authorize(...INTERNAL_ROLES),
-  updateBuilding
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  updateBuilding,
 );
 
 // Bulk update buildings
 router.put(
   "/buildings/bulk-update",
   protect,
-  authorize(...INTERNAL_ROLES),
-  bulkUpdateBuildings
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  bulkUpdateBuildings,
 );
 
 router.delete(
   "/building/:id",
   protect,
-  authorize(...INTERNAL_ROLES),
-  deleteBuilding
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  deleteBuilding,
 );
 
 // Dynamic Inspection and Marketing Data Routes
@@ -73,24 +98,24 @@ router.get("/building/:id/with-marketing", protect, getBuildingWithMarketing);
 router.put(
   "/building/:id/inspection",
   protect,
-  authorize(...INTERNAL_ROLES),
-  updateBuildingInspection
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  updateBuildingInspection,
 );
 
 // Update only building marketing data
 router.put(
   "/building/:id/marketing",
   protect,
-  authorize(...INTERNAL_ROLES),
-  updateBuildingMarketing
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  updateBuildingMarketing,
 );
 
 // ========================= Portfolios =========================
 router.post(
   "/portfolio",
   protect,
-  authorize(...INTERNAL_ROLES),
-  createPortfolio
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  createPortfolio,
 );
 // Get all portfolios
 router.get("/portfolios", protect, getAllPortfolios);
@@ -102,45 +127,45 @@ router.get("/portfolio/:id", protect, getPortfolioDetails);
 router.put(
   "/portfolio/:id",
   protect,
-  authorize(...INTERNAL_ROLES),
-  updatePortfolio
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  updatePortfolio,
 );
 
 // Bulk Update Portfolio
 router.put(
   "/portfolios/bulk-update",
   protect,
-  authorize(...INTERNAL_ROLES),
-  bulkUpdatePortfolios
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  bulkUpdatePortfolios,
 );
 
 // Delete Portfolio
 router.delete(
   "/portfolio/:id",
   protect,
-  authorize(...INTERNAL_ROLES),
-  deletePortfolio
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  deletePortfolio,
 );
 
 router.get(
   "/portfolio/:portfolioId/buildings",
   protect,
-  getBuildingsByPortfolio
+  getBuildingsByPortfolio,
 );
 
 // ========================= Portfolio Owners =========================
 router.post(
   "/portfolio/:portfolioId/owners",
   protect,
-  authorize(...INTERNAL_ROLES),
-  addOwnersToPortfolio
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  addOwnersToPortfolio,
 );
 
 router.delete(
   "/portfolio/:portfolioId/owners/:ownerId",
   protect,
-  authorize(...INTERNAL_ROLES),
-  removeOwnerFromPortfolio
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  removeOwnerFromPortfolio,
 );
 
 module.exports = router;
