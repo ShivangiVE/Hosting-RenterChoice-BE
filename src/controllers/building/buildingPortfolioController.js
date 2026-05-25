@@ -4,6 +4,7 @@ const Portfolio = require("../../models/Portfolio");
 const User = require("../../models/User");
 const AuditService = require("../../services/auditService");
 const { generateAccountNumber } = require("../../utils/generateAccountNumber");
+const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
 const { sendSuccess, sendError } = require("../../utils/response");
 
 /**
@@ -204,28 +205,184 @@ exports.getBuildingDetails = async (req, res) => {
 // get all buildings
 exports.getAllBuildings = async (req, res) => {
   try {
-    const { portfolioId, onlyCities } = req.query;
+    const {
+      portfolioId,
+      onlyCities,
+      page = 1,
+      limit = 10,
+      search = "",
+      buildingFilter,
+      statusFilter,
+      unitTypeFilter,
+      sortBy,
+      sortOrder = "asc",
+    } = req.query;
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    const query = {};
+
+    const andConditions = [];
+
+    // Apply team scope — null means Admin (no restriction)
+    if (allowedUserIds !== null) {
+      query.createdBy = { $in: allowedUserIds };
+    }
 
     // Build query object
-    const query = {};
     if (portfolioId && portfolioId !== "All") {
       query.portfolio = portfolioId;
     }
-
     if (onlyCities && onlyCities === "true") {
       // Return only unique cities
       const cities = await Building.distinct("formData.city", query);
       return sendSuccess(res, "Cities fetched successfully", { cities });
     }
 
-    const buildings = await Building.find(query)
+    if (statusFilter && statusFilter !== "All") {
+      query.status = statusFilter;
+    }
+
+    if (unitTypeFilter && unitTypeFilter !== "All") {
+      query["formData.unitType"] = unitTypeFilter;
+    }
+
+    if (buildingFilter && buildingFilter !== "All") {
+      andConditions.push({
+        $or: [
+          {
+            "formData.address": {
+              $regex: buildingFilter,
+              $options: "i",
+            },
+          },
+          {
+            buildingAbbreviation: {
+              $regex: buildingFilter,
+              $options: "i",
+            },
+          },
+        ],
+      });
+    }
+
+    if (search) {
+      andConditions.push({
+        $or: [
+          {
+            "formData.fullAddress": {
+              $regex: search,
+              $options: "i",
+            },
+          },
+          {
+            "formData.address": {
+              $regex: search,
+              $options: "i",
+            },
+          },
+          {
+            buildingAbbreviation: {
+              $regex: search,
+              $options: "i",
+            },
+          },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
+
+    // Count before pagination
+    const totalItems = await Building.countDocuments(query);
+
+    let buildingsQuery = Building.find(query)
       .populate("createdBy", "preferredName email")
+      .populate("portfolio", "portfolioAbbreviation _id");
+
+    // Server-side sorting
+    if (sortBy) {
+      const sortableFieldMap = {
+        fullAddress: "formData.fullAddress",
+        unitType: "formData.unitType",
+        monthlyRent: "formData.monthlyRent",
+        status: "status",
+      };
+      const mongoSortField = sortableFieldMap[sortBy] || sortBy;
+      buildingsQuery = buildingsQuery.sort({
+        [mongoSortField]: sortOrder === "desc" ? -1 : 1,
+      });
+    }
+
+    const buildings = await buildingsQuery.skip(skip).limit(limitNum).lean();
+
+    return sendSuccess(res, "Buildings fetched successfully", {
+      buildings,
+      pagination: {
+        currentPage: pageNum,
+        totalPages: Math.ceil(totalItems / limitNum),
+        totalItems,
+        itemsPerPage: limitNum,
+        hasNextPage: pageNum < Math.ceil(totalItems / limitNum),
+        hasPrevPage: pageNum > 1,
+      },
+      stats: {
+        vacantCount: await Building.countDocuments({
+          ...query,
+          status: "vacant",
+        }),
+      },
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch buildings", 500);
+  }
+};
+
+// Get buildings list for dropdowns & filters (no pagination, scoped to team)
+exports.getBuildingsList = async (req, res) => {
+  try {
+    const { portfolioId } = req.query;
+
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    const query = {};
+
+    // Apply team scope — null means Admin (no restriction)
+    if (allowedUserIds !== null) {
+      query.createdBy = { $in: allowedUserIds };
+    }
+
+    // Optionally filter by portfolio
+    if (portfolioId && portfolioId !== "All") {
+      query.portfolio = portfolioId;
+    }
+
+    const buildings = await Building.find(query)
+      .select("buildingAbbreviation formData.address formData.city portfolio")
       .populate("portfolio", "portfolioAbbreviation")
       .lean();
 
-    return sendSuccess(res, "Buildings fetched successfully", { buildings });
+    // Shape the response to be dropdown-friendly
+    const buildingList = buildings.map((b) => ({
+      _id: b._id,
+      label: b.formData?.address || b.buildingAbbreviation || b._id,
+      buildingAbbreviation: b.buildingAbbreviation,
+      address: b.formData?.address || "",
+      city: b.formData?.city || "",
+      portfolio: b.portfolio,
+    }));
+
+    return sendSuccess(res, "Building list fetched", {
+      buildings: buildingList,
+    });
   } catch (err) {
-    return sendError(res, err.message || "Failed to fetch buildings", 500);
+    return sendError(res, err.message || "Failed to fetch building list", 500);
   }
 };
 
@@ -813,8 +970,15 @@ exports.getAllPortfolios = async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Build query
+    // ── Resolve team scope ────────────────────────────────────────
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
     let query = {};
+
+    // Apply team scope — null means Admin (no restriction)
+    if (allowedUserIds !== null) {
+      query.createdBy = { $in: allowedUserIds };
+    }
 
     // Search functionality
     if (search) {
@@ -964,7 +1128,13 @@ exports.getAllPortfolios = async (req, res) => {
 // Get portfolio names/abbreviations only (for dropdowns & filters)
 exports.getPortfoliosList = async (req, res) => {
   try {
-    const portfolios = await Portfolio.find({})
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+    const query = {};
+    if (allowedUserIds !== null) {
+      query.createdBy = { $in: allowedUserIds };
+    }
+
+    const portfolios = await Portfolio.find(query)
       .select("portfolioName portfolioAbbreviation")
       .lean();
 

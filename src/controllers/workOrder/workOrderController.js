@@ -19,6 +19,7 @@ const { getIO } = require("../../../socket");
 const { createNotification } = require("../../services/notificationService");
 const { validateFutureOrTodayDate } = require("../../utils/dateValidator");
 const { assertVendorAccepted } = require("../../utils/vendorGuards");
+const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -169,6 +170,18 @@ exports.getWorkOrders = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    // ── Apply team scope — null means Admin (no restriction) ──
+    if (allowedUserIds !== null) {
+      filter.$or = [
+        { createdBy: { $in: allowedUserIds } }, // created by team
+        { assignedTo: { $in: allowedUserIds } }, // assigned to team
+      ];
+    }
+
     const {
       status,
       dynamicStatus,
@@ -180,8 +193,6 @@ exports.getWorkOrders = async (req, res) => {
       tenancy,
       search,
     } = req.query;
-
-    let filter = {};
 
     // Role-based filtering example (optional)
     // if (req.user && req.user.role === "SomeRole") {
@@ -1971,6 +1982,23 @@ exports.getInspectionRequests = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    // Scope to team
+    if (allowedUserIds !== null) {
+      filter.$or = [
+        { createdBy: { $in: allowedUserIds } },
+        { assignedTo: { $in: allowedUserIds } },
+      ];
+    }
+
+    // InspectionClerk override — they only see their own assigned
+    if (req.user.role === "InspectionClerk") {
+      filter = { assignedTo: req.user._id };
+    }
+
     const {
       status,
       type,
@@ -1983,8 +2011,6 @@ exports.getInspectionRequests = async (req, res) => {
       completeDate,
       search,
     } = req.query;
-
-    let filter = {};
 
     // Filter by logged-in user
     // Only show inspection requests assigned to this user
@@ -2591,6 +2617,15 @@ exports.getServiceAgreements = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    if (allowedUserIds !== null) {
+      filter.createdBy = { $in: allowedUserIds };
+      // Service agreements don't have assignedTo — createdBy is enough
+    }
+
     const {
       dueDate,
       category,
@@ -2600,8 +2635,6 @@ exports.getServiceAgreements = async (req, res) => {
       vendorStatus,
       search,
     } = req.query;
-
-    let filter = {};
 
     //  Due Date
     if (dueDate && dueDate !== "All") {
