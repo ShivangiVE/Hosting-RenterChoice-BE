@@ -6,6 +6,7 @@ const {
   generateCOAAccountNumber,
 } = require("../../utils/coaAccountNumberGenerator");
 const { validateAccountNumber } = require("../../utils/coaValidation");
+const Counter = require("../../utils/Counter");
 const { sendError, sendSuccess } = require("../../utils/response");
 
 exports.createAccount = async (req, res) => {
@@ -56,12 +57,12 @@ exports.createAccount = async (req, res) => {
     // =========================
 
     const accountNameExists = await Account.findOne({
+      isActive: true,
       accountName: {
         $regex: `^${accountName.trim()}$`,
         $options: "i",
       },
     });
-
     if (accountNameExists) {
       return sendError(res, "Account name already exists", 400);
     }
@@ -80,6 +81,7 @@ exports.createAccount = async (req, res) => {
 
     const exists = await Account.findOne({
       accountNumber: String(finalAccountNumber),
+      isActive: true,
     });
 
     if (exists) {
@@ -95,6 +97,29 @@ exports.createAccount = async (req, res) => {
       description,
       createdBy: req.user._id,
     });
+
+    if (!autoGenerate) {
+      const config = ACCOUNT_TYPES[accountType];
+
+      const manualNumber = Number(finalAccountNumber);
+
+      const expectedSequence = manualNumber - config.startFrom;
+
+      await Counter.findOneAndUpdate(
+        {
+          _id: config.counterId,
+          sequence_value: { $lt: expectedSequence },
+        },
+        {
+          $set: {
+            sequence_value: expectedSequence,
+          },
+        },
+        {
+          upsert: true,
+        },
+      );
+    }
 
     if (subAccounts.length) {
       const uniqueSubAccounts = [
@@ -132,19 +157,11 @@ exports.previewAccountNumber = async (req, res) => {
       return sendError(res, "Invalid account type", 400);
     }
 
-    const lastAccount = await Account.findOne({
-      accountType,
-    })
-      .sort({ accountNumber: -1 })
-      .select("accountNumber");
+    const counter = await Counter.findById(config.counterId);
 
-    let nextNumber;
-
-    if (!lastAccount) {
-      nextNumber = String(config.startFrom);
-    } else {
-      nextNumber = String(Number(lastAccount.accountNumber) + 1);
-    }
+    const nextNumber = String(
+      config.startFrom + ((counter?.sequence_value || 0) + 1),
+    );
 
     return sendSuccess(res, "Preview generated", {
       accountNumber: nextNumber,
@@ -205,6 +222,7 @@ exports.updateAccount = async (req, res) => {
 
     const existingAccount = await Account.findOne({
       _id: { $ne: id },
+      isActive: true,
       accountName: {
         $regex: `^${accountName.trim()}$`,
         $options: "i",
@@ -228,20 +246,94 @@ exports.updateAccount = async (req, res) => {
     await account.save();
 
     // =========================
-    // Replace Sub Accounts
+    // Sync Sub Accounts
     // =========================
 
-    await SubAccount.deleteMany({
+    const existingSubAccounts = await SubAccount.find({
       account: account._id,
     });
 
-    if (subAccounts.length) {
-      const uniqueSubAccounts = [
-        ...new Set(subAccounts.map((s) => s.trim()).filter(Boolean)),
-      ];
+    const existingNames = existingSubAccounts.map((item) => ({
+      originalName: item.name,
+      normalizedName: item.name.trim().toLowerCase(),
+    }));
 
+    const incomingSubAccounts = [
+      ...new Set(subAccounts.map((item) => item.trim()).filter(Boolean)),
+    ];
+
+    const incomingNames = incomingSubAccounts.map((item) => item.toLowerCase());
+
+    // =========================
+    // Soft Delete Removed Sub Accounts
+    // =========================
+
+    const removedNames = existingNames
+      .filter((item) => !incomingNames.includes(item.normalizedName))
+      .map((item) => item.originalName);
+
+    if (removedNames.length) {
+      await SubAccount.updateMany(
+        {
+          account: account._id,
+          name: {
+            $in: removedNames,
+          },
+          isActive: true,
+        },
+        {
+          $set: {
+            isActive: false,
+            deletedAt: new Date(),
+            deletedBy: req.user._id,
+          },
+        },
+      );
+    }
+
+    // =========================
+    // Reactivate Previously Deleted Sub Accounts
+    // =========================
+
+    const subAccountsToReactivate = existingSubAccounts
+      .filter(
+        (sub) =>
+          !sub.isActive &&
+          incomingNames.includes(sub.name.trim().toLowerCase()),
+      )
+      .map((sub) => sub._id);
+
+    if (subAccountsToReactivate.length) {
+      await SubAccount.updateMany(
+        {
+          _id: {
+            $in: subAccountsToReactivate,
+          },
+        },
+        {
+          $set: {
+            isActive: true,
+            deletedAt: null,
+            deletedBy: null,
+          },
+        },
+      );
+    }
+
+    // =========================
+    // Create New Sub Accounts
+    // =========================
+
+    const newNames = incomingSubAccounts.filter(
+      (name) =>
+        !existingSubAccounts.some(
+          (sub) => sub.name.trim().toLowerCase() === name.trim().toLowerCase(),
+        ),
+    );
+
+    if (newNames.length) {
       await SubAccount.insertMany(
-        uniqueSubAccounts.map((name) => ({
+        newNames.map((name) => ({
           account: account._id,
           name,
         })),
@@ -267,7 +359,9 @@ exports.getAccounts = async (req, res) => {
     const { search, accountType, page = 1, limit = 10 } = req.query;
     const skip = (page - 1) * limit;
 
-    const filter = {};
+    const filter = {
+      isActive: true,
+    };
 
     if (search?.trim()) {
       const searchTerm = search.trim();
@@ -344,7 +438,10 @@ exports.getAccountById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const account = await Account.findById(id);
+    const account = await Account.findOne({
+      _id: id,
+      isActive: true,
+    });
 
     if (!account) {
       return sendError(res, "Account not found", 404);
@@ -379,6 +476,43 @@ exports.getAccountsDropdown = async (req, res) => {
         label: `${account.accountNumber} - ${account.accountName}`,
       })),
     });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
+exports.archiveAccount = async (req, res) => {
+  try {
+    const account = await Account.findById(req.params.id);
+
+    if (!account) {
+      return sendError(res, "Account not found", 404);
+    }
+
+    if (!account.isActive) {
+      return sendError(res, "Account already archived", 400);
+    }
+
+    account.isActive = false;
+    account.deletedAt = new Date();
+    account.deletedBy = req.user._id;
+
+    await account.save();
+
+    await SubAccount.updateMany(
+      {
+        account: account._id,
+      },
+      {
+        $set: {
+          isActive: false,
+          deletedAt: new Date(),
+          deletedBy: req.user._id,
+        },
+      },
+    );
+
+    return sendSuccess(res, "Account archived successfully");
   } catch (err) {
     return sendError(res, err.message, 500);
   }

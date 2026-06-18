@@ -10,6 +10,7 @@ const {
   getAccountById,
   updateAccount,
   previewAccountNumber,
+  archiveAccount,
 } = require("../../controllers/Accounts/coaController");
 
 const router = express.Router();
@@ -32,5 +33,7 @@ router.get("/:id", protect, getAccountById);
 router.get("/:accountId/subaccounts", protect, getSubAccounts);
 
 router.put("/:id", protect, authorize("Admin"), updateAccount);
+
+router.delete("/:id", protect, authorize("Admin"), archiveAccount);
 
 module.exports = router;
