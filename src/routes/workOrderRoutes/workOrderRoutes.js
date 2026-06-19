@@ -323,20 +323,20 @@ router.post(
 
 router.get("/inspection-requests", protect, getInspectionRequests);
 
-// Get Inspection request by Id
-router.get(
-  "/inspection-requests/:id",
-  protect,
-  authorize(...WORK_ORDER_ROLES),
-  getInspectionRequest,
-);
-
 // Get Inspection Request by Building
 router.get(
   "/inspection-requests/by-building",
   protect,
   authorize(...WORK_ORDER_ROLES),
   getInspectionRequestsByBuilding,
+);
+
+// Get Inspection request by Id
+router.get(
+  "/inspection-requests/:id",
+  protect,
+  authorize(...WORK_ORDER_ROLES),
+  getInspectionRequest,
 );
 
 router.put(
@@ -408,19 +408,19 @@ router.post(
 
 router.get("/service-agreements", protect, getServiceAgreements);
 
-router.get(
-  "/service-agreements/:id",
-  protect,
-  authorize(...WORK_ORDER_ROLES),
-  getServiceAgreementById,
-);
-
 // Get Service agreement by Building
 router.get(
   "/service-agreements/by-building",
   protect,
   authorize(...WORK_ORDER_ROLES),
   getServiceAgreementsByBuilding,
+);
+
+router.get(
+  "/service-agreements/:id",
+  protect,
+  authorize(...WORK_ORDER_ROLES),
+  getServiceAgreementById,
 );
 
 router.put(
