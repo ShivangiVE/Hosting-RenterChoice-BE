@@ -20,6 +20,11 @@ const { createNotification } = require("../../services/notificationService");
 const { validateFutureOrTodayDate } = require("../../utils/dateValidator");
 const { assertVendorAccepted } = require("../../utils/vendorGuards");
 const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
+const {
+  scheduleReminder,
+  resolveReminders,
+  cancelAllReminders,
+} = require("../../services/notificationReminderService");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -1230,7 +1235,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
-    // Vendor security check
     if (req.user.role === "Vendor") {
       if (
         !workOrder.vendor ||
@@ -1241,7 +1245,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       assertVendorAccepted(workOrder);
     }
 
-    //  INVOICE VALIDATION
     if (invoiceOption === "upload_now") {
       if (!req.files || req.files.length === 0) {
         return sendError(
@@ -1252,8 +1255,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       }
     }
 
-    // HANDLE KEY RETURN LOGIC
-    // let finalKeyOption = workOrder.keyIssued ? keyReturnOption : null;
     if (workOrder.keyIssued === true && !keyReturnOption) {
       return sendError(
         res,
@@ -1269,10 +1270,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
     //   } else if (finalKeyOption === "return_later") {
     //     workOrder.keyReturnStatus = "Return Later";
     //   }
-    // }
-
-    //  HANDLE INVOICE UPLOAD NOW
-    let invoiceUrl = null;
+    // }    let invoiceUrl = null;
 
     if (invoiceOption === "upload_now" && req.files?.length > 0) {
       let invoiceCategory = await NoteCategory.findOne({ name: "Invoice" });
@@ -1288,7 +1286,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       for (let i = 0; i < req.files.length; i++) {
         const file = req.files[i];
         const metadata = invoiceMeta[i] || {};
-
         const fileType = getFileType(file.mimetype);
         const invoiceUrl = await uploadFile(file, "uploads/documents");
 
@@ -1310,11 +1307,11 @@ exports.markWorkOrderCompleted = async (req, res) => {
       workOrder.invoicePending = false;
     }
 
-    // HANDLE INVOICE LATER
     if (invoiceOption === "upload_later") {
       workOrder.invoiceUploaded = false;
       workOrder.invoicePending = true;
 
+      // ── EXISTING one-shot notification (keep as-is) ──────────────────────
       await createNotification({
         user: workOrder.vendor,
         role: "Vendor",
@@ -1331,7 +1328,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       workOrder.invoiceUploaded = true;
     }
 
-    //  COMPLETION NOTE → USE VENDOR CATEGORY
     if (note) {
       let vendorCategory = await NoteCategory.findOne({ name: "Vendor" });
       if (!vendorCategory) {
@@ -1341,54 +1337,38 @@ exports.markWorkOrderCompleted = async (req, res) => {
         });
       }
 
-      let createdNote = null;
+      const createdNote = await Note.create({
+        workOrder: id,
+        category: vendorCategory._id,
+        subject: "Completion Note",
+        description: note,
+        createdBy: req.user._id,
+      });
 
-      if (note) {
-        let vendorCategory = await NoteCategory.findOne({ name: "Vendor" });
-        if (!vendorCategory) {
-          vendorCategory = await NoteCategory.create({
-            name: "Vendor",
+      getIO()
+        .to(`workorder:${id}`)
+        .emit("timeline:new-item", {
+          workOrderId: id,
+          item: {
+            _id: createdNote._id,
+            type: "note",
+            description: createdNote.description,
             createdBy: req.user._id,
-          });
-        }
-
-        createdNote = await Note.create({
-          workOrder: id,
-          category: vendorCategory._id,
-          subject: "Completion Note",
-          description: note,
-          createdBy: req.user._id,
+            createdAt: createdNote.createdAt,
+          },
         });
-
-        // Timeline socket event (SAFE)
-        getIO()
-          .to(`workorder:${id}`)
-          .emit("timeline:new-item", {
-            workOrderId: id,
-            item: {
-              _id: createdNote._id,
-              type: "note",
-              description: createdNote.description,
-              createdBy: req.user._id,
-              createdAt: createdNote.createdAt,
-            },
-          });
-      }
     }
 
-    // UPDATE WORK ORDER STATUS
     const completedStatus = await WODynamicStatus.findOne({
       name: "Completed",
     });
     if (!completedStatus)
       return sendError(res, "Completed status missing", 400);
-
     // workOrder.dynamicStatus = completedStatus._id;
     // workOrder.completeDate = new Date();
 
     // // Primary status logic
     // workOrder.status = invoiceOption === "upload_now" ? "closed" : "open";
-
     await completeWorkOrder(workOrder, {
       invoiceUploaded: invoiceOption === "upload_now",
       keyReturnOption,
@@ -1396,6 +1376,38 @@ exports.markWorkOrderCompleted = async (req, res) => {
     });
 
     await workOrder.save();
+
+    // ── REMINDER ENGINE: schedule recurring reminders ─────────────────────
+    // Invoice reminder — only when vendor chose "upload later"
+    if (workOrder.invoicePending) {
+      await scheduleReminder({
+        reminderType: "INVOICE_UPLOAD_PENDING",
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+        userId: workOrder.vendor,
+        role: "Vendor",
+        cycleId: "VENDOR_DEFAULT",
+        title: "Invoice Upload Pending",
+        message: `Please upload the invoice for work order ${workOrder.workOrderNumber}.`,
+        metadata: { workOrderNumber: workOrder.workOrderNumber },
+      });
+    }
+
+    // Key return reminder — only when key was issued and vendor chose "return later"
+    if (workOrder.keyReturn?.status === "pending") {
+      await scheduleReminder({
+        reminderType: "KEY_RETURN_PENDING",
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+        userId: workOrder.vendor,
+        role: "Vendor",
+        cycleId: "VENDOR_DEFAULT",
+        title: "Key Return Pending",
+        message: `Please confirm key return for work order ${workOrder.workOrderNumber}.`,
+        metadata: { workOrderNumber: workOrder.workOrderNumber },
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     return sendSuccess(res, "Work order marked as completed", { workOrder });
   } catch (err) {
@@ -1412,7 +1424,6 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
       "dynamicStatus",
       "name",
     );
-
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
     //  Vendor security
@@ -1475,6 +1486,9 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
     });
     await workOrder.save();
 
+    // ── REMINDER ENGINE: stop invoice reminders — action is done ─────────
+    await resolveReminders(workOrder._id, "INVOICE_UPLOAD_PENDING");
+
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
   } catch (err) {
     return sendError(res, err.message || "Failed to upload invoice", 500);
@@ -1511,6 +1525,8 @@ exports.vendorConfirmKeyReturn = async (req, res) => {
   workOrder.keyReturn.returnedBy = req.user._id;
 
   await workOrder.save();
+  // ── REMINDER ENGINE: stop key return reminders — action is done ───────
+  await resolveReminders(workOrder._id, "KEY_RETURN_PENDING");
 
   return sendSuccess(res, "Key return confirmed", { workOrder });
 };
@@ -1579,6 +1595,13 @@ exports.vendorBulkConfirmKeyReturn = async (req, res) => {
     // getIO().to(`vendor:${vendorId}`).emit("work-order:key-returned", {
     //   workOrderIds: eligibleIds,
     // });
+
+    // ── REMINDER ENGINE: resolve key reminders for all confirmed IDs ──────
+    await Promise.all(
+      eligibleIds.map((entityId) =>
+        resolveReminders(entityId, "KEY_RETURN_PENDING"),
+      ),
+    );
 
     return sendSuccess(res, "Key return confirmed", {
       totalRequested: ids.length,
@@ -1746,8 +1769,10 @@ exports.deleteWorkOrder = async (req, res) => {
     const workOrder = await WorkOrder.findById(id);
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
-
     if (workOrder.fileUrl) await deleteFile(workOrder.fileUrl);
+
+    // ── REMINDER ENGINE: cancel any active reminders for this entity ──────
+    await cancelAllReminders(workOrder._id);
 
     await WorkOrder.findByIdAndDelete(id);
 
@@ -1766,6 +1791,8 @@ exports.bulkDeleteWorkOrders = async (req, res) => {
     const workOrders = await WorkOrder.find({ _id: { $in: ids } });
     for (const wo of workOrders) {
       if (wo.fileUrl) await deleteFile(wo.fileUrl);
+      // ── REMINDER ENGINE: cancel reminders per entity ───────────────────
+      await cancelAllReminders(wo._id);
     }
 
     const result = await WorkOrder.deleteMany({ _id: { $in: ids } });
