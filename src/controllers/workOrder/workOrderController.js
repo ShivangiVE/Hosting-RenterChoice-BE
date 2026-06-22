@@ -592,17 +592,62 @@ exports.getVendorWorkOrders = async (req, res) => {
 // Get Work Orders by Building
 exports.getWorkOrdersByBuilding = async (req, res) => {
   try {
-    const { buildingId, page = 1, limit = 10, status } = req.query;
+    const {
+      buildingId,
+      page = 1,
+      limit = 10,
+      status,
+      vendor,
+      category,
+      workOrderType,
+      dueDate,
+      dynamicStatus,
+    } = req.query;
 
     if (!buildingId) {
       return sendError(res, "Building ID is required", 400);
     }
 
     const skip = (page - 1) * limit;
-
     const filter = { building: buildingId };
+
+    // Status (primary: open/closed)
     if (status && status !== "All") {
       filter.status = status;
+    }
+
+    // Dynamic status (by ID)
+    if (dynamicStatus && dynamicStatus !== "All") {
+      const statusObj = await WODynamicStatus.findOne({
+        $or: [
+          {
+            _id: mongoose.Types.ObjectId.isValid(dynamicStatus)
+              ? dynamicStatus
+              : null,
+          },
+          { name: new RegExp(dynamicStatus, "i") },
+        ].filter(Boolean),
+      });
+      if (statusObj) filter.dynamicStatus = statusObj._id;
+    }
+
+    // Vendor
+    if (vendor && vendor !== "All") filter.vendor = vendor;
+
+    // Category
+    if (category && category !== "All") filter.category = category;
+
+    // Work Order Type
+    if (workOrderType && workOrderType !== "All")
+      filter.workOrderType = workOrderType;
+
+    // Due Date (exact day range)
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      filter.dueDate = { $gte: start, $lte: end };
     }
 
     // Fetch work orders
@@ -2249,47 +2294,25 @@ exports.getInspectionRequestsByBuilding = async (req, res) => {
       status,
       inspectionType,
       assignedTo,
-      startDate,
-      endDate,
+      dueDate,
     } = req.query;
 
     if (!buildingId) return sendError(res, "Building ID is required", 400);
 
     const skip = (page - 1) * limit;
-
-    // Build filter object - DON'T hardcode status
     const filter = { building: buildingId };
 
-    // Filter by status (if provided) - maintains backward compatibility
-    if (status && status !== "All") {
-      filter.status = status;
-    }
-
-    // Filter by inspection type
-    if (inspectionType && inspectionType !== "" && inspectionType !== "All") {
+    if (status && status !== "All") filter.status = status;
+    if (inspectionType && inspectionType !== "All")
       filter.inspectionType = inspectionType;
-    }
+    if (assignedTo && assignedTo !== "All") filter.assignedTo = assignedTo;
 
-    // Filter by assigned user (completed by)
-    if (assignedTo && assignedTo !== "" && assignedTo !== "All") {
-      filter.assignedTo = assignedTo;
-    }
-
-    // Filter by completion date range
-    if (startDate || endDate) {
-      filter.completeDate = {};
-
-      if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        filter.completeDate.$gte = start;
-      }
-
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        filter.completeDate.$lte = end;
-      }
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      filter.dueDate = { $gte: start, $lte: end };
     }
 
     const [inspectionRequests, total] = await Promise.all([
@@ -2830,14 +2853,32 @@ exports.getServiceAgreementById = async (req, res) => {
 // Get Service Agreements by Building
 exports.getServiceAgreementsByBuilding = async (req, res) => {
   try {
-    const { buildingId, page = 1, limit = 10, status } = req.query;
+    const {
+      buildingId,
+      page = 1,
+      limit = 10,
+      status,
+      vendor,
+      category,
+      dueDate,
+    } = req.query;
 
     if (!buildingId) return sendError(res, "Building ID is required", 400);
 
     const skip = (page - 1) * limit;
-
     const filter = { building: buildingId };
+
     if (status && status !== "All") filter.status = status;
+    if (vendor && vendor !== "All") filter.vendor = vendor;
+    if (category && category !== "All") filter.category = category;
+
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      filter.initialDueDate = { $gte: start, $lte: end };
+    }
 
     const [serviceAgreements, total] = await Promise.all([
       ServiceAgreement.find(filter)
