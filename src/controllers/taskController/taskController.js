@@ -7,6 +7,7 @@ const { uploadFile, deleteFile } = require("../../utils/storageService");
 const Todo = require("../../models/tasks/Todo");
 const { createNotification } = require("../../services/notificationService");
 const { getIO } = require("../../../socket");
+const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
 
 // Increment counter
 const getNextSequence = async (sequenceName) => {
@@ -109,7 +110,6 @@ exports.createTask = async (req, res) => {
             entityId: task._id,
           });
 
-  
           getIO().to(`user:${assignedTo}`).emit("clerk:new-task", {
             taskId: task._id,
           });
@@ -130,6 +130,17 @@ exports.getTasks = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    if (allowedUserIds !== null) {
+      filter.$or = [
+        { createdBy: { $in: allowedUserIds } },
+        { assignedTo: { $in: allowedUserIds } },
+      ];
+    }
+
     const {
       category,
       user,
@@ -141,7 +152,6 @@ exports.getTasks = async (req, res) => {
       myView,
     } = req.query;
 
-    let filter = {};
     if (category) filter.category = category;
     if (assignedTo) filter.assignedTo = assignedTo;
     if (taskColor) filter.taskColor = taskColor;

@@ -60,32 +60,28 @@ const {
   cancelAppointment,
   getWorkOrderAppointment,
 } = require("../../controllers/workOrder/workOrderAppointmentController");
+const {
+  WORK_ORDER_ROLES,
+  WORK_ORDER_AND_VENDOR_ROLES,
+} = require("../../constants/roles");
 
 const router = express.Router();
-
-const ALLOWED_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
-
-const Extra_Roles = [...ALLOWED_ROLES, "Vendor"];
 
 // ========================= Work Orders =========================
 router.post(
   "/work-order",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   upload.workOrderUpload.single("file"),
   createWorkOrder,
 );
 
-router.get("/work-orders", protect, authorize(...ALLOWED_ROLES), getWorkOrders);
+router.get(
+  "/work-orders",
+  protect,
+  authorize(...WORK_ORDER_ROLES),
+  getWorkOrders,
+);
 
 // Get Work Orders for vendor
 router.get(
@@ -99,7 +95,7 @@ router.get(
 router.get(
   "/work-order/by-building",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   getWorkOrdersByBuilding,
 );
 
@@ -115,7 +111,7 @@ router.get(
 router.put(
   "/work-orders/:id",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   upload.workOrderUpload.single("file"),
   updateWorkOrder,
 );
@@ -123,7 +119,7 @@ router.put(
 router.put(
   "/work-orders/:id/status",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   updateWorkOrderStatus,
 );
 
@@ -178,7 +174,7 @@ router.put(
 router.put(
   "/vendor/work-orders/:id/complete",
   protect,
-  authorize(...Extra_Roles),
+  authorize(...WORK_ORDER_AND_VENDOR_ROLES),
   upload.workOrderUpload.array("files", 5),
   markWorkOrderCompleted,
 );
@@ -211,14 +207,14 @@ router.put(
 router.get(
   "/work-orders/:workOrderId/timeline",
   protect,
-  authorize(...Extra_Roles),
+  authorize(...WORK_ORDER_AND_VENDOR_ROLES),
   getWorkOrderTimeline,
 );
 
 router.put(
   "/work-orders/:id/close",
   protect,
-  authorize(...Extra_Roles),
+  authorize(...WORK_ORDER_AND_VENDOR_ROLES),
   closeWorkOrder,
 );
 
@@ -226,7 +222,7 @@ router.put(
 router.put(
   "/work-orders/:id/reopen",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   reopenWorkOrder,
 );
 
@@ -234,21 +230,21 @@ router.put(
 router.post(
   "/work-orders/bulk-close",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   bulkCloseWorkOrders,
 );
 
 router.delete(
   "/work-orders/:id",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   deleteWorkOrder,
 );
 
 router.post(
   "/work-orders/bulk-delete",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   bulkDeleteWorkOrders,
 );
 
@@ -321,53 +317,53 @@ router.get(
 router.post(
   "/inspection-request",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   createInspectionRequest,
 );
 
 router.get("/inspection-requests", protect, getInspectionRequests);
 
-// Get Inspection request by Id
-router.get(
-  "/inspection-requests/:id",
-  protect,
-  authorize(...ALLOWED_ROLES),
-  getInspectionRequest,
-);
-
 // Get Inspection Request by Building
 router.get(
   "/inspection-requests/by-building",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   getInspectionRequestsByBuilding,
+);
+
+// Get Inspection request by Id
+router.get(
+  "/inspection-requests/:id",
+  protect,
+  authorize(...WORK_ORDER_ROLES),
+  getInspectionRequest,
 );
 
 router.put(
   "/inspection-requests/:id",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   updateInspectionRequest,
 );
 
 router.put(
   "/inspection-requests/:id/close",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   closeInspectionRequest,
 );
 
 router.put(
   "/inspection-requests/:id/return-key",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   confirmInspectionKeyReturn,
 );
 
 router.put(
   "/inspection-requests/return-key/bulk",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   bulkConfirmInspectionKeyReturn,
 );
 
@@ -375,7 +371,7 @@ router.put(
 router.post(
   "/inspection-requests/bulk-close",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   bulkCloseInspectionRequests,
 );
 
@@ -383,21 +379,21 @@ router.post(
 router.put(
   "/inspection-requests/:id/reopen",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   reopenInspectionRequest,
 );
 
 router.delete(
   "/inspection-requests/:id",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   deleteInspectionRequest,
 );
 
 router.post(
   "/inspection-requests/bulk-delete",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   bulkDeleteInspectionRequests,
 );
 
@@ -405,32 +401,32 @@ router.post(
 router.post(
   "/service-agreement",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   upload.serviceAgreementUpload.single("file"),
   createServiceAgreement,
 );
 
 router.get("/service-agreements", protect, getServiceAgreements);
 
-router.get(
-  "/service-agreements/:id",
-  protect,
-  authorize(...ALLOWED_ROLES),
-  getServiceAgreementById,
-);
-
 // Get Service agreement by Building
 router.get(
   "/service-agreements/by-building",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   getServiceAgreementsByBuilding,
+);
+
+router.get(
+  "/service-agreements/:id",
+  protect,
+  authorize(...WORK_ORDER_ROLES),
+  getServiceAgreementById,
 );
 
 router.put(
   "/service-agreements/:id",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   upload.serviceAgreementUpload.single("file"),
   updateServiceAgreement,
 );
@@ -438,7 +434,7 @@ router.put(
 router.put(
   "/service-agreements/:id/close",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   closeServiceAgreement,
 );
 
@@ -446,7 +442,7 @@ router.put(
 router.post(
   "/service-agreements/bulk-close",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   bulkCloseServiceAgreements,
 );
 
@@ -454,21 +450,21 @@ router.post(
 router.put(
   "/service-agreements/:id/reopen",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   reopenServiceAgreement,
 );
 
 router.delete(
   "/service-agreements/:id",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   deleteServiceAgreement,
 );
 
 router.post(
   "/service-agreements/bulk-delete",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...WORK_ORDER_ROLES),
   bulkDeleteServiceAgreements,
 );
 

@@ -19,6 +19,12 @@ const { getIO } = require("../../../socket");
 const { createNotification } = require("../../services/notificationService");
 const { validateFutureOrTodayDate } = require("../../utils/dateValidator");
 const { assertVendorAccepted } = require("../../utils/vendorGuards");
+const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
+const {
+  scheduleReminder,
+  resolveReminders,
+  cancelAllReminders,
+} = require("../../services/notificationReminderService");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -169,6 +175,18 @@ exports.getWorkOrders = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    // ── Apply team scope — null means Admin (no restriction) ──
+    if (allowedUserIds !== null) {
+      filter.$or = [
+        { createdBy: { $in: allowedUserIds } }, // created by team
+        { assignedTo: { $in: allowedUserIds } }, // assigned to team
+      ];
+    }
+
     const {
       status,
       dynamicStatus,
@@ -180,8 +198,6 @@ exports.getWorkOrders = async (req, res) => {
       tenancy,
       search,
     } = req.query;
-
-    let filter = {};
 
     // Role-based filtering example (optional)
     // if (req.user && req.user.role === "SomeRole") {
@@ -576,17 +592,62 @@ exports.getVendorWorkOrders = async (req, res) => {
 // Get Work Orders by Building
 exports.getWorkOrdersByBuilding = async (req, res) => {
   try {
-    const { buildingId, page = 1, limit = 10, status } = req.query;
+    const {
+      buildingId,
+      page = 1,
+      limit = 10,
+      status,
+      vendor,
+      category,
+      workOrderType,
+      dueDate,
+      dynamicStatus,
+    } = req.query;
 
     if (!buildingId) {
       return sendError(res, "Building ID is required", 400);
     }
 
     const skip = (page - 1) * limit;
-
     const filter = { building: buildingId };
+
+    // Status (primary: open/closed)
     if (status && status !== "All") {
       filter.status = status;
+    }
+
+    // Dynamic status (by ID)
+    if (dynamicStatus && dynamicStatus !== "All") {
+      const statusObj = await WODynamicStatus.findOne({
+        $or: [
+          {
+            _id: mongoose.Types.ObjectId.isValid(dynamicStatus)
+              ? dynamicStatus
+              : null,
+          },
+          { name: new RegExp(dynamicStatus, "i") },
+        ].filter(Boolean),
+      });
+      if (statusObj) filter.dynamicStatus = statusObj._id;
+    }
+
+    // Vendor
+    if (vendor && vendor !== "All") filter.vendor = vendor;
+
+    // Category
+    if (category && category !== "All") filter.category = category;
+
+    // Work Order Type
+    if (workOrderType && workOrderType !== "All")
+      filter.workOrderType = workOrderType;
+
+    // Due Date (exact day range)
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      filter.dueDate = { $gte: start, $lte: end };
     }
 
     // Fetch work orders
@@ -1219,7 +1280,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
     const workOrder = await WorkOrder.findById(id);
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
-    // Vendor security check
     if (req.user.role === "Vendor") {
       if (
         !workOrder.vendor ||
@@ -1230,7 +1290,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       assertVendorAccepted(workOrder);
     }
 
-    //  INVOICE VALIDATION
     if (invoiceOption === "upload_now") {
       if (!req.files || req.files.length === 0) {
         return sendError(
@@ -1241,8 +1300,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       }
     }
 
-    // HANDLE KEY RETURN LOGIC
-    // let finalKeyOption = workOrder.keyIssued ? keyReturnOption : null;
     if (workOrder.keyIssued === true && !keyReturnOption) {
       return sendError(
         res,
@@ -1258,10 +1315,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
     //   } else if (finalKeyOption === "return_later") {
     //     workOrder.keyReturnStatus = "Return Later";
     //   }
-    // }
-
-    //  HANDLE INVOICE UPLOAD NOW
-    let invoiceUrl = null;
+    // }    let invoiceUrl = null;
 
     if (invoiceOption === "upload_now" && req.files?.length > 0) {
       let invoiceCategory = await NoteCategory.findOne({ name: "Invoice" });
@@ -1277,7 +1331,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       for (let i = 0; i < req.files.length; i++) {
         const file = req.files[i];
         const metadata = invoiceMeta[i] || {};
-
         const fileType = getFileType(file.mimetype);
         const invoiceUrl = await uploadFile(file, "uploads/documents");
 
@@ -1299,11 +1352,11 @@ exports.markWorkOrderCompleted = async (req, res) => {
       workOrder.invoicePending = false;
     }
 
-    // HANDLE INVOICE LATER
     if (invoiceOption === "upload_later") {
       workOrder.invoiceUploaded = false;
       workOrder.invoicePending = true;
 
+      // ── EXISTING one-shot notification (keep as-is) ──────────────────────
       await createNotification({
         user: workOrder.vendor,
         role: "Vendor",
@@ -1320,7 +1373,6 @@ exports.markWorkOrderCompleted = async (req, res) => {
       workOrder.invoiceUploaded = true;
     }
 
-    //  COMPLETION NOTE → USE VENDOR CATEGORY
     if (note) {
       let vendorCategory = await NoteCategory.findOne({ name: "Vendor" });
       if (!vendorCategory) {
@@ -1330,54 +1382,38 @@ exports.markWorkOrderCompleted = async (req, res) => {
         });
       }
 
-      let createdNote = null;
+      const createdNote = await Note.create({
+        workOrder: id,
+        category: vendorCategory._id,
+        subject: "Completion Note",
+        description: note,
+        createdBy: req.user._id,
+      });
 
-      if (note) {
-        let vendorCategory = await NoteCategory.findOne({ name: "Vendor" });
-        if (!vendorCategory) {
-          vendorCategory = await NoteCategory.create({
-            name: "Vendor",
+      getIO()
+        .to(`workorder:${id}`)
+        .emit("timeline:new-item", {
+          workOrderId: id,
+          item: {
+            _id: createdNote._id,
+            type: "note",
+            description: createdNote.description,
             createdBy: req.user._id,
-          });
-        }
-
-        createdNote = await Note.create({
-          workOrder: id,
-          category: vendorCategory._id,
-          subject: "Completion Note",
-          description: note,
-          createdBy: req.user._id,
+            createdAt: createdNote.createdAt,
+          },
         });
-
-        // Timeline socket event (SAFE)
-        getIO()
-          .to(`workorder:${id}`)
-          .emit("timeline:new-item", {
-            workOrderId: id,
-            item: {
-              _id: createdNote._id,
-              type: "note",
-              description: createdNote.description,
-              createdBy: req.user._id,
-              createdAt: createdNote.createdAt,
-            },
-          });
-      }
     }
 
-    // UPDATE WORK ORDER STATUS
     const completedStatus = await WODynamicStatus.findOne({
       name: "Completed",
     });
     if (!completedStatus)
       return sendError(res, "Completed status missing", 400);
-
     // workOrder.dynamicStatus = completedStatus._id;
     // workOrder.completeDate = new Date();
 
     // // Primary status logic
     // workOrder.status = invoiceOption === "upload_now" ? "closed" : "open";
-
     await completeWorkOrder(workOrder, {
       invoiceUploaded: invoiceOption === "upload_now",
       keyReturnOption,
@@ -1385,6 +1421,38 @@ exports.markWorkOrderCompleted = async (req, res) => {
     });
 
     await workOrder.save();
+
+    // ── REMINDER ENGINE: schedule recurring reminders ─────────────────────
+    // Invoice reminder — only when vendor chose "upload later"
+    if (workOrder.invoicePending) {
+      await scheduleReminder({
+        reminderType: "INVOICE_UPLOAD_PENDING",
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+        userId: workOrder.vendor,
+        role: "Vendor",
+        cycleId: "VENDOR_DEFAULT",
+        title: "Invoice Upload Pending",
+        message: `Please upload the invoice for work order ${workOrder.workOrderNumber}.`,
+        metadata: { workOrderNumber: workOrder.workOrderNumber },
+      });
+    }
+
+    // Key return reminder — only when key was issued and vendor chose "return later"
+    if (workOrder.keyReturn?.status === "pending") {
+      await scheduleReminder({
+        reminderType: "KEY_RETURN_PENDING",
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+        userId: workOrder.vendor,
+        role: "Vendor",
+        cycleId: "VENDOR_DEFAULT",
+        title: "Key Return Pending",
+        message: `Please confirm key return for work order ${workOrder.workOrderNumber}.`,
+        metadata: { workOrderNumber: workOrder.workOrderNumber },
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     return sendSuccess(res, "Work order marked as completed", { workOrder });
   } catch (err) {
@@ -1401,7 +1469,6 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
       "dynamicStatus",
       "name",
     );
-
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
     //  Vendor security
@@ -1464,6 +1531,9 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
     });
     await workOrder.save();
 
+    // ── REMINDER ENGINE: stop invoice reminders — action is done ─────────
+    await resolveReminders(workOrder._id, "INVOICE_UPLOAD_PENDING");
+
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
   } catch (err) {
     return sendError(res, err.message || "Failed to upload invoice", 500);
@@ -1500,6 +1570,8 @@ exports.vendorConfirmKeyReturn = async (req, res) => {
   workOrder.keyReturn.returnedBy = req.user._id;
 
   await workOrder.save();
+  // ── REMINDER ENGINE: stop key return reminders — action is done ───────
+  await resolveReminders(workOrder._id, "KEY_RETURN_PENDING");
 
   return sendSuccess(res, "Key return confirmed", { workOrder });
 };
@@ -1568,6 +1640,13 @@ exports.vendorBulkConfirmKeyReturn = async (req, res) => {
     // getIO().to(`vendor:${vendorId}`).emit("work-order:key-returned", {
     //   workOrderIds: eligibleIds,
     // });
+
+    // ── REMINDER ENGINE: resolve key reminders for all confirmed IDs ──────
+    await Promise.all(
+      eligibleIds.map((entityId) =>
+        resolveReminders(entityId, "KEY_RETURN_PENDING"),
+      ),
+    );
 
     return sendSuccess(res, "Key return confirmed", {
       totalRequested: ids.length,
@@ -1735,8 +1814,10 @@ exports.deleteWorkOrder = async (req, res) => {
     const workOrder = await WorkOrder.findById(id);
 
     if (!workOrder) return sendError(res, "Work order not found", 404);
-
     if (workOrder.fileUrl) await deleteFile(workOrder.fileUrl);
+
+    // ── REMINDER ENGINE: cancel any active reminders for this entity ──────
+    await cancelAllReminders(workOrder._id);
 
     await WorkOrder.findByIdAndDelete(id);
 
@@ -1755,6 +1836,8 @@ exports.bulkDeleteWorkOrders = async (req, res) => {
     const workOrders = await WorkOrder.find({ _id: { $in: ids } });
     for (const wo of workOrders) {
       if (wo.fileUrl) await deleteFile(wo.fileUrl);
+      // ── REMINDER ENGINE: cancel reminders per entity ───────────────────
+      await cancelAllReminders(wo._id);
     }
 
     const result = await WorkOrder.deleteMany({ _id: { $in: ids } });
@@ -1971,6 +2054,23 @@ exports.getInspectionRequests = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    // Scope to team
+    if (allowedUserIds !== null) {
+      filter.$or = [
+        { createdBy: { $in: allowedUserIds } },
+        { assignedTo: { $in: allowedUserIds } },
+      ];
+    }
+
+    // InspectionClerk override — they only see their own assigned
+    if (req.user.role === "InspectionClerk") {
+      filter = { assignedTo: req.user._id };
+    }
+
     const {
       status,
       type,
@@ -1983,8 +2083,6 @@ exports.getInspectionRequests = async (req, res) => {
       completeDate,
       search,
     } = req.query;
-
-    let filter = {};
 
     // Filter by logged-in user
     // Only show inspection requests assigned to this user
@@ -2196,47 +2294,25 @@ exports.getInspectionRequestsByBuilding = async (req, res) => {
       status,
       inspectionType,
       assignedTo,
-      startDate,
-      endDate,
+      dueDate,
     } = req.query;
 
     if (!buildingId) return sendError(res, "Building ID is required", 400);
 
     const skip = (page - 1) * limit;
-
-    // Build filter object - DON'T hardcode status
     const filter = { building: buildingId };
 
-    // Filter by status (if provided) - maintains backward compatibility
-    if (status && status !== "All") {
-      filter.status = status;
-    }
-
-    // Filter by inspection type
-    if (inspectionType && inspectionType !== "" && inspectionType !== "All") {
+    if (status && status !== "All") filter.status = status;
+    if (inspectionType && inspectionType !== "All")
       filter.inspectionType = inspectionType;
-    }
+    if (assignedTo && assignedTo !== "All") filter.assignedTo = assignedTo;
 
-    // Filter by assigned user (completed by)
-    if (assignedTo && assignedTo !== "" && assignedTo !== "All") {
-      filter.assignedTo = assignedTo;
-    }
-
-    // Filter by completion date range
-    if (startDate || endDate) {
-      filter.completeDate = {};
-
-      if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        filter.completeDate.$gte = start;
-      }
-
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        filter.completeDate.$lte = end;
-      }
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      filter.dueDate = { $gte: start, $lte: end };
     }
 
     const [inspectionRequests, total] = await Promise.all([
@@ -2591,6 +2667,15 @@ exports.getServiceAgreements = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
+    const allowedUserIds = await resolveTeamUserIds(req.user);
+
+    let filter = {};
+
+    if (allowedUserIds !== null) {
+      filter.createdBy = { $in: allowedUserIds };
+      // Service agreements don't have assignedTo — createdBy is enough
+    }
+
     const {
       dueDate,
       category,
@@ -2600,8 +2685,6 @@ exports.getServiceAgreements = async (req, res) => {
       vendorStatus,
       search,
     } = req.query;
-
-    let filter = {};
 
     //  Due Date
     if (dueDate && dueDate !== "All") {
@@ -2770,14 +2853,32 @@ exports.getServiceAgreementById = async (req, res) => {
 // Get Service Agreements by Building
 exports.getServiceAgreementsByBuilding = async (req, res) => {
   try {
-    const { buildingId, page = 1, limit = 10, status } = req.query;
+    const {
+      buildingId,
+      page = 1,
+      limit = 10,
+      status,
+      vendor,
+      category,
+      dueDate,
+    } = req.query;
 
     if (!buildingId) return sendError(res, "Building ID is required", 400);
 
     const skip = (page - 1) * limit;
-
     const filter = { building: buildingId };
+
     if (status && status !== "All") filter.status = status;
+    if (vendor && vendor !== "All") filter.vendor = vendor;
+    if (category && category !== "All") filter.category = category;
+
+    if (dueDate && dueDate !== "All") {
+      const start = new Date(dueDate);
+      const end = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+      filter.initialDueDate = { $gte: start, $lte: end };
+    }
 
     const [serviceAgreements, total] = await Promise.all([
       ServiceAgreement.find(filter)

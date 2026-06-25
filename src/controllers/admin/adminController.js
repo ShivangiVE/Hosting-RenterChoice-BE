@@ -12,6 +12,49 @@ const INTERNAL_ROLES = [
   "InspectionClerk",
 ];
 
+exports.createBrokerageAdmin = async (req, res) => {
+  try {
+    const { preferredName, email, password } = req.body;
+
+    const exists = await User.findOne({ email: email.toLowerCase().trim() });
+    if (exists) return sendError(res, "User already exists", 409);
+
+    const user = await User.create({
+      preferredName,
+      email,
+      password,
+      role: "BrokerageAdmin",
+      createdBy: req.user.id,
+    });
+
+    return sendSuccess(
+      res,
+      "Brokerage admin created successfully",
+      {
+        _id: user._id,
+        preferredName: user.preferredName,
+        email: user.email,
+        role: user.role,
+      },
+      201,
+    );
+  } catch (err) {
+    return sendError(res, "Failed to create brokerage admin", 500);
+  }
+};
+
+// Add to getBrokerageAdmins
+exports.getBrokerageAdmins = async (req, res) => {
+  try {
+    const brokerageAdmins = await User.find({ role: "BrokerageAdmin" }).select(
+      "preferredName email isActive createdAt",
+    );
+    return sendSuccess(res, "Brokerage admins retrieved", { brokerageAdmins });
+  } catch (err) {
+    return sendError(res, "Failed to fetch brokerage admins", 500);
+  }
+};
+
 // Admin creates OfficeAdmin
 exports.createOfficeAdmin = async (req, res) => {
   try {
@@ -43,7 +86,7 @@ exports.createOfficeAdmin = async (req, res) => {
         email: user.email,
         role: user.role,
       },
-      201
+      201,
     );
   } catch (err) {
     return sendError(res, "Failed to create office admin", 500);
@@ -80,7 +123,7 @@ exports.createInternalUser = async (req, res) => {
         email: user.email,
         role: user.role,
       },
-      201
+      201,
     );
   } catch (err) {
     return sendError(res, "Failed to create internal user", 500);
@@ -101,7 +144,7 @@ exports.getAllUsers = async (req, res) => {
 exports.getOfficeAdmins = async (req, res) => {
   try {
     const officeAdmins = await User.find({ role: "OfficeAdmin" }).select(
-      "preferredName email"
+      "preferredName email",
     );
     return sendSuccess(res, "Office admins retrieved successfully", {
       officeAdmins,
@@ -115,7 +158,7 @@ exports.getOfficeAdmins = async (req, res) => {
 exports.getTeamsGroupedByOfficeAdmin = async (req, res) => {
   try {
     const officeAdmins = await User.find({ role: "OfficeAdmin" }).select(
-      "_id preferredName email"
+      "_id preferredName email",
     );
 
     const result = [];
@@ -183,7 +226,7 @@ exports.updateUserRole = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { role },
-      { new: true }
+      { new: true },
     ).select("-password");
 
     if (!user) {
