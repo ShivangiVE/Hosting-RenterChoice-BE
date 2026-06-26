@@ -195,7 +195,11 @@ exports.impersonateOfficeAdmin = async (req, res) => {
       return sendError(res, "Office admin not found", 404);
     }
 
-    const token = generateToken(targetUser);
+    const token = generateToken({
+      user: targetUser,
+      platform: "impersonate",
+      portal: "internal",
+    });
 
     return sendSuccess(res, "Impersonation successful", {
       token,
