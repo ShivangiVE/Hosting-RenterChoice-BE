@@ -22,20 +22,58 @@ module.exports = {
     io.use(async (socket, next) => {
       try {
         const token = socket.handshake.auth?.token;
-        if (!token) return next(new Error("Authentication error"));
+
+        if (!token) {
+          const err = new Error("Authentication error");
+          err.code = "NO_TOKEN";
+          return next(err);
+        }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id).select("_id role preferredName profileImage");
 
-        if (!user) return next(new Error("User not found"));
+        const user = await User.findById(decoded.id).select(
+          "_id role preferredName profileImage internalWebSessionVersion externalWebSessionVersion",
+        );
+
+        if (!user) {
+          const err = new Error("User not found");
+          err.code = "USER_NOT_FOUND";
+          return next(err);
+        }
+
+        // Skip session validation for impersonation tokens
+        // ── Impersonation tokens skip ALL session validation ──────────────────
+        if (decoded.platform === "impersonate") {
+          socket.user = user;
+          socket.isImpersonated = true;
+          return next();
+        }
+
+        // ── Web session validation — single login enforcement ─────────────────
+        if (
+          decoded.platform === "web" &&
+          decoded.sessionVersion !== undefined
+        ) {
+          const versionField =
+            decoded.portal === "internal"
+              ? "internalWebSessionVersion"
+              : "externalWebSessionVersion";
+
+          if (user[versionField] !== decoded.sessionVersion) {
+            const err = new Error("Session expired");
+            err.code = "SESSION_REPLACED";
+            return next(err);
+          }
+        }
 
         socket.user = user;
         next();
       } catch (err) {
-        next(new Error("Invalid token"));
+        const socketError = new Error("Invalid token");
+        socketError.code = "INVALID_TOKEN";
+        return next(socketError);
       }
     });
-
 
     io.on("connection", (socket) => {
       const userId = socket.user._id.toString();
@@ -77,7 +115,7 @@ module.exports = {
         socket.join(`conversation:${conversationId}`);
       });
 
-      // SEND MESSAGE 
+      // SEND MESSAGE
       socket.on("send_message", async ({ conversationId, text }) => {
         try {
           const sender = socket.user;
@@ -151,7 +189,6 @@ module.exports = {
 
           // Emit to ALL participants in the conversation room
           io.to(`conversation:${conversationId}`).emit("new_message", msg);
-
         } catch (err) {
           console.error("Socket send_message error:", err);
           socket.emit("chat_error", {
