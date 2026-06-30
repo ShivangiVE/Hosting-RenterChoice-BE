@@ -1,5 +1,6 @@
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
+const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 
 const INTERNAL_ROLES = [
   "AccountsTeam",
@@ -107,6 +108,17 @@ exports.getInternalUsers = async (req, res) => {
     return sendError(res, "Failed to retrieve internal users", 500);
   }
 };
+
+// Activating and Deactivating the user.
+exports.toggleUserStatus = (req, res) =>
+  toggleUserStatus(req, res, {
+    scopeCheck: async (targetUser, performer) => {
+      return (
+        INTERNAL_ROLES.includes(targetUser.role) &&
+        targetUser.createdBy?.toString() === performer._id.toString()
+      );
+    },
+  });
 
 // OfficeAdmin can delete internal user
 exports.deleteInternalUser = async (req, res) => {

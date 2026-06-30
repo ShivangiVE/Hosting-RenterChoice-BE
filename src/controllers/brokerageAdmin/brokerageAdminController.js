@@ -1,6 +1,7 @@
 const User = require("../../models/User");
 const { sendError, sendSuccess } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
+const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 
 // BrokerageAdmin creates OfficeAdmins
 exports.createOfficeAdmin = async (req, res) => {
@@ -164,6 +165,31 @@ exports.impersonateOfficeAdmin = async (req, res) => {
     return sendError(res, "Impersonation failed", 500);
   }
 };
+
+// Activating and Deactivating the user.
+exports.toggleUserStatus = (req, res) =>
+  toggleUserStatus(req, res, {
+    scopeCheck: async (targetUser, performer) => {
+      // Can toggle OfficeAdmins they created
+      if (
+        targetUser.role === "OfficeAdmin" &&
+        targetUser.createdBy?.toString() === performer._id.toString()
+      )
+        return true;
+
+      // Can toggle team members under their OfficeAdmins
+      if (TEAM_ROLES.includes(targetUser.role)) {
+        const officeAdmin = await User.findOne({
+          _id: targetUser.createdBy,
+          role: "OfficeAdmin",
+          createdBy: performer._id,
+        });
+        return !!officeAdmin;
+      }
+
+      return false;
+    },
+  });
 
 // BrokerageAdmin deletes an OfficeAdmin they own
 exports.deleteOfficeAdmin = async (req, res) => {
