@@ -17,6 +17,14 @@ exports.loginInternal = async (req, res, next) => {
       return sendError(res, "Invalid credentials", 401);
     }
 
+    if (!user.isActive) {
+      return sendError(
+        res,
+        "Your account has been deactivated. Please contact your administrator.",
+        403,
+      );
+    }
+
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return sendError(res, "Invalid credentials", 401);

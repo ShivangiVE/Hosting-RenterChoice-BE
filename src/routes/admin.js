@@ -13,6 +13,8 @@ const {
   impersonateOfficeAdmin,
   createBrokerageAdmin,
   getBrokerageAdmins,
+  toggleUserStatus,
+  getUserStatusLogs,
 } = require("../controllers/admin/adminController");
 
 // All routes protected AND only for Admin
@@ -42,6 +44,10 @@ router.get("/teams-by-office-admin", getTeamsGroupedByOfficeAdmin);
 
 //Logged in as office Admin
 router.post("/impersonate/:officeAdminId", impersonateOfficeAdmin);
+
+router.patch("/users/:userId/toggle-status", toggleUserStatus);
+
+router.get("/users/:userId/status-logs", getUserStatusLogs);
 
 router.delete("/users/:id", deleteUser);
 router.put("/users/:id/role", updateUserRole);
