@@ -15,7 +15,7 @@ if (isS3) {
     });
   } catch (err) {
     console.warn(
-      "⚠️ AWS SDK not installed. Run 'npm install aws-sdk' when enabling USE_S3=true."
+      "⚠️ AWS SDK not installed. Run 'npm install aws-sdk' when enabling USE_S3=true.",
     );
   }
 }
@@ -126,9 +126,44 @@ const getFileStream = (fileUrl) => {
   }
 };
 
+/**
+ * Get a viewable URL for a stored file.
+ * - S3: returns a short-lived signed URL (bucket can stay private)
+ * - Local: returns an absolute URL the browser can open directly
+ */
+const getFileViewUrl = async (fileUrl) => {
+  if (!fileUrl) return null;
+
+  if (isS3 && s3) {
+    const s3Key = fileUrl.split(".amazonaws.com/")[1];
+
+    if (!s3Key) {
+      throw new Error("Invalid S3 key in fileUrl");
+    }
+
+    return s3.getSignedUrlPromise("getObject", {
+      Bucket: process.env.AWS_S3_BUCKET,
+      Key: s3Key,
+      Expires: 300,
+    });
+  }
+
+  const serverPublicUrl = process.env.SERVER_PUBLIC_URL;
+
+  if (!serverPublicUrl) {
+    throw new Error("SERVER_PUBLIC_URL environment variable is not configured");
+  }
+
+  const normalizedBaseUrl = serverPublicUrl.replace(/\/+$/, "");
+  const normalizedFileUrl = fileUrl.startsWith("/") ? fileUrl : `/${fileUrl}`;
+
+  return `${normalizedBaseUrl}${normalizedFileUrl}`;
+};
+
 module.exports = {
   uploadFile,
   deleteFile,
   fileExists,
   getFileStream,
+  getFileViewUrl,
 };

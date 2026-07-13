@@ -1,6 +1,12 @@
 const express = require("express");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { ACCOUNTS_ROLES } = require("../../constants/roles");
+const {
+  getInternalTeamMoneyOut,
+} = require("../../controllers/Accounts/InternalTeam/internalMoneyOutController");
+const {
+  getInvoiceFileUrl,
+} = require("../../controllers/workOrder/invoiceController");
 
 const router = express.Router();
 
@@ -33,6 +39,23 @@ router.get("/me", protect, authorize(...ACCOUNTS_ROLES), (req, res) => {
     permissions: PERMISSIONS[req.user.role],
   });
 });
+
+// Internal Team routes
+// ================= Internal Team — Money Out =================
+router.get(
+  "/internal-team/money-out",
+  protect,
+  authorize(...ACCOUNTS_ROLES),
+  getInternalTeamMoneyOut,
+);
+
+// ================= Invoices — File Preview =================
+router.get(
+  "/invoices/:invoiceId/file-url",
+  protect,
+  authorize(...ACCOUNTS_ROLES),
+  getInvoiceFileUrl,
+);
 
 // ========================= Summary =========================
 // Phase 2 — add controller import and wire here when ready

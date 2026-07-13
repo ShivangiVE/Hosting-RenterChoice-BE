@@ -64,6 +64,12 @@ const {
   WORK_ORDER_ROLES,
   WORK_ORDER_AND_VENDOR_ROLES,
 } = require("../../constants/roles");
+const {
+  createInvoiceDraft,
+  confirmInvoice,
+  finalizeInvoiceLater,
+  discardInvoiceDraft,
+} = require("../../controllers/workOrder/invoiceController");
 
 const router = express.Router();
 
@@ -179,12 +185,44 @@ router.put(
   markWorkOrderCompleted,
 );
 
+// Vendor — Create Invoice Draft (upload + AI extract)
+router.post(
+  "/vendor/work-orders/:id/invoice-drafts",
+  protect,
+  authorize("Vendor"),
+  upload.invoiceUpload.single("file"),
+  createInvoiceDraft,
+);
+
+// Vendor — Confirm Extracted Invoice Details
+router.patch(
+  "/vendor/invoices/:invoiceId/confirm",
+  protect,
+  authorize("Vendor"),
+  confirmInvoice,
+);
+
+// Vendor — Finalize Invoice (Upload Later flow, after work order already completed)
+router.patch(
+  "/vendor/work-orders/:id/invoice/finalize-later",
+  protect,
+  authorize("Vendor"),
+  finalizeInvoiceLater,
+);
+
+router.delete(
+  "/vendor/invoices/:invoiceId",
+  protect,
+  authorize("Vendor"),
+  discardInvoiceDraft,
+);
+
 // Vendor Upload Invoice Later
 router.put(
   "/vendor/work-orders/:id/upload-invoice",
   protect,
   authorize("Vendor"),
-  upload.workOrderUpload.array("files", 5),
+  upload.invoiceUpload.array("files", 5),
   vendorUploadInvoiceLater,
 );
 
