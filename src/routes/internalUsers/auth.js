@@ -12,17 +12,7 @@ const {
 } = require("../../controllers/internalUsers/authController");
 const validate = require("../../middleware/validate");
 const { loginValidator } = require("../../validators/authValidator");
-
-const INTERNAL_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const { INTERNAL_ROLES } = require("../../constants/roles");
 
 router.post("/login", loginValidator, validate, loginInternal);
 
