@@ -1,6 +1,7 @@
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
+const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 
 const INTERNAL_ROLES = [
   "OfficeAdmin",
@@ -195,7 +196,11 @@ exports.impersonateOfficeAdmin = async (req, res) => {
       return sendError(res, "Office admin not found", 404);
     }
 
-    const token = generateToken(targetUser);
+    const token = generateToken({
+      user: targetUser,
+      platform: "impersonate",
+      portal: "internal",
+    });
 
     return sendSuccess(res, "Impersonation successful", {
       token,
@@ -208,6 +213,30 @@ exports.impersonateOfficeAdmin = async (req, res) => {
     });
   } catch (error) {
     return sendError(res, "Impersonation failed", 500);
+  }
+};
+
+// Activating and Deactivating the user.
+exports.toggleUserStatus = (req, res) =>
+  toggleUserStatus(req, res, {
+    scopeCheck: async (targetUser, performer) => {
+      // Admin cannot toggle another Admin
+      return targetUser.role !== "Admin";
+    },
+  });
+
+exports.getUserStatusLogs = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const logs = await UserStatusLog.find({ targetUser: userId })
+      .populate("performedBy", "preferredName email role")
+      .populate("targetUser", "preferredName email role")
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    return sendSuccess(res, "Status logs retrieved", { logs });
+  } catch (err) {
+    return sendError(res, "Failed to fetch logs", 500);
   }
 };
 

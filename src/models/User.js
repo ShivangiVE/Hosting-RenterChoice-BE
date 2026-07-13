@@ -76,6 +76,16 @@ const userSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+
+    internalWebSessionVersion: {
+      type: Number,
+      default: 1,
+    },
+
+    externalWebSessionVersion: {
+      type: Number,
+      default: 1,
+    },
     profileImage: {
       type: String,
       default: "",

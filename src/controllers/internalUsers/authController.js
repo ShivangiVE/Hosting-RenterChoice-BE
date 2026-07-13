@@ -1,31 +1,45 @@
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { INTERNAL_ROLES } = require("../../constants/roles");
 
 // Generate JWT
-const generateToken = (user) => {
-  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
-};
+const generateToken = require("../../utils/generateToken");
 
 // Login
 exports.loginInternal = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, platform = "web" } = req.body;
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user || !INTERNAL_ROLES.includes(user.role)) {
       return sendError(res, "Invalid credentials", 401);
     }
 
+    if (!user.isActive) {
+      return sendError(
+        res,
+        "Your account has been deactivated. Please contact your administrator.",
+        403,
+      );
+    }
+
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return sendError(res, "Invalid credentials", 401);
     }
+
+    if (platform === "web") {
+      user.internalWebSessionVersion += 1;
+      await user.save();
+    }
+
+    const token = generateToken({
+      user,
+      platform,
+      portal: "internal",
+    });
 
     const userData = {
       _id: user._id,
@@ -34,7 +48,7 @@ exports.loginInternal = async (req, res, next) => {
       email: user.email,
       role: user.role,
       defaultRepairTab: user.defaultRepairTab,
-      token: generateToken(user),
+      token,
     };
 
     return sendSuccess(res, `You are logged in as ${user.role}`, userData);
@@ -58,7 +72,11 @@ exports.impersonateVendor = async (req, res) => {
       return sendError(res, "Vendor account is inactive", 403);
     }
 
-    const token = generateToken(vendor);
+    const token = generateToken({
+      user: vendor,
+      platform: "impersonate",
+      portal: "external",
+    });
 
     return sendSuccess(res, "Vendor impersonation successful", {
       token,
@@ -90,6 +108,10 @@ exports.changePassword = async (req, res, next) => {
     }
 
     user.password = newPassword;
+
+    user.internalWebSessionVersion += 1;
+    user.externalWebSessionVersion += 1;
+
     await user.save();
 
     return sendSuccess(res, "Password updated successfully");
@@ -181,6 +203,10 @@ exports.resetPassword = async (req, res, next) => {
     }
 
     user.password = password;
+
+    user.internalWebSessionVersion += 1;
+    user.externalWebSessionVersion += 1;
+
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
 

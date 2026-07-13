@@ -3,30 +3,45 @@ const { sendSuccess } = require("../../utils/response");
 
 // GET notifications
 exports.getNotifications = async (req, res) => {
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 20;
-  const skip = (page - 1) * limit;
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-  const notifications = await Notification.find({
-    user: req.user._id,
-    deletedAt: null,
-    actionTakenAt: null,
-  })
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit);
+    const filter = {
+      user: req.user._id,
+      deletedAt: null,
+      actionTakenAt: null,
+    };
 
-  const unreadCount = await Notification.countDocuments({
-    user: req.user._id,
-    readAt: null,
-    deletedAt: null,
-    actionTakenAt: null,
-  });
+    const [notifications, total, unreadCount] = await Promise.all([
+      Notification.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
 
-  return sendSuccess(res, "Notifications fetched", {
-    notifications,
-    unreadCount,
-  });
+      Notification.countDocuments(filter),
+
+      Notification.countDocuments({
+        ...filter,
+        readAt: null,
+      }),
+    ]);
+
+    return sendSuccess(res, "Notifications fetched", {
+      notifications,
+      unreadCount,
+
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total,
+        limit,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 };
 
 // MARK single notification read
