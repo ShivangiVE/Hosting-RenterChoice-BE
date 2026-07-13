@@ -28,6 +28,9 @@ const {
 const {
   notifyInternalUsers,
 } = require("../../services/internalNotificationService");
+const { getFileType } = require("../../utils/fileType");
+const { finalizeInvoice } = require("../../services/invoiceFinalizeService");
+const { assignBillNumberIfMissing } = require("../../utils/generateAccountNumber");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -59,26 +62,6 @@ exports.getNextCounterValue = async (req, res) => {
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch counter", 500);
   }
-};
-
-const getFileType = (mimeType) => {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType === "application/pdf") return "pdf";
-  if (
-    mimeType === "application/vnd.ms-excel" ||
-    mimeType ===
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  ) {
-    return "excel";
-  }
-  if (
-    mimeType === "application/msword" ||
-    mimeType ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  ) {
-    return "word";
-  }
-  return "other";
 };
 
 // Helper to add months to a date
@@ -1294,13 +1277,16 @@ exports.markWorkOrderCompleted = async (req, res) => {
     }
 
     if (invoiceOption === "upload_now") {
-      if (!req.files || req.files.length === 0) {
+      if (!req.body.invoiceId) {
         return sendError(
           res,
-          "Invoice upload is mandatory when 'Upload Now' is selected",
+          "Invoice must be uploaded and confirmed first",
           400,
         );
       }
+      await finalizeInvoice(workOrder, req.body.invoiceId, req.user._id);
+      // ── Assign bill number now that the invoice is finalized ──────────
+      await assignBillNumberIfMissing(req.body.invoiceId);
     }
 
     if (workOrder.keyIssued === true && !keyReturnOption) {
@@ -1335,7 +1321,7 @@ exports.markWorkOrderCompleted = async (req, res) => {
         const file = req.files[i];
         const metadata = invoiceMeta[i] || {};
         const fileType = getFileType(file.mimetype);
-        const invoiceUrl = await uploadFile(file, "uploads/documents");
+        const invoiceUrl = await uploadFile(file, "uploads/invoices");
 
         await Document.create({
           fileName: metadata.fileName || file.originalname,
