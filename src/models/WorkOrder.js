@@ -81,6 +81,19 @@ const workOrderSchema = new mongoose.Schema(
     invoicePending: { type: Boolean, default: false },
     invoiceUploaded: { type: Boolean, default: false },
 
+    invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
+    invoiceStatus: {
+      type: String,
+      enum: [
+        "not_uploaded",
+        "processing",
+        "review_required",
+        "confirmed",
+        "posted",
+      ],
+      default: "not_uploaded",
+    },
+
     status: {
       type: String,
       enum: ["open", "closed"],

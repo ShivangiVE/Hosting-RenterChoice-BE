@@ -7,6 +7,7 @@ const {
   getInternalUsers,
   deleteInternalUser,
   updateInternalUserRole,
+  toggleUserStatus,
 } = require("../controllers/officeAdmin/officeAdminController");
 const { INTERNAL_ROLES } = require("../constants/roles");
 
@@ -18,6 +19,8 @@ router.post("/internal-users", createInternalUser);
 
 // Get all internal users
 router.get("/team-users", getInternalUsers);
+
+router.patch("/users/:userId/toggle-status", toggleUserStatus);
 
 // Delete internal user
 router.delete("/internal-users/:id", deleteInternalUser);

@@ -1,6 +1,7 @@
 const User = require("../../models/User");
 const { sendError, sendSuccess } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
+const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 
 // BrokerageAdmin creates OfficeAdmins
 exports.createOfficeAdmin = async (req, res) => {
@@ -145,7 +146,12 @@ exports.impersonateOfficeAdmin = async (req, res) => {
 
     if (!target) return sendError(res, "Office admin not found", 404);
 
-    const token = generateToken(target);
+    const token = generateToken({
+      user: target,
+      platform: "impersonate",
+      portal: "internal",
+    });
+
     return sendSuccess(res, "Impersonation successful", {
       token,
       user: {
@@ -159,6 +165,31 @@ exports.impersonateOfficeAdmin = async (req, res) => {
     return sendError(res, "Impersonation failed", 500);
   }
 };
+
+// Activating and Deactivating the user.
+exports.toggleUserStatus = (req, res) =>
+  toggleUserStatus(req, res, {
+    scopeCheck: async (targetUser, performer) => {
+      // Can toggle OfficeAdmins they created
+      if (
+        targetUser.role === "OfficeAdmin" &&
+        targetUser.createdBy?.toString() === performer._id.toString()
+      )
+        return true;
+
+      // Can toggle team members under their OfficeAdmins
+      if (TEAM_ROLES.includes(targetUser.role)) {
+        const officeAdmin = await User.findOne({
+          _id: targetUser.createdBy,
+          role: "OfficeAdmin",
+          createdBy: performer._id,
+        });
+        return !!officeAdmin;
+      }
+
+      return false;
+    },
+  });
 
 // BrokerageAdmin deletes an OfficeAdmin they own
 exports.deleteOfficeAdmin = async (req, res) => {
@@ -195,10 +226,11 @@ exports.deleteTeamMember = async (req, res) => {
     const officeAdmin = await User.findOne({
       _id: member.createdBy,
       role: "OfficeAdmin",
-      createdBy: req.user._id,   // scope check
+      createdBy: req.user._id, // scope check
     });
 
-    if (!officeAdmin) return sendError(res, "Not authorized to delete this user", 403);
+    if (!officeAdmin)
+      return sendError(res, "Not authorized to delete this user", 403);
 
     await User.findByIdAndDelete(req.params.memberId);
     return sendSuccess(res, "Team member deleted successfully");

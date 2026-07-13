@@ -1,3 +1,4 @@
+const Invoice = require("../models/Accounts/Invoice");
 const Counter = require("./Counter");
 
 /**
@@ -50,4 +51,28 @@ const generateAccountNumber = async ({
   }
 };
 
-module.exports = { generateAccountNumber };
+// Generate Bill Number for Invoice if missing
+const assignBillNumberIfMissing = async (invoiceId) => {
+  const invoice = await Invoice.findById(invoiceId).select("billNumber status");
+  if (!invoice) return null;
+
+  // Never assign a bill number to an invoice that hasn't been confirmed —
+  // even if this helper gets called from a new code path later.
+  if (!["confirmed", "posted"].includes(invoice.status)) {
+    return null;
+  }
+
+  if (!invoice.billNumber) {
+    invoice.billNumber = await generateAccountNumber({
+      counterId: "invoiceBill",
+      startFrom: 0,
+      prefix: "Bill #",
+      pad: false,
+    });
+    await invoice.save();
+  }
+
+  return invoice.billNumber;
+};
+
+module.exports = { generateAccountNumber, assignBillNumberIfMissing };

@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const NOTIFICATION_TYPES = require("../constants/notificationTypes");
 
 const notificationSchema = new mongoose.Schema(
   {
@@ -13,26 +14,31 @@ const notificationSchema = new mongoose.Schema(
       type: String,
     },
 
+    // type: {
+    //   type: String,
+    //   enum: [
+    //     "WORK_ORDER_ASSIGNED",
+    //     "INVOICE_UPLOAD_PENDING",
+    //     "KEY_RETURN_PENDING",
+    //     "DUE_DATE_EXTENSION_REQUESTED",
+    //     "DUE_DATE_EXTENSION_REVIEWED",
+    //     "WORK_ORDER_DECLINED",
+    //     "WORK_ORDER_ACCEPTED",
+
+    //     "INSPECTION_REQUEST_ASSIGNED",
+    //     "WORK_ORDER_ASSIGNED_CLERK",
+
+    //     "TASK_ASSIGNED_CLERK",
+    //     "TODO_ASSIGNED_CLERK",
+    //   ],
+    //   required: true,
+    // },
+
     type: {
       type: String,
-      enum: [
-        "WORK_ORDER_ASSIGNED",
-        "INVOICE_UPLOAD_PENDING",
-        "KEY_RETURN_PENDING",
-        "DUE_DATE_EXTENSION_REQUESTED",
-        "DUE_DATE_EXTENSION_REVIEWED",
-        "WORK_ORDER_DECLINED",
-        "WORK_ORDER_ACCEPTED",
-
-        "INSPECTION_REQUEST_ASSIGNED",
-        "WORK_ORDER_ASSIGNED_CLERK",
-
-        "TASK_ASSIGNED_CLERK",
-        "TODO_ASSIGNED_CLERK",
-      ],
+      enum: Object.values(NOTIFICATION_TYPES),
       required: true,
     },
-
     title: { type: String, required: true },
     message: { type: String, required: true },
 

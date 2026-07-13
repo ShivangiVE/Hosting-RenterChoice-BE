@@ -64,9 +64,17 @@ const todoUpload = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
+// Invoice Uploads (vendor invoice drafts + upload-later flow)
+const invoiceUpload = multer({
+  storage: createStorage("invoices"),
+  fileFilter,
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
 module.exports = {
   workOrderUpload,
   serviceAgreementUpload,
   taskUpload,
   todoUpload,
+  invoiceUpload,
 };

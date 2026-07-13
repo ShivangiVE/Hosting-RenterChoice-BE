@@ -13,11 +13,7 @@ const Company = require("../../models/ContactCards/Company");
 // Allowed roles
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
 
-const generateToken = (user) => {
-  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
-};
+const generateToken = require("../../utils/generateToken");
 
 // Generate 4-digit OTP
 const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
@@ -78,6 +74,16 @@ exports.register = async (req, res, next) => {
       role,
     });
 
+    // Registration creates a new web session
+    user.externalWebSessionVersion += 1;
+    await user.save();
+
+    const token = generateToken({
+      user,
+      platform: "web",
+      portal: "external",
+    });
+
     return sendSuccess(
       res,
       "Registration successful",
@@ -87,7 +93,7 @@ exports.register = async (req, res, next) => {
         preferredName: user.preferredName,
         email: user.email,
         role: user.role,
-        token: generateToken(user),
+        token,
       },
       201,
     );
@@ -121,7 +127,7 @@ exports.verifyCompanyAccount = async (req, res) => {
 // Login (strict role-based)
 exports.login = async (req, res, next) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password, role, platform = "web" } = req.body;
 
     if (!email || !password) {
       return sendError(res, "Email and password are required", 400);
@@ -165,7 +171,16 @@ exports.login = async (req, res, next) => {
       );
     }
 
-    const token = generateToken(user);
+    if (platform === "web") {
+      user.externalWebSessionVersion += 1;
+      await user.save();
+    }
+
+    const token = generateToken({
+      user,
+      platform,
+      portal: "external",
+    });
 
     return sendSuccess(res, "Login successful", {
       _id: user._id,
@@ -265,6 +280,10 @@ exports.changePassword = async (req, res, next) => {
     }
 
     user.password = newPassword;
+
+    user.internalWebSessionVersion += 1;
+    user.externalWebSessionVersion += 1;
+
     await user.save();
 
     return sendSuccess(res, "Password updated successfully");
@@ -351,8 +370,13 @@ exports.resetPassword = async (req, res, next) => {
     }
 
     user.password = password;
+
+    user.internalWebSessionVersion += 1;
+    user.externalWebSessionVersion += 1;
+
     user.resetPasswordOTP = undefined;
     user.resetPasswordExpires = undefined;
+
     await user.save();
 
     return sendSuccess(res, "Password reset successfully");

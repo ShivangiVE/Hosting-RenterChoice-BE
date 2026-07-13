@@ -10,6 +10,7 @@ const {
   deleteOfficeAdmin,
   getOfficeAdminTeam,
   deleteTeamMember,
+  toggleUserStatus,
 } = require("../../controllers/brokerageAdmin/brokerageAdminController");
 
 // All routes: authenticated + BrokerageAdmin only
@@ -20,6 +21,7 @@ router.get("/office-admins", getMyOfficeAdmins);
 router.get("/office-admins/:officeAdminId/team", getOfficeAdminTeam);
 router.get("/teams", getMyTeamsGrouped);
 router.post("/impersonate/:officeAdminId", impersonateOfficeAdmin);
+router.patch("/users/:userId/toggle-status", toggleUserStatus);
 router.delete("/office-admins/:id", deleteOfficeAdmin);
 router.delete("/team-members/:memberId", deleteTeamMember);
 
