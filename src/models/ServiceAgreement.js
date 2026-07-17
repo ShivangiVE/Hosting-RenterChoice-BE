@@ -16,7 +16,7 @@ const serviceAgreementSchema = new mongoose.Schema(
       enum: ["Weekly", "Monthly", "Quarterly", "Bi-Annually", "Annually"],
       default: null,
     },
-    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
     fileUrl: { type: String },
     status: {
       type: String,

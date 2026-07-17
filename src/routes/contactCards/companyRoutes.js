@@ -6,6 +6,9 @@ const {
   getCompanyDetails,
   updateCompany,
   removeVendorFromCompany,
+  getCompanyWorkOrders,
+  getCompanyServiceAgreements,
+  getCompanyOverview,
 } = require("../../controllers/contactCards/companyController");
 
 const router = express.Router();
@@ -29,6 +32,30 @@ router.get("/list", protect, authorize(...ALLOWED_ROLES), listCompanies);
 
 // Get single company details
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getCompanyDetails);
+
+// Get company's vendor work orders
+router.get(
+  "/:id/work-orders",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getCompanyWorkOrders,
+);
+
+// Get company's vendor service agreements
+router.get(
+  "/:id/service-agreements",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getCompanyServiceAgreements,
+);
+
+// Get company overview (counts/summary)
+router.get(
+  "/:id/overview",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getCompanyOverview,
+);
 
 // Update the Company Details
 router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateCompany);
