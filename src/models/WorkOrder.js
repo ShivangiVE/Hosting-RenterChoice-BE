@@ -47,7 +47,7 @@ const workOrderSchema = new mongoose.Schema(
       required: true,
     },
     description: { type: String, required: true },
-    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
     // keyIssued: { type: Boolean, default: false },
     keyIssued: {
       type: Boolean,

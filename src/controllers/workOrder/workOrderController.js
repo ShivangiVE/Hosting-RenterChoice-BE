@@ -30,7 +30,9 @@ const {
 } = require("../../services/internalNotificationService");
 const { getFileType } = require("../../utils/fileType");
 const { finalizeInvoice } = require("../../services/invoiceFinalizeService");
-const { assignBillNumberIfMissing } = require("../../utils/generateAccountNumber");
+const {
+  assignBillNumberIfMissing,
+} = require("../../utils/generateAccountNumber");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
