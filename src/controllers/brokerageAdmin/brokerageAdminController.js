@@ -2,6 +2,9 @@ const User = require("../../models/User");
 const { sendError, sendSuccess } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
+const { TEAM_ROLES, BROKERAGE_STAFF_ROLES } = require("../../constants/roles");
+
+const CREATABLE_BROKERAGE_STAFF_ROLES = BROKERAGE_STAFF_ROLES;
 
 // BrokerageAdmin creates OfficeAdmins
 exports.createOfficeAdmin = async (req, res) => {
@@ -35,6 +38,46 @@ exports.createOfficeAdmin = async (req, res) => {
   }
 };
 
+// BrokerageAdmin creates BrokerageAccounts or BrokerageUser
+exports.createBrokerageStaff = async (req, res) => {
+  try {
+    const { preferredName, email, password, role } = req.body;
+
+    if (!CREATABLE_BROKERAGE_STAFF_ROLES.includes(role)) {
+      return sendError(
+        res,
+        `Invalid role. Must be one of: ${CREATABLE_BROKERAGE_STAFF_ROLES.join(", ")}`,
+        400,
+      );
+    }
+
+    const exists = await User.findOne({ email: email.toLowerCase().trim() });
+    if (exists) return sendError(res, "User already exists", 409);
+
+    const user = await User.create({
+      preferredName,
+      email,
+      password,
+      role,
+      createdBy: req.user._id, // links this staff member to the Brokerage Admin/Franchise
+    });
+
+    return sendSuccess(
+      res,
+      `${role} created successfully`,
+      {
+        _id: user._id,
+        preferredName: user.preferredName,
+        email: user.email,
+        role: user.role,
+      },
+      201,
+    );
+  } catch (err) {
+    return sendError(res, "Failed to create brokerage staff", 500);
+  }
+};
+
 // BrokerageAdmin gets their own OfficeAdmins
 exports.getMyOfficeAdmins = async (req, res) => {
   try {
@@ -49,10 +92,23 @@ exports.getMyOfficeAdmins = async (req, res) => {
   }
 };
 
+// BrokerageAdmin lists their own BrokerageAccounts / BrokerageUser staff
+exports.getMyBrokerageStaff = async (req, res) => {
+  try {
+    const staff = await User.find({
+      role: { $in: CREATABLE_BROKERAGE_STAFF_ROLES },
+      createdBy: req.user._id,
+    }).select("preferredName email role isActive createdAt");
+
+    return sendSuccess(res, "Brokerage staff retrieved", { staff });
+  } catch (err) {
+    return sendError(res, "Failed to fetch brokerage staff", 500);
+  }
+};
+
 // Get team members under a specific OfficeAdmin (scoped to this BrokerageAdmin)
 exports.getOfficeAdminTeam = async (req, res) => {
   try {
-    const { TEAM_ROLES } = require("../../constants/roles");
     const { officeAdminId } = req.params;
 
     // Verify this OfficeAdmin belongs to this BrokerageAdmin
@@ -78,7 +134,6 @@ exports.getOfficeAdminTeam = async (req, res) => {
 // Get team members under a specific OfficeAdmin (scoped to this BrokerageAdmin)
 exports.getOfficeAdminTeam = async (req, res) => {
   try {
-    const { TEAM_ROLES } = require("../../constants/roles");
     const { officeAdminId } = req.params;
 
     // Verify this OfficeAdmin belongs to this BrokerageAdmin
@@ -104,8 +159,6 @@ exports.getOfficeAdminTeam = async (req, res) => {
 // BrokerageAdmin gets teams grouped under their OfficeAdmins
 exports.getMyTeamsGrouped = async (req, res) => {
   try {
-    const { TEAM_ROLES } = require("../../constants/roles");
-
     const officeAdmins = await User.find({
       role: "OfficeAdmin",
       createdBy: req.user._id,
@@ -191,6 +244,14 @@ exports.toggleUserStatus = (req, res) =>
     },
   });
 
+// BrokerageAdmin toggles active/inactive for their own staff
+exports.toggleBrokerageStaffStatus = (req, res) =>
+  toggleUserStatus(req, res, {
+    scopeCheck: async (targetUser, performer) =>
+      CREATABLE_BROKERAGE_STAFF_ROLES.includes(targetUser.role) &&
+      targetUser.createdBy?.toString() === performer._id.toString(),
+  });
+
 // BrokerageAdmin deletes an OfficeAdmin they own
 exports.deleteOfficeAdmin = async (req, res) => {
   try {
@@ -209,11 +270,27 @@ exports.deleteOfficeAdmin = async (req, res) => {
   }
 };
 
+// BrokerageAdmin deletes their own staff
+exports.deleteBrokerageStaff = async (req, res) => {
+  try {
+    const target = await User.findOne({
+      _id: req.params.id,
+      role: { $in: CREATABLE_BROKERAGE_STAFF_ROLES },
+      createdBy: req.user._id,
+    });
+
+    if (!target) return sendError(res, "Brokerage staff not found", 404);
+
+    await User.findByIdAndDelete(req.params.id);
+    return sendSuccess(res, "Brokerage staff deleted successfully");
+  } catch (err) {
+    return sendError(res, "Failed to delete brokerage staff", 500);
+  }
+};
+
 // BrokerageAdmin deletes a team member under their OfficeAdmins
 exports.deleteTeamMember = async (req, res) => {
   try {
-    const { TEAM_ROLES } = require("../../constants/roles");
-
     // Find the user and verify they're a team member
     const member = await User.findOne({
       _id: req.params.memberId,
