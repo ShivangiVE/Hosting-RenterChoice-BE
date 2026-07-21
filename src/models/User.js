@@ -55,6 +55,8 @@ const userSchema = new mongoose.Schema(
       enum: [
         "Admin",
         "BrokerageAdmin",
+        "BrokerageAccounts",
+        "BrokerageUser",
         "OfficeAdmin",
         "AccountsTeam",
         "RepairsTeam",

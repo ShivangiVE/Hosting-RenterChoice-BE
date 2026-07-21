@@ -7,9 +7,19 @@ const TEAM_ROLES = [
   "InspectionClerk",
 ];
 
+const BROKERAGE_ROLES = [
+  "BrokerageAdmin",
+  "BrokerageAccounts",
+  "BrokerageUser",
+];
+
+const BROKERAGE_STAFF_ROLES = BROKERAGE_ROLES.filter(
+  (role) => role !== "BrokerageAdmin",
+);
+
 const INTERNAL_ROLES = [
   "Admin",
-  "BrokerageAdmin",
+  ...BROKERAGE_ROLES,
   "OfficeAdmin",
   ...TEAM_ROLES,
 ];
@@ -17,6 +27,8 @@ const INTERNAL_ROLES = [
 const ACCOUNTS_ROLES = [
   "Admin",
   "BrokerageAdmin",
+  "BrokerageAccounts",
+  "BrokerageUser",
   "OfficeAdmin",
   "AccountsTeam",
   "LeaseTeam",
@@ -35,6 +47,8 @@ const ALL_ROLES = [...INTERNAL_ROLES, "Vendor", "Owner", "Tenant"];
 
 module.exports = {
   TEAM_ROLES,
+  BROKERAGE_ROLES,
+  BROKERAGE_STAFF_ROLES,
   INTERNAL_ROLES,
   ACCOUNTS_ROLES,
   ALLOWED_INTERNAL_ROLES,
