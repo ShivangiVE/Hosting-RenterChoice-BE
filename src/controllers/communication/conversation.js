@@ -261,29 +261,44 @@ exports.createConversation = async (req, res) => {
 exports.getConversations = async (req, res) => {
   try {
     const userId = req.user._id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    const conversations = await Conversation.find({
+    const filter = {
       participants: userId,
       lastMessage: { $ne: null },
-    })
-      .populate("participants", "preferredName role profileImage")
-      .populate({
-        path: "workOrder",
-        select: "workOrderNumber status building",
-        populate: {
-          path: "building",
-          select: "formData.address",
-        },
-      })
-      .populate({
-        path: "lastMessage",
-        populate: { path: "sender", select: "preferredName role" },
-      })
-      .sort({ updatedAt: -1 });
+    };
+
+    const [conversations, total] = await Promise.all([
+      Conversation.find(filter)
+        .populate("participants", "preferredName role profileImage")
+        .populate({
+          path: "workOrder",
+          select: "workOrderNumber status building",
+          populate: {
+            path: "building",
+            select: "formData.address",
+          },
+        })
+        .populate({
+          path: "lastMessage",
+          populate: { path: "sender", select: "preferredName role" },
+        })
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Conversation.countDocuments(filter),
+    ]);
 
     res.json({
       success: true,
       conversations,
+      pagination: {
+        current: page,
+        pages: Math.max(Math.ceil(total / limit), 1),
+        total,
+      },
     });
   } catch (err) {
     console.error("Get conversations error:", err);
