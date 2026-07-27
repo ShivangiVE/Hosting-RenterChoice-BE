@@ -108,6 +108,24 @@ exports.listCompanies = async (req, res) => {
   }
 };
 
+// For Filters and Dropdowns
+exports.getCompaniesList = async (req, res) => {
+  try {
+    const companies = await Company.find({
+      isActive: true,
+    })
+      .select("companyName")
+      .sort({ companyName: 1 })
+      .lean();
+
+    return sendSuccess(res, "Companies fetched", {
+      companies,
+    });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
 // Get single company details
 exports.getCompanyDetails = async (req, res) => {
   try {
@@ -144,6 +162,30 @@ exports.getCompanyDetails = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err.message, 500);
+  }
+};
+
+exports.searchCompanies = async (req, res) => {
+  try {
+    const { q = "", limit = 20 } = req.query;
+
+    const query = { isActive: true };
+
+    if (q.trim()) {
+      // Uses the companyNameNormalized index for fast prefix/substring search
+      query.companyName = { $regex: q.trim(), $options: "i" };
+    }
+
+    const companies = await Company.find(query)
+      .select("companyName companyAccountNumber vendorType")
+      .populate("vendorType", "name")
+      .sort({ companyName: 1 })
+      .limit(Math.min(Number(limit) || 20, 50))
+      .lean();
+
+    return sendSuccess(res, "Companies fetched", { companies });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to search companies", 500);
   }
 };
 
