@@ -50,6 +50,10 @@ const {
   reopenInspectionRequest,
   confirmInspectionKeyReturn,
   bulkConfirmInspectionKeyReturn,
+  reassignWorkOrder,
+  reassignServiceAgreement,
+  getWorkOrderReassignSummary,
+  getServiceAgreementReassignSummary,
 } = require("../../controllers/workOrder/workOrderController");
 const {
   createAppointment,
@@ -106,6 +110,8 @@ router.get(
 );
 
 router.get("/work-orders/:id", protect, getWorkOrder);
+
+router.get("/work-orders/:id/reassign-summary", getWorkOrderReassignSummary);
 
 router.get(
   "/vendor/new-count",
@@ -286,6 +292,12 @@ router.post(
   bulkDeleteWorkOrders,
 );
 
+router.patch(
+  "/work-orders/:id/reassign",
+  authorize("Admin", "OfficeAdmin"),
+  reassignWorkOrder,
+);
+
 // ========================= RC Schedule (Vendor Appointments) =========================
 
 // Get eligible work orders for scheduling appointment
@@ -461,6 +473,13 @@ router.get(
   getServiceAgreementById,
 );
 
+router.get(
+  "/service-agreements/:id/reassign-summary",
+  protect,
+  authorize(...WORK_ORDER_ROLES),
+  getServiceAgreementReassignSummary,
+);
+
 router.put(
   "/service-agreements/:id",
   protect,
@@ -504,6 +523,12 @@ router.post(
   protect,
   authorize(...WORK_ORDER_ROLES),
   bulkDeleteServiceAgreements,
+);
+
+router.patch(
+  "/service-agreements/:id/reassign",
+  authorize("Admin", "OfficeAdmin"),
+  reassignServiceAgreement,
 );
 
 // ========================= Counter =========================

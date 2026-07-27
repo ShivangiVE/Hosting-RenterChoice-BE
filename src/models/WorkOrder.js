@@ -32,6 +32,20 @@ const extensionSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const vendorResponseSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    response: {
+      type: String,
+      enum: ["pending", "accepted", "declined", "superseded"],
+      default: "pending",
+    },
+    respondedAt: Date,
+    seenAt: Date,
+  },
+  { _id: false },
+);
+
 const workOrderSchema = new mongoose.Schema(
   {
     workOrderNumber: { type: String, required: true, unique: true },
@@ -47,7 +61,27 @@ const workOrderSchema = new mongoose.Schema(
       required: true,
     },
     description: { type: String, required: true },
-    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+
+    assignmentType: {
+      type: String,
+      enum: ["direct", "company"],
+      default: "direct",
+    },
+
+    // Set when assignmentType === "company"
+    assignedCompany: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      index: true,
+    },
+
+    vendor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+      default: null,
+    },
+
     // keyIssued: { type: Boolean, default: false },
     keyIssued: {
       type: Boolean,
@@ -103,6 +137,8 @@ const workOrderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "WODynamicStatus",
     },
+
+    vendorResponses: [vendorResponseSchema],
 
     vendorResponse: {
       type: String,

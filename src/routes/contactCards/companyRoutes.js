@@ -9,6 +9,8 @@ const {
   getCompanyWorkOrders,
   getCompanyServiceAgreements,
   getCompanyOverview,
+  searchCompanies,
+  getCompaniesList,
 } = require("../../controllers/contactCards/companyController");
 
 const router = express.Router();
@@ -29,6 +31,11 @@ router.post("/create", protect, authorize(...ALLOWED_ROLES), createCompany);
 
 // Get list of Companies
 router.get("/list", protect, authorize(...ALLOWED_ROLES), listCompanies);
+
+// Get list of Companies without pagination for filters and dropdown
+router.get("/lookup", protect, authorize(...ALLOWED_ROLES), getCompaniesList);
+
+router.get("/search", protect, authorize(...ALLOWED_ROLES), searchCompanies);
 
 // Get single company details
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getCompanyDetails);
