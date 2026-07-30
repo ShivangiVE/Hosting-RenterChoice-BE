@@ -26,18 +26,6 @@ const {
 } = require("../../controllers/building/buildingPortfolioController");
 const { ALLOWED_INTERNAL_ROLES } = require("../../constants/roles");
 
-// Internal roles allowed
-const INTERNAL_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
-
 // ========================= Buildings =========================
 router.post(
   "/building",

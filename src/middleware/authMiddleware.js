@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { sendError } = require("../utils/response");
 
 const protect = async (req, res, next) => {
   let token;
@@ -73,10 +74,19 @@ const protect = async (req, res, next) => {
 // Role-based: pass one or more allowed roles
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      res.status(403);
-      throw new Error(`User role ${req.user.role} is not authorized`);
+    if (!req.user) {
+      return sendError(res, "Not authenticated", 401);
     }
+
+    if (!roles.includes(req.user.role)) {
+      return sendError(
+        res,
+        `User role ${req.user.role} is not authorized`,
+        403,
+        "ROLE_NOT_AUTHORIZED",
+      );
+    }
+
     next();
   };
 };

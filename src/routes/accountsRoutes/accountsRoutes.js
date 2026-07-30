@@ -7,6 +7,7 @@ const {
 const {
   getInvoiceFileUrl,
 } = require("../../controllers/workOrder/invoiceController");
+const { PERMISSION_MATRIX, MODULES } = require("../../constants/permissions");
 
 const router = express.Router();
 
@@ -14,29 +15,18 @@ const router = express.Router();
 // Returns the logged-in user's role + what they can do in Accounts.
 // Used by the FE AccountsPermissionContext on first load.
 router.get("/me", protect, authorize(...ACCOUNTS_ROLES), (req, res) => {
-  const PERMISSIONS = {
-    Admin: { canEdit: true, canExport: true, canManageSettings: true },
-    BrokerageAdmin: {
-      canEdit: true,
-      canExport: true,
-      canManageSettings: false,
-    },
-    OfficeAdmin: { canEdit: true, canExport: true, canManageSettings: false },
-    AccountsTeam: {
-      canEdit: false,
-      canExport: false,
-      canManageSettings: false,
-    },
-    LeaseTeam: { canEdit: false, canExport: false, canManageSettings: false },
-    LandlordsTeam: {
-      canEdit: false,
-      canExport: false,
-      canManageSettings: false,
-    },
-  };
+  const modulePerms =
+    PERMISSION_MATRIX[req.user.role]?.[MODULES.ACCOUNTS] || [];
+
   res.json({
     role: req.user.role,
-    permissions: PERMISSIONS[req.user.role],
+    permissions: {
+      canView: modulePerms.includes("view"),
+      canEdit: modulePerms.includes("edit"),
+      canCreate: modulePerms.includes("create"),
+      canExport: modulePerms.includes("edit"), // or its own action if export is distinct
+      canManageSettings: false, // Accounts module doesn't cover franchise settings; keep separate if you add that check
+    },
   });
 });
 
