@@ -1,5 +1,19 @@
 const mongoose = require("mongoose");
 
+const vendorResponseSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    response: {
+      type: String,
+      enum: ["pending", "accepted", "declined", "superseded"],
+      default: "pending",
+    },
+    respondedAt: Date,
+    seenAt: Date,
+  },
+  { _id: false },
+);
+
 const serviceAgreementSchema = new mongoose.Schema(
   {
     serviceAgreementNumber: { type: String, required: true, unique: true },
@@ -16,7 +30,32 @@ const serviceAgreementSchema = new mongoose.Schema(
       enum: ["Weekly", "Monthly", "Quarterly", "Bi-Annually", "Annually"],
       default: null,
     },
-    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    assignmentType: {
+      type: String,
+      enum: ["direct", "company"],
+      default: "direct",
+    },
+    assignedCompany: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      index: true,
+    },
+    vendor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+      default: null,
+    },
+    vendorResponses: [vendorResponseSchema],
+    vendorResponse: {
+      type: String,
+      enum: ["pending", "accepted", "declined"],
+      default: "pending",
+    },
+    declinedDate: { type: Date },
+    vendorSeenAt: { type: Date, default: null },
+    reassignedAt: { type: Date },
+    reassignedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     fileUrl: { type: String },
     status: {
       type: String,

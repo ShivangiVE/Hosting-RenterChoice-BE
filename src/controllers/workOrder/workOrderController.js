@@ -30,7 +30,11 @@ const {
 } = require("../../services/internalNotificationService");
 const { getFileType } = require("../../utils/fileType");
 const { finalizeInvoice } = require("../../services/invoiceFinalizeService");
-const { assignBillNumberIfMissing } = require("../../utils/generateAccountNumber");
+const {
+  assignBillNumberIfMissing,
+} = require("../../utils/generateAccountNumber");
+const resolveCompanyVendorIds = require("../../utils/resolveCompanyVendorIds");
+const buildCompanyScopeFilter = require("../../utils/buildCompanyScopeFilter");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -81,7 +85,8 @@ exports.createWorkOrder = async (req, res) => {
       category,
       building,
       description,
-      vendor,
+      vendor, // direct-assign path (legacy) — single vendor userId
+      company, // NEW — company-assign path
       keyIssued,
       dueDate,
     } = req.body;
@@ -94,27 +99,49 @@ exports.createWorkOrder = async (req, res) => {
         400,
       );
     }
-
-    if (dueDate) {
-      validateFutureOrTodayDate(dueDate, "Due date");
+    if (dueDate) validateFutureOrTodayDate(dueDate, "Due date");
+    if (!vendor && !company) {
+      return sendError(
+        res,
+        "Either a vendor or a company must be assigned",
+        400,
+      );
     }
 
-    // If a file was uploaded, build a public URL
     const fileUrl = req.file
       ? `/uploads/Repair/workOrders/${req.file.filename}`
       : null;
-    // Generate work order number
     const sequence = await getNextSequence("workOrder");
     const workOrderNumber = `WO #${sequence.toString().padStart(4, "0")}`;
 
-    // Normalize status to lowercase
     const normalizeStatus = (status) => {
       if (!status) return "open";
       const s = status.toLowerCase();
-      if (s === "open") return "open";
-      if (s === "closed") return "closed";
-      return "open"; // fallback
+      return s === "closed" ? "closed" : "open";
     };
+
+    let assignmentType = "direct";
+    let vendorResponses = [];
+    let resolvedVendor = vendor || null;
+
+    if (company && !vendor) {
+      assignmentType = "company";
+      const vendorIds = await resolveCompanyVendorIds(company);
+
+      if (vendorIds.length === 0) {
+        return sendError(
+          res,
+          "This company has no active vendor users to assign",
+          400,
+        );
+      }
+
+      vendorResponses = vendorIds.map((userId) => ({
+        user: userId,
+        response: "pending",
+      }));
+      resolvedVendor = null; // nobody has accepted yet
+    }
 
     const workOrder = await WorkOrder.create({
       workOrderNumber,
@@ -122,7 +149,10 @@ exports.createWorkOrder = async (req, res) => {
       category,
       building,
       description,
-      vendor,
+      assignmentType,
+      assignedCompany: assignmentType === "company" ? company : undefined,
+      vendor: resolvedVendor,
+      vendorResponses,
       keyIssued: keyIssued || false,
       dueDate,
       fileUrl,
@@ -133,26 +163,42 @@ exports.createWorkOrder = async (req, res) => {
 
     sendSuccess(res, "Work order created successfully", { workOrder }, 201);
 
-    // Emit socket event AFTER creation
-    if (vendor) {
-      await createNotification({
-        user: vendor,
-        role: "Vendor",
-        type: "WORK_ORDER_ASSIGNED",
-        title: "New Work Order Assigned",
-        message: `You have a new work order request (${workOrder.workOrderNumber}). Please Accept or Decline.`,
-        entityType: "WorkOrder",
-        entityId: workOrder._id,
-      });
-      getIO().to(`vendor:${vendor.toString()}`).emit("vendor:new-work-order", {
-        workOrderId: workOrder._id,
-        workOrderNumber: workOrder.workOrderNumber,
-      });
+    // ── Notify AFTER response ────────────────────────────────────────
+    if (assignmentType === "direct" && vendor) {
+      await notifyVendorAssigned(workOrder, [vendor]);
+    } else if (assignmentType === "company") {
+      const vendorIds = vendorResponses.map((v) => v.user);
+      await notifyVendorAssigned(workOrder, vendorIds);
     }
   } catch (err) {
     return sendError(res, err.message || "Failed to create work order", 500);
   }
 };
+
+// Shared fan-out notifier
+async function notifyVendorAssigned(workOrder, vendorIds) {
+  await Promise.all(
+    vendorIds.map((vendorId) =>
+      createNotification({
+        user: vendorId,
+        role: "Vendor",
+        type: "WORK_ORDER_ASSIGNED",
+        title: "New Work Order Available",
+        message: `A new work order (${workOrder.workOrderNumber}) is available. Please Accept or Decline.`,
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+      }),
+    ),
+  );
+
+  const io = getIO();
+  vendorIds.forEach((vendorId) => {
+    io.to(`user:${vendorId.toString()}`).emit("vendor:new-work-order", {
+      workOrderId: workOrder._id,
+      workOrderNumber: workOrder.workOrderNumber,
+    });
+  });
+}
 
 // Get all work orders
 exports.getWorkOrders = async (req, res) => {
@@ -177,6 +223,7 @@ exports.getWorkOrders = async (req, res) => {
       status,
       dynamicStatus,
       category,
+      company,
       vendor,
       building,
       city,
@@ -203,6 +250,13 @@ exports.getWorkOrders = async (req, res) => {
 
     // Category filter
     if (category && category !== "All") filter.category = category;
+
+    if (company && company !== "All") {
+      const companyScope = await buildCompanyScopeFilter(company);
+      filter.$and = (filter.$and || []).concat(companyScope);
+    } else if (vendor && vendor !== "All") {
+      filter.vendor = vendor;
+    }
 
     // Vendor filter
     if (vendor && vendor !== "All") filter.vendor = vendor;
@@ -292,7 +346,12 @@ exports.getWorkOrders = async (req, res) => {
           select: "portfolioAbbreviation formData.name",
         },
       })
-      .populate("vendor", "companyName technicianName")
+      .populate({
+        path: "vendor",
+        select: "technicianName email company",
+        populate: { path: "company", select: "companyName" },
+      })
+      .populate("assignedCompany", "companyName")
       .populate("category", "name")
       .populate("createdBy", "preferredName email")
       .populate("dynamicStatus", "name description isDefault")
@@ -330,7 +389,16 @@ exports.getVendorWorkOrders = async (req, res) => {
       sortOrder = "asc",
     } = req.query;
 
-    let filter = { vendor: vendorId };
+    let filter = {
+      $or: [
+        { vendor: vendorId },
+        {
+          "vendorResponses.user": vendorId,
+          "vendorResponses.response": "pending",
+        }, // company invite awaiting my response
+      ],
+    };
+
     if (req.query.vendorResponse === "pending") {
       filter.vendorResponse = "pending";
       filter.status = "open";
@@ -539,12 +607,15 @@ exports.getVendorWorkOrders = async (req, res) => {
     if (req.query.vendorResponse === "pending") {
       await WorkOrder.updateMany(
         {
-          vendor: vendorId,
-          vendorResponse: "pending",
-          vendorSeenAt: null,
+          "vendorResponses.user": vendorId,
+          "vendorResponses.response": "pending",
+          "vendorResponses.seenAt": null,
         },
         {
-          $set: { vendorSeenAt: new Date() },
+          $set: { "vendorResponses.$[elem].seenAt": new Date() },
+        },
+        {
+          arrayFilters: [{ "elem.user": vendorId, "elem.response": "pending" }],
         },
       );
     }
@@ -688,7 +759,12 @@ exports.getWorkOrder = async (req, res) => {
           select: "portfolioAbbreviation formData.name",
         },
       })
-      .populate("vendor", "companyName technicianName email")
+      .populate({
+        path: "vendor",
+        select: "technicianName email company",
+        populate: { path: "company", select: "companyName" },
+      })
+      .populate("assignedCompany", "companyName")
       .populate("createdBy", "preferredName email")
       .populate("dynamicStatus", "name description isDefault")
       .populate("assignedTo", "preferredName email");
@@ -707,8 +783,8 @@ exports.getWorkOrder = async (req, res) => {
     const woObj = workOrder.toObject();
     const assignedToDisplay =
       woObj.assignedTo?.preferredName ||
-      woObj.vendor?.technicianName ||
-      woObj.vendor?.companyName ||
+      woObj.vendor?.company?.companyName ||
+      woObj.assignedCompany?.companyName ||
       null;
 
     const dyn = workOrder.dynamicStatus?.name ?? "";
@@ -725,6 +801,49 @@ exports.getWorkOrder = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err.message || "Failed to fetch work order", 500);
+  }
+};
+
+// Get WorkOrder summary for Reassign
+exports.getWorkOrderReassignSummary = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const workOrder = await WorkOrder.findById(id)
+      .select("workOrderNumber workOrderType category building status")
+      .populate({
+        path: "building",
+        select: "buildingAbbreviation formData.address",
+      })
+      .lean();
+
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    let categoryName = workOrder.category || "—";
+    if (
+      workOrder.category &&
+      mongoose.Types.ObjectId.isValid(workOrder.category)
+    ) {
+      const cat = await Category.findById(workOrder.category).select("name");
+      categoryName = cat?.name || workOrder.category;
+    }
+
+    return sendSuccess(res, "Work order summary fetched", {
+      workOrder: {
+        _id: workOrder._id,
+        workOrderNumber: workOrder.workOrderNumber,
+        workOrderType: workOrder.workOrderType,
+        category: categoryName,
+        address: workOrder.building?.formData?.address || "—",
+        status: workOrder.status,
+      },
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch work order summary",
+      500,
+    );
   }
 };
 
@@ -761,6 +880,77 @@ exports.updateWorkOrder = async (req, res) => {
       if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
     }
 
+    const incomingCompany = updateData.company;
+    const currentCompany = workOrder.assignedCompany?.toString();
+    const companyChanged =
+      incomingCompany && incomingCompany !== currentCompany;
+
+    // Never let "company" leak into a raw findByIdAndUpdate — it isn't a real field
+    delete updateData.company;
+
+    if (companyChanged) {
+      if (!["Admin", "OfficeAdmin"].includes(req.user.role)) {
+        return sendError(
+          res,
+          "Only Admin or Office Admin can reassign the vendor company",
+          403,
+        );
+      }
+
+      const vendorIds = await resolveCompanyVendorIds(incomingCompany);
+      if (vendorIds.length === 0) {
+        return sendError(
+          res,
+          "This company has no active vendor users to assign",
+          400,
+        );
+      }
+
+      const defaultStatus = await WODynamicStatus.findOne({ isDefault: true });
+      if (!defaultStatus) {
+        return sendError(
+          res,
+          "No default dynamic status set. Please configure one.",
+          400,
+        );
+      }
+
+      await cancelAllReminders(workOrder._id);
+
+      updateData.assignmentType = "company";
+      updateData.assignedCompany = incomingCompany;
+      updateData.vendor = null;
+      updateData.vendorResponses = vendorIds.map((userId) => ({
+        user: userId,
+        response: "pending",
+      }));
+      updateData.vendorResponse = "pending";
+      updateData.dynamicStatus = updateData.dynamicStatus || defaultStatus._id;
+      updateData.declinedDate = null;
+      updateData.vendorSeenAt = null;
+      updateData.reassignedAt = new Date();
+      updateData.reassignedBy = req.user._id;
+
+      const updated = await WorkOrder.findByIdAndUpdate(id, updateData, {
+        new: true,
+        runValidators: true,
+      })
+        .populate("dynamicStatus", "name description")
+        .populate("assignedCompany", "companyName");
+
+      // Fire-and-forget notify — same helper already used at create time
+      notifyVendorAssigned(updated, vendorIds).catch(console.error);
+
+      return sendSuccess(
+        res,
+        "Work order updated and reassigned successfully",
+        {
+          workOrder: updated,
+        },
+      );
+    }
+
+    // ── No company change — behave exactly as before ───────────────────
     const updated = await WorkOrder.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -774,71 +964,235 @@ exports.updateWorkOrder = async (req, res) => {
   }
 };
 
+// Update work order status
+exports.updateWorkOrderStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const workOrder = await WorkOrder.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true, runValidators: true },
+    );
+
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+
+    return sendSuccess(res, "Work order status updated successfully", {
+      workOrder,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to update work order status",
+      500,
+    );
+  }
+};
+
 // Vendor Accept Work Order
 exports.vendorAcceptWorkOrder = async (req, res) => {
-  const { id } = req.params;
+  try {
+    const { id } = req.params;
+    const vendorId = req.user._id;
 
-  const wo = await WorkOrder.findById(id);
-  if (!wo) return sendError(res, "Work order not found", 404);
+    const wo = await WorkOrder.findById(id);
+    if (!wo) return sendError(res, "Work order not found", 404);
 
-  //  MUST be assigned
-  if (!wo.vendor) {
-    return sendError(res, "This work order is not assigned to any vendor", 403);
+    if (wo.assignmentType === "direct") {
+      // ── Legacy single-vendor path (unchanged behavior) ──────────
+      if (!wo.vendor || wo.vendor.toString() !== vendorId.toString()) {
+        return sendError(
+          res,
+          "You are not allowed to accept this work order",
+          403,
+        );
+      }
+      if (wo.vendorResponse !== "pending") {
+        return sendError(res, "Work order already responded", 400);
+      }
+      wo.vendorResponse = "accepted";
+      await wo.save();
+      return sendSuccess(res, "Work order accepted", { workOrder: wo });
+    }
+
+    // ── Company pool path ───────────────────────────────────────────
+    const invited = wo.vendorResponses?.find(
+      (r) => r.user.toString() === vendorId.toString(),
+    );
+    if (!invited) {
+      return sendError(
+        res,
+        "You are not invited to respond to this work order",
+        403,
+      );
+    }
+    if (invited.response !== "pending") {
+      return sendError(
+        res,
+        "You have already responded to this work order",
+        400,
+      );
+    }
+
+    // Atomic claim: only succeeds if nobody has claimed it yet (vendor === null)
+    const claimed = await WorkOrder.findOneAndUpdate(
+      {
+        _id: id,
+        vendor: null,
+        "vendorResponses.user": vendorId,
+        "vendorResponses.response": "pending",
+      },
+      {
+        $set: {
+          vendor: vendorId,
+          vendorResponse: "accepted",
+          "vendorResponses.$.response": "accepted",
+          "vendorResponses.$.respondedAt": new Date(),
+        },
+      },
+      { new: true },
+    );
+
+    if (!claimed) {
+      // Someone else already claimed it in the meantime
+      return sendError(
+        res,
+        "This work order has already been accepted by another team member",
+        409,
+      );
+    }
+
+    // Mark everyone else invited as "superseded" and stop their reminders
+    const otherVendorIds = claimed.vendorResponses
+      .filter(
+        (r) =>
+          r.user.toString() !== vendorId.toString() && r.response === "pending",
+      )
+      .map((r) => r.user);
+
+    if (otherVendorIds.length > 0) {
+      await WorkOrder.updateOne(
+        { _id: id },
+        {
+          $set: {
+            "vendorResponses.$[elem].response": "superseded",
+            "vendorResponses.$[elem].respondedAt": new Date(),
+          },
+        },
+        {
+          arrayFilters: [
+            {
+              "elem.user": { $in: otherVendorIds },
+              "elem.response": "pending",
+            },
+          ],
+        },
+      );
+
+      // Notify the losing vendors so it drops off their pending list
+      const io = getIO();
+      otherVendorIds.forEach((otherId) => {
+        io.to(`user:${otherId.toString()}`).emit("vendor:work-order-claimed", {
+          workOrderId: id,
+        });
+      });
+    }
+
+    return sendSuccess(res, "Work order accepted", { workOrder: claimed });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to accept work order", 500);
   }
-
-  //  MUST belong to logged-in vendor
-  if (wo.vendor.toString() !== req.user._id.toString()) {
-    return sendError(res, "You are not allowed to accept this work order", 403);
-  }
-
-  // MUST be pending
-  if (wo.vendorResponse !== "pending") {
-    return sendError(res, "Work order already responded", 400);
-  }
-
-  wo.vendorResponse = "accepted";
-  await wo.save();
-
-  return sendSuccess(res, "Work order accepted", { workOrder: wo });
 };
 
 // Vendor Decline Work Order
 exports.vendorDeclineWorkOrder = async (req, res) => {
-  const { id } = req.params;
+  try {
+    const { id } = req.params;
+    const vendorId = req.user._id;
 
-  const declinedStatus = await WODynamicStatus.findOne({ name: "Declined" });
-  if (!declinedStatus) return sendError(res, "Declined status missing", 400);
+    const declinedStatus = await WODynamicStatus.findOne({ name: "Declined" });
+    if (!declinedStatus) return sendError(res, "Declined status missing", 400);
 
-  const wo = await WorkOrder.findById(id);
-  if (!wo) return sendError(res, "Work order not found", 404);
+    const wo = await WorkOrder.findById(id);
+    if (!wo) return sendError(res, "Work order not found", 404);
 
-  //  MUST be assigned
-  if (!wo.vendor) {
-    return sendError(res, "This work order is not assigned to any vendor", 403);
-  }
+    if (wo.assignmentType === "direct") {
+      // ── Legacy path (unchanged) ─────────────────────────────────
+      if (!wo.vendor || wo.vendor.toString() !== vendorId.toString()) {
+        return sendError(
+          res,
+          "You are not allowed to decline this work order",
+          403,
+        );
+      }
+      if (wo.vendorResponse !== "pending") {
+        return sendError(res, "Work order already responded", 400);
+      }
+      wo.vendorResponse = "declined";
+      wo.dynamicStatus = declinedStatus._id;
+      wo.declinedDate = new Date();
+      wo.status = "open";
+      await wo.save();
+      return sendSuccess(res, "Work order declined", { workOrder: wo });
+    }
 
-  //  MUST belong to logged-in vendor
-  if (wo.vendor.toString() !== req.user._id.toString()) {
-    return sendError(
-      res,
-      "You are not allowed to decline this work order",
-      403,
+    // ── Company pool path ───────────────────────────────────────────
+    const invited = wo.vendorResponses?.find(
+      (r) => r.user.toString() === vendorId.toString(),
     );
+    if (!invited)
+      return sendError(
+        res,
+        "You are not invited to respond to this work order",
+        403,
+      );
+    if (invited.response !== "pending") {
+      return sendError(
+        res,
+        "You have already responded to this work order",
+        400,
+      );
+    }
+
+    const updated = await WorkOrder.findOneAndUpdate(
+      {
+        _id: id,
+        "vendorResponses.user": vendorId,
+        "vendorResponses.response": "pending",
+      },
+      {
+        $set: {
+          "vendorResponses.$.response": "declined",
+          "vendorResponses.$.respondedAt": new Date(),
+        },
+      },
+      { new: true },
+    );
+
+    // Only escalate to overall "declined" if EVERY invited vendor has declined
+    const allDeclined = updated.vendorResponses.every(
+      (r) => r.response === "declined",
+    );
+    if (allDeclined) {
+      updated.vendorResponse = "declined";
+      updated.dynamicStatus = declinedStatus._id;
+      updated.declinedDate = new Date();
+      await updated.save();
+
+      await notifyInternalUsers({
+        eventType: "WORK_ORDER_ALL_VENDORS_DECLINED",
+        title: "Work Order Declined by All Vendors",
+        message: `No vendor at the assigned company accepted ${updated.workOrderNumber}. Please reassign.`,
+        entityType: "WorkOrder",
+        entityId: updated._id,
+      }).catch(console.error);
+    }
+
+    return sendSuccess(res, "Work order declined", { workOrder: updated });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to decline work order", 500);
   }
-
-  //  MUST be pending
-  if (wo.vendorResponse !== "pending") {
-    return sendError(res, "Work order already responded", 400);
-  }
-
-  wo.vendorResponse = "declined";
-  wo.dynamicStatus = declinedStatus._id;
-  wo.declinedDate = new Date();
-  wo.status = "open";
-
-  await wo.save();
-
-  return sendSuccess(res, "Work order declined", { workOrder: wo });
 };
 
 // Vendor Update Work Order
@@ -1146,6 +1500,14 @@ exports.vendorRequestDueDateExtension = async (req, res) => {
         },
       });
 
+    await notifyInternalUsers({
+      eventType: "DUE_DATE_EXTENSION_REQUESTED",
+      title: "Due Date Extension Requested",
+      message: `Vendor requested a due date extension for ${workOrder.workOrderNumber}. Please review.`,
+      entityType: "WorkOrder",
+      entityId: workOrder._id,
+    }).catch(console.error);
+
     return sendSuccess(res, "Due date extension requested", { workOrder });
   } catch (err) {
     return sendError(res, err.message, 500);
@@ -1218,7 +1580,7 @@ exports.reviewDueDateExtension = async (req, res) => {
       reviewRemarks: workOrder.dueDateExtension.reviewRemarks,
     });
 
-    // Clear current extension (it's now in history)
+    // Clear current extension
     workOrder.dueDateExtension = undefined;
 
     workOrder.markModified("dueDate");
@@ -1226,9 +1588,27 @@ exports.reviewDueDateExtension = async (req, res) => {
     workOrder.markModified("dueDateExtensionHistory");
     await workOrder.save();
 
+    if (workOrder.vendor) {
+      await createNotification({
+        user: workOrder.vendor,
+        role: "Vendor",
+        type: "DUE_DATE_EXTENSION_REVIEWED",
+        title:
+          action === "approved"
+            ? "Due Date Extension Approved"
+            : "Due Date Extension Rejected",
+        message:
+          action === "approved"
+            ? `Your extension request for ${workOrder.workOrderNumber} was approved. New due date: ${new Date(workOrder.dueDate).toLocaleDateString()}.`
+            : `Your extension request for ${workOrder.workOrderNumber} was rejected.${remarks ? ` Reason: ${remarks}` : ""}`,
+        entityType: "WorkOrder",
+        entityId: workOrder._id,
+      }).catch(console.error);
+    }
+
     // Notify vendor
     getIO()
-      .to(`vendor:${workOrder.vendor}`)
+      .to(`user:${workOrder.vendor}`)
       .emit("work-order:due-date-extension-reviewed", {
         workOrderId: workOrder._id,
         status: action,
@@ -1792,10 +2172,27 @@ exports.getVendorNewWorkOrderCount = async (req, res) => {
     const vendorId = req.user._id;
 
     const count = await WorkOrder.countDocuments({
-      vendor: vendorId,
-      vendorResponse: "pending",
+      // vendor: vendorId,
+      // vendorResponse: "pending",
       status: "open",
-      vendorSeenAt: null,
+      $or: [
+        {
+          vendor: vendorId,
+          vendorResponse: "pending",
+          vendorSeenAt: null,
+        },
+
+        {
+          vendorResponses: {
+            $elemMatch: {
+              user: vendorId,
+              response: "pending",
+              seenAt: null,
+            },
+          },
+        },
+      ],
+      // vendorSeenAt: null,
     });
 
     return sendSuccess(res, "New work order count fetched", { count });
@@ -1989,6 +2386,100 @@ exports.bulkCloseWorkOrders = async (req, res) => {
       success: false,
       message: "Failed to close work orders",
     });
+  }
+};
+
+// ── Reassign Work Order (Admin / OfficeAdmin only) ──────────────────────
+exports.reassignWorkOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { targetType, assignTo } = req.body; // "vendor" | "company"
+
+    if (!["Admin", "OfficeAdmin"].includes(req.user.role)) {
+      return sendError(
+        res,
+        "Only Admin or Office Admin can reassign work orders",
+        403,
+      );
+    }
+    if (!["vendor", "company"].includes(targetType)) {
+      return sendError(res, "targetType must be 'vendor' or 'company'", 400);
+    }
+    if (!assignTo) return sendError(res, "assignTo is required", 400);
+
+    const workOrder = await WorkOrder.findById(id);
+    if (!workOrder) return sendError(res, "Work order not found", 404);
+    if (workOrder.status === "closed") {
+      return sendError(res, "Cannot reassign a closed work order", 400);
+    }
+
+    const defaultStatus = await WODynamicStatus.findOne({ isDefault: true });
+    if (!defaultStatus) {
+      return sendError(
+        res,
+        "No default dynamic status set. Please configure one.",
+        400,
+      );
+    }
+
+    await cancelAllReminders(workOrder._id);
+
+    let vendorIdsToNotify = [];
+
+    if (targetType === "vendor") {
+      const vendorUser = await User.findOne({
+        _id: assignTo,
+        role: "Vendor",
+        isActive: true,
+      });
+      if (!vendorUser)
+        return sendError(res, "Vendor not found or inactive", 400);
+
+      workOrder.assignmentType = "direct";
+      workOrder.assignedCompany = undefined;
+      workOrder.vendor = vendorUser._id;
+      workOrder.vendorResponses = [];
+      vendorIdsToNotify = [vendorUser._id];
+    } else {
+      const vendorIds = await resolveCompanyVendorIds(assignTo);
+      if (vendorIds.length === 0) {
+        return sendError(
+          res,
+          "This company has no active vendor users to assign",
+          400,
+        );
+      }
+
+      workOrder.assignmentType = "company";
+      workOrder.assignedCompany = assignTo;
+      workOrder.vendor = null;
+      workOrder.vendorResponses = vendorIds.map((userId) => ({
+        user: userId,
+        response: "pending",
+      }));
+      vendorIdsToNotify = vendorIds;
+    }
+
+    workOrder.vendorResponse = "pending";
+    workOrder.status = "open";
+    workOrder.dynamicStatus = defaultStatus._id;
+    workOrder.declinedDate = null;
+    workOrder.vendorSeenAt = null;
+    workOrder.reassignedAt = new Date();
+    workOrder.reassignedBy = req.user._id;
+
+    await workOrder.save();
+    await notifyVendorAssigned(workOrder, vendorIdsToNotify);
+
+    const populated = await WorkOrder.findById(id)
+      .populate("vendor", "companyName technicianName")
+      .populate("assignedCompany", "companyName");
+
+    return sendSuccess(res, "Work order reassigned successfully", {
+      workOrder: populated,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to reassign work order", 500);
   }
 };
 
@@ -2699,6 +3190,7 @@ exports.getServiceAgreements = async (req, res) => {
     const {
       dueDate,
       category,
+      company,
       vendor,
       building,
       portfolio,
@@ -2718,6 +3210,13 @@ exports.getServiceAgreements = async (req, res) => {
     //  Category
     if (category && category !== "All") {
       filter.category = category; // expecting categoryId
+    }
+
+    if (company && company !== "All") {
+      const companyScope = await buildCompanyScopeFilter(company);
+      filter.$and = (filter.$and || []).concat(companyScope);
+    } else if (vendor && vendor !== "All") {
+      filter.vendor = vendor;
     }
 
     //  Vendor
@@ -2783,7 +3282,12 @@ exports.getServiceAgreements = async (req, res) => {
           select: "portfolioAbbreviation formData.name",
         },
       })
-      .populate("vendor", "companyName technicianName status")
+      .populate({
+        path: "vendor",
+        select: "technicianName email company",
+        populate: { path: "company", select: "companyName" },
+      })
+      .populate("assignedCompany", "companyName")
       .populate("category", "name")
       .populate("createdBy", "preferredName email")
       .sort({ createdAt: -1 })
@@ -2824,7 +3328,12 @@ exports.getServiceAgreementById = async (req, res) => {
           select: "portfolioAbbreviation formData.name",
         },
       })
-      .populate("vendor", "companyName technicianName email")
+      .populate({
+        path: "vendor",
+        select: "technicianName email company",
+        populate: { path: "company", select: "companyName" },
+      })
+      .populate("assignedCompany", "companyName")
       .populate("createdBy", "preferredName email");
 
     if (!serviceAgreement) {
@@ -2911,7 +3420,12 @@ exports.getServiceAgreementsByBuilding = async (req, res) => {
             select: "portfolioAbbreviation formData.name",
           },
         })
-        .populate("vendor", "companyName technicianName email")
+        .populate({
+          path: "vendor",
+          select: "technicianName email company",
+          populate: { path: "company", select: "companyName" },
+        })
+        .populate("assignedCompany", "companyName")
         .populate("category", "name")
         .populate("createdBy", "preferredName email")
         .sort({ createdAt: -1 })
@@ -2935,6 +3449,39 @@ exports.getServiceAgreementsByBuilding = async (req, res) => {
   }
 };
 
+// Get Service Agreement Summary for Reassign
+exports.getServiceAgreementReassignSummary = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const sa = await ServiceAgreement.findById(id)
+      .select("serviceAgreementNumber category building status")
+      .populate({
+        path: "building",
+        select: "buildingAbbreviation formData.address",
+      })
+      .lean();
+
+    if (!sa) return sendError(res, "Service agreement not found", 404);
+
+    return sendSuccess(res, "Service agreement summary fetched", {
+      serviceAgreement: {
+        _id: sa._id,
+        serviceAgreementNumber: sa.serviceAgreementNumber,
+        category: sa.category,
+        address: sa.building?.formData?.address || "—",
+        status: sa.status,
+      },
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch service agreement summary",
+      500,
+    );
+  }
+};
+
 // Update Service Agreement
 exports.updateServiceAgreement = async (req, res) => {
   try {
@@ -2945,7 +3492,6 @@ exports.updateServiceAgreement = async (req, res) => {
       updateData.fileUrl = null;
     }
 
-    // Handle file replacement (if uploaded)
     if (req.file) {
       updateData.fileUrl = `/uploads/Repair/serviceAgreements/${req.file.filename}`;
     }
@@ -2964,6 +3510,71 @@ exports.updateServiceAgreement = async (req, res) => {
       updateData.fileUrl = await uploadFile(
         req.file,
         "uploads/Repair/serviceAgreements",
+      );
+    }
+
+    const incomingCompany = updateData.company;
+    const currentCompany = serviceAgreement.assignedCompany?.toString();
+    const companyChanged =
+      incomingCompany && incomingCompany !== currentCompany;
+
+    delete updateData.company;
+    delete updateData.vendor;
+
+    if (companyChanged) {
+      if (!["Admin", "OfficeAdmin"].includes(req.user.role)) {
+        return sendError(
+          res,
+          "Only Admin or Office Admin can reassign the vendor company",
+          403,
+        );
+      }
+
+      const vendorIds = await resolveCompanyVendorIds(incomingCompany);
+      if (vendorIds.length === 0) {
+        return sendError(
+          res,
+          "This company has no active vendor users to assign",
+          400,
+        );
+      }
+
+      updateData.assignmentType = "company";
+      updateData.assignedCompany = incomingCompany;
+      updateData.vendor = null;
+      updateData.vendorResponses = vendorIds.map((userId) => ({
+        user: userId,
+        response: "pending",
+      }));
+      updateData.vendorResponse = "pending";
+      updateData.declinedDate = null;
+      updateData.vendorSeenAt = null;
+      updateData.reassignedAt = new Date();
+      updateData.reassignedBy = req.user._id;
+
+      const updated = await ServiceAgreement.findByIdAndUpdate(id, updateData, {
+        new: true,
+        runValidators: true,
+      }).populate("assignedCompany", "companyName");
+
+      await Promise.all(
+        vendorIds.map((vendorId) =>
+          createNotification({
+            user: vendorId,
+            role: "Vendor",
+            type: "SERVICE_AGREEMENT_ASSIGNED",
+            title: "Service Agreement Assigned to You",
+            message: `Service agreement ${updated.serviceAgreementNumber} has been assigned. Please Accept or Decline.`,
+            entityType: "ServiceAgreement",
+            entityId: updated._id,
+          }),
+        ),
+      ).catch(console.error);
+
+      return sendSuccess(
+        res,
+        "Service agreement updated and reassigned successfully",
+        { serviceAgreement: updated },
       );
     }
 
@@ -3144,27 +3755,98 @@ exports.reopenServiceAgreement = async (req, res) => {
   }
 };
 
-// Update work order status
-exports.updateWorkOrderStatus = async (req, res) => {
+// ── Reassign Service Agreement (Admin / OfficeAdmin only) ───────────────
+exports.reassignServiceAgreement = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { targetType, assignTo } = req.body;
 
-    const workOrder = await WorkOrder.findByIdAndUpdate(
-      id,
-      { status },
-      { new: true, runValidators: true },
+    if (!["Admin", "OfficeAdmin"].includes(req.user.role)) {
+      return sendError(
+        res,
+        "Only Admin or Office Admin can reassign service agreements",
+        403,
+      );
+    }
+    if (!["vendor", "company"].includes(targetType)) {
+      return sendError(res, "targetType must be 'vendor' or 'company'", 400);
+    }
+    if (!assignTo) return sendError(res, "assignTo is required", 400);
+
+    const sa = await ServiceAgreement.findById(id);
+    if (!sa) return sendError(res, "Service agreement not found", 404);
+    if (sa.status === "closed") {
+      return sendError(res, "Cannot reassign a closed service agreement", 400);
+    }
+
+    let vendorIdsToNotify = [];
+
+    if (targetType === "vendor") {
+      const vendorUser = await User.findOne({
+        _id: assignTo,
+        role: "Vendor",
+        isActive: true,
+      });
+      if (!vendorUser)
+        return sendError(res, "Vendor not found or inactive", 400);
+
+      sa.assignmentType = "direct";
+      sa.assignedCompany = undefined;
+      sa.vendor = vendorUser._id;
+      sa.vendorResponses = [];
+      vendorIdsToNotify = [vendorUser._id];
+    } else {
+      const vendorIds = await resolveCompanyVendorIds(assignTo);
+      if (vendorIds.length === 0) {
+        return sendError(
+          res,
+          "This company has no active vendor users to assign",
+          400,
+        );
+      }
+      sa.assignmentType = "company";
+      sa.assignedCompany = assignTo;
+      sa.vendor = null;
+      sa.vendorResponses = vendorIds.map((userId) => ({
+        user: userId,
+        response: "pending",
+      }));
+      vendorIdsToNotify = vendorIds;
+    }
+
+    sa.vendorResponse = "pending";
+    sa.declinedDate = null;
+    sa.vendorSeenAt = null;
+    sa.reassignedAt = new Date();
+    sa.reassignedBy = req.user._id;
+
+    await sa.save();
+
+    await Promise.all(
+      vendorIdsToNotify.map((vendorId) =>
+        createNotification({
+          user: vendorId,
+          role: "Vendor",
+          type: "SERVICE_AGREEMENT_ASSIGNED",
+          title: "Service Agreement Reassigned to You",
+          message: `Service agreement ${sa.serviceAgreementNumber} has been reassigned. Please Accept or Decline.`,
+          entityType: "ServiceAgreement",
+          entityId: sa._id,
+        }),
+      ),
     );
 
-    if (!workOrder) return sendError(res, "Work order not found", 404);
+    const populated = await ServiceAgreement.findById(id)
+      .populate("vendor", "companyName technicianName")
+      .populate("assignedCompany", "companyName");
 
-    return sendSuccess(res, "Work order status updated successfully", {
-      workOrder,
+    return sendSuccess(res, "Service agreement reassigned successfully", {
+      serviceAgreement: populated,
     });
   } catch (err) {
     return sendError(
       res,
-      err.message || "Failed to update work order status",
+      err.message || "Failed to reassign service agreement",
       500,
     );
   }

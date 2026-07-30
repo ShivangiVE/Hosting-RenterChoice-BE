@@ -4,6 +4,13 @@ const VendorType = require("../../models/ContactCards/VendorType");
 const User = require("../../models/User");
 const { generateAccountNumber } = require("../../utils/generateAccountNumber");
 const { sendSuccess, sendError } = require("../../utils/response");
+const resolveCompanyVendorIds = require("../../utils/resolveCompanyVendorIds");
+const {
+  buildWorkOrderFilter,
+  buildServiceAgreementFilter,
+} = require("../workOrder/workOrderQueryBuilder");
+const WorkOrder = require("../../models/WorkOrder");
+const ServiceAgreement = require("../../models/ServiceAgreement");
 
 // Create Company
 exports.createCompany = async (req, res) => {
@@ -101,6 +108,24 @@ exports.listCompanies = async (req, res) => {
   }
 };
 
+// For Filters and Dropdowns
+exports.getCompaniesList = async (req, res) => {
+  try {
+    const companies = await Company.find({
+      isActive: true,
+    })
+      .select("companyName")
+      .sort({ companyName: 1 })
+      .lean();
+
+    return sendSuccess(res, "Companies fetched", {
+      companies,
+    });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
 // Get single company details
 exports.getCompanyDetails = async (req, res) => {
   try {
@@ -134,6 +159,146 @@ exports.getCompanyDetails = async (req, res) => {
     return sendSuccess(res, "Company fetched", {
       company,
       vendors,
+    });
+  } catch (err) {
+    return sendError(res, err.message, 500);
+  }
+};
+
+exports.searchCompanies = async (req, res) => {
+  try {
+    const { q = "", limit = 20 } = req.query;
+
+    const query = { isActive: true };
+
+    if (q.trim()) {
+      // Uses the companyNameNormalized index for fast prefix/substring search
+      query.companyName = { $regex: q.trim(), $options: "i" };
+    }
+
+    const companies = await Company.find(query)
+      .select("companyName companyAccountNumber vendorType")
+      .populate("vendorType", "name")
+      .sort({ companyName: 1 })
+      .limit(Math.min(Number(limit) || 20, 50))
+      .lean();
+
+    return sendSuccess(res, "Companies fetched", { companies });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to search companies", 500);
+  }
+};
+
+// Get Work Orders by Company
+exports.getCompanyWorkOrders = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const vendorIds = await resolveCompanyVendorIds(id);
+    if (vendorIds.length === 0) {
+      return sendSuccess(res, "Work orders fetched", {
+        workOrders: [],
+        pagination: { current: page, pages: 0, total: 0 },
+      });
+    }
+
+    const filter = await buildWorkOrderFilter(req.query, {
+      vendor: { $in: vendorIds },
+    });
+
+    const [workOrders, total] = await Promise.all([
+      WorkOrder.find(filter)
+        .populate("building", "buildingAbbreviation formData.address")
+        .populate("vendor", "companyName technicianName")
+        .populate("category", "name")
+        .populate("dynamicStatus", "name description isDefault")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      WorkOrder.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Work orders fetched", {
+      workOrders,
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch company work orders",
+      500,
+    );
+  }
+};
+
+// Get Service Agreements by Company
+exports.getCompanyServiceAgreements = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const vendorIds = await resolveCompanyVendorIds(id);
+    if (vendorIds.length === 0) {
+      return sendSuccess(res, "Service agreements fetched", {
+        serviceAgreements: [],
+        pagination: { current: page, pages: 0, total: 0 },
+      });
+    }
+
+    const filter = await buildServiceAgreementFilter(req.query, {
+      vendor: { $in: vendorIds },
+    });
+
+    const [serviceAgreements, total] = await Promise.all([
+      ServiceAgreement.find(filter)
+        .populate("building", "buildingAbbreviation formData.address")
+        .populate("vendor", "companyName technicianName status")
+        .populate("category", "name")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      ServiceAgreement.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Service agreements fetched", {
+      serviceAgreements,
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch company service agreements",
+      500,
+    );
+  }
+};
+
+exports.getCompanyOverview = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const vendorIds = await resolveCompanyVendorIds(id);
+    const vendorFilter = { vendor: { $in: vendorIds } };
+
+    const [openWorkOrders, closedWorkOrders, activeServiceAgreements] =
+      await Promise.all([
+        WorkOrder.countDocuments({ ...vendorFilter, status: "open" }),
+        WorkOrder.countDocuments({ ...vendorFilter, status: "closed" }),
+        ServiceAgreement.countDocuments({
+          ...vendorFilter,
+          status: { $ne: "closed" },
+        }),
+      ]);
+
+    return sendSuccess(res, "Company overview fetched", {
+      vendorCount: vendorIds.length,
+      openWorkOrders,
+      closedWorkOrders,
+      activeServiceAgreements,
     });
   } catch (err) {
     return sendError(res, err.message, 500);
