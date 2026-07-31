@@ -46,6 +46,10 @@ const getNextSequence = async (sequenceName) => {
   return counter.sequence_value;
 };
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Peek next sequence number without incrementing
 exports.getNextCounterValue = async (req, res) => {
   try {
@@ -810,7 +814,9 @@ exports.getWorkOrderReassignSummary = async (req, res) => {
     const { id } = req.params;
 
     const workOrder = await WorkOrder.findById(id)
-      .select("workOrderNumber workOrderType category building status")
+      .select(
+        "workOrderNumber workOrderType category building status description",
+      )
       .populate({
         path: "building",
         select: "buildingAbbreviation formData.address",
@@ -834,6 +840,7 @@ exports.getWorkOrderReassignSummary = async (req, res) => {
         workOrderNumber: workOrder.workOrderNumber,
         workOrderType: workOrder.workOrderType,
         category: categoryName,
+        description: workOrder.description || "—",
         address: workOrder.building?.formData?.address || "—",
         status: workOrder.status,
       },
@@ -1643,7 +1650,10 @@ exports.markWorkOrderCompleted = async (req, res) => {
     const { note, keyReturnOption, invoiceOption, invoiceDescription } =
       req.body;
 
-    const workOrder = await WorkOrder.findById(id);
+    const workOrder = await WorkOrder.findById(id).populate(
+      "dynamicStatus",
+      "name",
+    );
     if (!workOrder) return sendError(res, "Work order not found", 404);
 
     if (req.user.role === "Vendor") {
@@ -1654,6 +1664,17 @@ exports.markWorkOrderCompleted = async (req, res) => {
         return sendError(res, "Not authorized", 403);
       }
       assertVendorAccepted(workOrder);
+    }
+
+    if (workOrder.dynamicStatus?.name === "Completed") {
+      return sendError(
+        res,
+        "This work order has already been marked as completed",
+        409,
+      );
+    }
+    if (workOrder.status === "closed") {
+      return sendError(res, "This work order is already closed", 409);
     }
 
     if (invoiceOption === "upload_now") {
@@ -3131,18 +3152,47 @@ exports.createServiceAgreement = async (req, res) => {
       initialDueDate,
       recurringSchedule,
       vendor,
+      company,
     } = req.body;
+
+    if (!vendor && !company) {
+      return sendError(
+        res,
+        "Either a vendor or a company must be assigned",
+        400,
+      );
+    }
 
     let fileUrl = null;
     if (req.file) {
       fileUrl = await uploadFile(req.file, "uploads/Repair/serviceAgreements");
     }
 
-    // Generate service agreement number
     const sequence = await getNextSequence("serviceAgreement");
-    const serviceAgreementNumber = `SA #${sequence
-      .toString()
-      .padStart(4, "0")}`;
+    const serviceAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
+
+    let assignmentType = "direct";
+    let vendorResponses = [];
+    let resolvedVendor = vendor || null;
+
+    if (company && !vendor) {
+      assignmentType = "company";
+      const vendorIds = await resolveCompanyVendorIds(company);
+
+      if (vendorIds.length === 0) {
+        return sendError(
+          res,
+          "This company has no active vendor users to assign",
+          400,
+        );
+      }
+
+      vendorResponses = vendorIds.map((userId) => ({
+        user: userId,
+        response: "pending",
+      }));
+      resolvedVendor = null;
+    }
 
     const serviceAgreement = await ServiceAgreement.create({
       serviceAgreementNumber,
@@ -3151,17 +3201,28 @@ exports.createServiceAgreement = async (req, res) => {
       description,
       initialDueDate,
       recurringSchedule,
-      vendor: vendor || null,
+      assignmentType,
+      assignedCompany: assignmentType === "company" ? company : undefined,
+      vendor: resolvedVendor,
+      vendorResponses,
       fileUrl,
       createdBy: req.user._id,
     });
 
-    return sendSuccess(
+    sendSuccess(
       res,
       "Service agreement created successfully",
       { serviceAgreement },
       201,
     );
+
+    // ── Notify AFTER response ────────────────────────────────────────
+    if (assignmentType === "direct" && vendor) {
+      await notifyVendorAssignedSA(serviceAgreement, [vendor]);
+    } else if (assignmentType === "company") {
+      const vendorIds = vendorResponses.map((v) => v.user);
+      await notifyVendorAssignedSA(serviceAgreement, vendorIds);
+    }
   } catch (err) {
     return sendError(
       res,
@@ -3170,6 +3231,31 @@ exports.createServiceAgreement = async (req, res) => {
     );
   }
 };
+
+// Shared fan-out notifier for Service Agreements (mirrors notifyVendorAssigned for WorkOrder)
+async function notifyVendorAssignedSA(serviceAgreement, vendorIds) {
+  await Promise.all(
+    vendorIds.map((vendorId) =>
+      createNotification({
+        user: vendorId,
+        role: "Vendor",
+        type: "SERVICE_AGREEMENT_ASSIGNED",
+        title: "New Service Agreement Available",
+        message: `A new service agreement (${serviceAgreement.serviceAgreementNumber}) is available. Please Accept or Decline.`,
+        entityType: "ServiceAgreement",
+        entityId: serviceAgreement._id,
+      }),
+    ),
+  );
+
+  const io = getIO();
+  vendorIds.forEach((vendorId) => {
+    io.to(`user:${vendorId.toString()}`).emit("vendor:new-service-agreement", {
+      serviceAgreementId: serviceAgreement._id,
+      serviceAgreementNumber: serviceAgreement.serviceAgreementNumber,
+    });
+  });
+}
 
 // Get all service agreements
 exports.getServiceAgreements = async (req, res) => {
@@ -3322,7 +3408,7 @@ exports.getServiceAgreementById = async (req, res) => {
       .populate({
         path: "building",
         select:
-          "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio",
+          "buildingAbbreviation formData.city formData.address formData.fullAddress portfolio status",
         populate: {
           path: "portfolio",
           select: "portfolioAbbreviation formData.name",
@@ -3338,6 +3424,22 @@ exports.getServiceAgreementById = async (req, res) => {
 
     if (!serviceAgreement) {
       return sendError(res, "Service agreement not found", 404);
+    }
+
+    if (req.user.role === "Vendor") {
+      const vendorId = req.user._id.toString();
+      const isDirectVendor =
+        serviceAgreement.vendor?._id?.toString() === vendorId;
+      const isInvitedVendor = serviceAgreement.vendorResponses?.some(
+        (r) => r.user.toString() === vendorId,
+      );
+      if (!isDirectVendor && !isInvitedVendor) {
+        return sendError(
+          res,
+          "You do not have access to this service agreement",
+          403,
+        );
+      }
     }
 
     let categoryName = null;
@@ -3455,7 +3557,7 @@ exports.getServiceAgreementReassignSummary = async (req, res) => {
     const { id } = req.params;
 
     const sa = await ServiceAgreement.findById(id)
-      .select("serviceAgreementNumber category building status")
+      .select("serviceAgreementNumber category building status description")
       .populate({
         path: "building",
         select: "buildingAbbreviation formData.address",
@@ -3469,6 +3571,7 @@ exports.getServiceAgreementReassignSummary = async (req, res) => {
         _id: sa._id,
         serviceAgreementNumber: sa.serviceAgreementNumber,
         category: sa.category,
+        description: sa.description || "—",
         address: sa.building?.formData?.address || "—",
         status: sa.status,
       },
@@ -3481,6 +3584,393 @@ exports.getServiceAgreementReassignSummary = async (req, res) => {
     );
   }
 };
+
+// Vendor Accept Service Agreement
+exports.vendorAcceptServiceAgreement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const vendorId = req.user._id;
+
+    const sa = await ServiceAgreement.findById(id);
+    if (!sa) return sendError(res, "Service agreement not found", 404);
+
+    if (sa.assignmentType === "direct") {
+      if (!sa.vendor || sa.vendor.toString() !== vendorId.toString()) {
+        return sendError(
+          res,
+          "You are not allowed to accept this service agreement",
+          403,
+        );
+      }
+      if (sa.vendorResponse !== "pending") {
+        return sendError(res, "Service agreement already responded", 400);
+      }
+      sa.vendorResponse = "accepted";
+      await sa.save();
+      return sendSuccess(res, "Service agreement accepted", {
+        serviceAgreement: sa,
+      });
+    }
+
+    const invited = sa.vendorResponses?.find(
+      (r) => r.user.toString() === vendorId.toString(),
+    );
+    if (!invited) {
+      return sendError(
+        res,
+        "You are not invited to respond to this service agreement",
+        403,
+      );
+    }
+    if (invited.response !== "pending") {
+      return sendError(
+        res,
+        "You have already responded to this service agreement",
+        400,
+      );
+    }
+
+    const claimed = await ServiceAgreement.findOneAndUpdate(
+      {
+        _id: id,
+        vendor: null,
+        "vendorResponses.user": vendorId,
+        "vendorResponses.response": "pending",
+      },
+      {
+        $set: {
+          vendor: vendorId,
+          vendorResponse: "accepted",
+          "vendorResponses.$.response": "accepted",
+          "vendorResponses.$.respondedAt": new Date(),
+        },
+      },
+      { new: true },
+    );
+
+    if (!claimed) {
+      return sendError(
+        res,
+        "This service agreement has already been accepted by another team member",
+        409,
+      );
+    }
+
+    const otherVendorIds = claimed.vendorResponses
+      .filter(
+        (r) =>
+          r.user.toString() !== vendorId.toString() && r.response === "pending",
+      )
+      .map((r) => r.user);
+
+    if (otherVendorIds.length > 0) {
+      await ServiceAgreement.updateOne(
+        { _id: id },
+        {
+          $set: {
+            "vendorResponses.$[elem].response": "superseded",
+            "vendorResponses.$[elem].respondedAt": new Date(),
+          },
+        },
+        {
+          arrayFilters: [
+            {
+              "elem.user": { $in: otherVendorIds },
+              "elem.response": "pending",
+            },
+          ],
+        },
+      );
+
+      const io = getIO();
+      otherVendorIds.forEach((otherId) => {
+        io.to(`user:${otherId.toString()}`).emit(
+          "vendor:service-agreement-claimed",
+          { serviceAgreementId: id },
+        );
+      });
+    }
+
+    return sendSuccess(res, "Service agreement accepted", {
+      serviceAgreement: claimed,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to accept service agreement",
+      500,
+    );
+  }
+};
+
+// Vendor Decline Service Agreement
+exports.vendorDeclineServiceAgreement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const vendorId = req.user._id;
+
+    const sa = await ServiceAgreement.findById(id);
+    if (!sa) return sendError(res, "Service agreement not found", 404);
+
+    if (sa.assignmentType === "direct") {
+      if (!sa.vendor || sa.vendor.toString() !== vendorId.toString()) {
+        return sendError(
+          res,
+          "You are not allowed to decline this service agreement",
+          403,
+        );
+      }
+      if (sa.vendorResponse !== "pending") {
+        return sendError(res, "Service agreement already responded", 400);
+      }
+      sa.vendorResponse = "declined";
+      sa.declinedDate = new Date();
+      await sa.save();
+      return sendSuccess(res, "Service agreement declined", {
+        serviceAgreement: sa,
+      });
+    }
+
+    const invited = sa.vendorResponses?.find(
+      (r) => r.user.toString() === vendorId.toString(),
+    );
+    if (!invited)
+      return sendError(
+        res,
+        "You are not invited to respond to this service agreement",
+        403,
+      );
+    if (invited.response !== "pending") {
+      return sendError(
+        res,
+        "You have already responded to this service agreement",
+        400,
+      );
+    }
+
+    const updated = await ServiceAgreement.findOneAndUpdate(
+      {
+        _id: id,
+        "vendorResponses.user": vendorId,
+        "vendorResponses.response": "pending",
+      },
+      {
+        $set: {
+          "vendorResponses.$.response": "declined",
+          "vendorResponses.$.respondedAt": new Date(),
+        },
+      },
+      { new: true },
+    );
+
+    const allDeclined = updated.vendorResponses.every(
+      (r) => r.response === "declined",
+    );
+    if (allDeclined) {
+      updated.vendorResponse = "declined";
+      updated.declinedDate = new Date();
+      await updated.save();
+
+      await notifyInternalUsers({
+        eventType: "SERVICE_AGREEMENT_ALL_VENDORS_DECLINED",
+        title: "Service Agreement Declined by All Vendors",
+        message: `No vendor at the assigned company accepted ${updated.serviceAgreementNumber}. Please reassign.`,
+        entityType: "ServiceAgreement",
+        entityId: updated._id,
+      }).catch(console.error);
+    }
+
+    return sendSuccess(res, "Service agreement declined", {
+      serviceAgreement: updated,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to decline service agreement",
+      500,
+    );
+  }
+};
+
+// Get Vendor Assigned Service Agreements (mirrors getVendorWorkOrders, no dynamicStatus/keyReturn)
+exports.getVendorServiceAgreements = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const {
+      tab,
+      category,
+      search,
+      sortBy,
+      sortOrder = "asc",
+      dueDate,
+      completedDate,
+      declinedStartDate,
+      declinedEndDate,
+      dynamicStatus,
+    } = req.query;
+
+    if (dynamicStatus && dynamicStatus !== "All" && dynamicStatus !== "") {
+      return sendSuccess(res, "Vendor service agreements fetched", {
+        serviceAgreements: [],
+        pagination: { current: 1, pages: 0, total: 0 },
+      });
+    }
+
+    let filter = {
+      $or: [
+        { vendor: vendorId },
+        {
+          "vendorResponses.user": vendorId,
+          "vendorResponses.response": "pending",
+        },
+      ],
+    };
+
+    if (req.query.vendorResponse === "pending") {
+      filter.vendorResponse = "pending";
+      filter.status = "open";
+    }
+
+    if (!req.query.vendorResponse) {
+      if (tab === "Pending") {
+        filter.status = "open";
+        filter.vendorResponse = "accepted";
+      } else if (tab === "Completed") {
+        filter.status = "closed";
+      } else if (tab === "Declined") {
+        filter.vendorResponse = "declined";
+      }
+    }
+
+    if (category && category !== "All") {
+      let categoryName = null;
+
+      if (category.startsWith("sa:")) {
+        categoryName = category.slice(3);
+      } else {
+        const catDoc = await Category.findById(category).select("name").lean();
+        categoryName = catDoc ? catDoc.name : null;
+      }
+
+      filter.category = categoryName
+        ? { $regex: `^${escapeRegex(categoryName)}$`, $options: "i" }
+        : "__no_match__";
+    }
+
+    if (dueDate) {
+      const start = new Date(dueDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(dueDate);
+      end.setHours(23, 59, 59, 999);
+      filter.initialDueDate = { $gte: start, $lte: end };
+    }
+
+    // Completed Date filter → ServiceAgreement.closedAt ──
+    if (completedDate) {
+      const start = new Date(completedDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(completedDate);
+      end.setHours(23, 59, 59, 999);
+      filter.closedAt = { $gte: start, $lte: end };
+    }
+
+    //  Declined Date range filter → ServiceAgreement.declinedDate ──
+    if (declinedStartDate || declinedEndDate) {
+      filter.declinedDate = {};
+      if (declinedStartDate) {
+        filter.declinedDate.$gte = new Date(declinedStartDate);
+      }
+      if (declinedEndDate) {
+        const end = new Date(declinedEndDate);
+        end.setHours(23, 59, 59, 999);
+        filter.declinedDate.$lte = end;
+      }
+    }
+
+    if (search && search.trim() !== "") {
+      const regex = new RegExp(search, "i");
+      const buildingIds = await Building.find({
+        $or: [
+          { "formData.address": regex },
+          { "formData.fullAddress": regex },
+          { buildingAbbreviation: regex },
+        ],
+      }).distinct("_id");
+      if (buildingIds.length === 0) {
+        return sendSuccess(res, "Vendor service agreements fetched", {
+          serviceAgreements: [],
+          pagination: { current: 1, pages: 0, total: 0 },
+        });
+      }
+      filter.building = { $in: buildingIds };
+    }
+
+    const sortQuery = sortBy
+      ? { [sortBy]: sortOrder === "asc" ? 1 : -1 }
+      : { createdAt: -1 };
+
+    const serviceAgreements = await ServiceAgreement.find(filter)
+      .populate(
+        "building",
+        "formData.address formData.fullAddress formData.city buildingAbbreviation status",
+      )
+      .sort(sortQuery)
+      .skip(skip)
+      .limit(limit);
+
+    const total = await ServiceAgreement.countDocuments(filter);
+
+    if (req.query.vendorResponse === "pending") {
+      await ServiceAgreement.updateMany(
+        {
+          "vendorResponses.user": vendorId,
+          "vendorResponses.response": "pending",
+          "vendorResponses.seenAt": null,
+        },
+        { $set: { "vendorResponses.$[elem].seenAt": new Date() } },
+        {
+          arrayFilters: [{ "elem.user": vendorId, "elem.response": "pending" }],
+        },
+      );
+    }
+
+    return sendSuccess(res, "Vendor service agreements fetched", {
+      serviceAgreements,
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch vendor service agreements",
+      500,
+    );
+  }
+};
+
+// Count new Service Agreements assigned to vendor
+exports.getVendorNewServiceAgreementCount = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+    const count = await ServiceAgreement.countDocuments({
+      status: "open",
+      $or: [
+        { vendor: vendorId, vendorResponse: "pending", vendorSeenAt: null },
+        {
+          vendorResponses: {
+            $elemMatch: { user: vendorId, response: "pending", seenAt: null },
+          },
+        },
+      ],
+    });
+    return sendSuccess(res, "New service agreement count fetched", { count });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch count", 500);
+  }
+};
+
 
 // Update Service Agreement
 exports.updateServiceAgreement = async (req, res) => {

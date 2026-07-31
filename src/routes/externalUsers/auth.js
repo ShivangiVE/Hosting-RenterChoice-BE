@@ -25,6 +25,18 @@ router.post("/register", registerValidator, validate, register);
 router.get("/verify-account/:accountNumber", verifyCompanyAccount);
 router.post("/login", loginValidator, validate, login);
 
+// Mobile-specific login alias ──
+router.post(
+  "/login/mobile",
+  (req, res, next) => {
+    req.body.platform = "mobile";
+    next();
+  },
+  loginValidator,
+  validate,
+  login,
+);
+
 // Forgot / Reset
 router.post("/forgot", forgotPassword);
 router.post("/verify-otp", verifyOtp);

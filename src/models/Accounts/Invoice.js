@@ -5,7 +5,18 @@ const invoiceSchema = new mongoose.Schema(
     workOrder: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "WorkOrder",
-      required: true,
+      validate: {
+        validator: function (value) {
+          return Boolean(value) || Boolean(this.serviceAgreement);
+        },
+        message:
+          "Invoice must belong to either a work order or a service agreement",
+      },
+    },
+    serviceAgreement: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceAgreement",
+      index: true,
     },
     vendor: {
       type: mongoose.Schema.Types.ObjectId,
