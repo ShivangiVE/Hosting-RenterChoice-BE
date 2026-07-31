@@ -12,6 +12,7 @@ const {
   getNotesByWorkOrder,
   internalCreateNoteForWorkOrder,
   getNotesByEntity,
+  vendorCreateNoteForEntity,
 } = require("../../controllers/notes&Documents/NoteController");
 
 const router = express.Router();
@@ -47,6 +48,13 @@ router.post(
   vendorCreateNote,
 );
 
+router.post(
+  "/vendor-create/entity/:entityType/:entityId",
+  protect,
+  authorize("Vendor"),
+  vendorCreateNoteForEntity,
+);
+
 router.get("/", protect, authorize(...ALLOWED_ROLES), getNotes);
 
 router.get(
@@ -75,7 +83,7 @@ router.get(
 router.get(
   "/entity/:sourceType/:sourceId",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...ALLOWED_ROLES, "Vendor"),
   getNotesByEntity,
 );
 

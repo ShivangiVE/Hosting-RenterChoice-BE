@@ -54,6 +54,10 @@ const {
   reassignServiceAgreement,
   getWorkOrderReassignSummary,
   getServiceAgreementReassignSummary,
+  getVendorServiceAgreements,
+  getVendorNewServiceAgreementCount,
+  vendorAcceptServiceAgreement,
+  vendorDeclineServiceAgreement,
 } = require("../../controllers/workOrder/workOrderController");
 const {
   createAppointment,
@@ -73,6 +77,8 @@ const {
   confirmInvoice,
   finalizeInvoiceLater,
   discardInvoiceDraft,
+  createServiceAgreementInvoiceDraft,
+  finalizeServiceAgreementInvoice,
 } = require("../../controllers/workOrder/invoiceController");
 
 const router = express.Router();
@@ -221,6 +227,21 @@ router.delete(
   protect,
   authorize("Vendor"),
   discardInvoiceDraft,
+);
+
+router.post(
+  "/vendor/service-agreements/:id/invoice-drafts",
+  protect,
+  authorize("Vendor"),
+  upload.invoiceUpload.single("file"),
+  createServiceAgreementInvoiceDraft,
+);
+
+router.patch(
+  "/vendor/service-agreements/:id/invoice/finalize",
+  protect,
+  authorize("Vendor"),
+  finalizeServiceAgreementInvoice,
 );
 
 // Vendor Upload Invoice Later
@@ -469,7 +490,7 @@ router.get(
 router.get(
   "/service-agreements/:id",
   protect,
-  authorize(...WORK_ORDER_ROLES),
+  authorize(...WORK_ORDER_AND_VENDOR_ROLES),
   getServiceAgreementById,
 );
 
@@ -478,6 +499,33 @@ router.get(
   protect,
   authorize(...WORK_ORDER_ROLES),
   getServiceAgreementReassignSummary,
+);
+
+router.get(
+  "/vendor/my-service-agreements",
+  protect,
+  authorize("Vendor"),
+  getVendorServiceAgreements,
+);
+
+router.get(
+  "/vendor/service-agreements/new-count",
+  protect,
+  authorize("Vendor"),
+  getVendorNewServiceAgreementCount,
+);
+
+router.put(
+  "/vendor/service-agreements/:id/accept",
+  protect,
+  authorize("Vendor"),
+  vendorAcceptServiceAgreement,
+);
+router.put(
+  "/vendor/service-agreements/:id/decline",
+  protect,
+  authorize("Vendor"),
+  vendorDeclineServiceAgreement,
 );
 
 router.put(

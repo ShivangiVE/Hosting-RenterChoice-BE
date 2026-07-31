@@ -1,5 +1,6 @@
-const WorkOrder = require("../../models/WorkOrder");
 const Invoice = require("../../models/Accounts/Invoice");
+const WorkOrder = require("../../models/WorkOrder");
+const ServiceAgreement = require("../../models/ServiceAgreement");
 const { extractInvoiceData } = require("../../services/invoiceExtraction");
 const { finalizeInvoice } = require("../../services/invoiceFinalizeService");
 const {
@@ -15,7 +16,12 @@ const {
 const {
   notifyInternalUsers,
 } = require("../../services/internalNotificationService");
-const { assignBillNumberIfMissing } = require("../../utils/generateAccountNumber");
+const {
+  assignBillNumberIfMissing,
+} = require("../../utils/generateAccountNumber");
+const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
+const Document = require("../../models/Notes&Documents/Document");
+const { getFileType } = require("../../utils/fileType");
 
 exports.createInvoiceDraft = async (req, res) => {
   try {
@@ -30,6 +36,14 @@ exports.createInvoiceDraft = async (req, res) => {
       workOrder.vendor?.toString() !== req.user._id.toString()
     ) {
       return sendError(res, "Not authorized", 403);
+    }
+
+    if (workOrder.invoiceUploaded) {
+      return sendError(
+        res,
+        "An invoice has already been uploaded for this work order",
+        409,
+      );
     }
 
     const fileUrl = await uploadFile(req.file, "uploads/Repair/invoices");
@@ -56,6 +70,58 @@ exports.createInvoiceDraft = async (req, res) => {
     return sendSuccess(res, "Invoice processed", {
       invoiceId: invoice._id,
       workOrderNumber: workOrder.workOrderNumber,
+      extracted,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Invoice extraction failed", 500);
+  }
+};
+
+exports.createServiceAgreementInvoiceDraft = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return sendError(res, "Invoice file is required", 400);
+
+    const serviceAgreement = await ServiceAgreement.findById(id);
+    if (!serviceAgreement)
+      return sendError(res, "Service agreement not found", 404);
+
+    if (
+      req.user.role === "Vendor" &&
+      serviceAgreement.vendor?.toString() !== req.user._id.toString()
+    ) {
+      return sendError(res, "Not authorized", 403);
+    }
+
+    if (serviceAgreement.vendorResponse !== "accepted") {
+      return sendError(
+        res,
+        "You must accept this service agreement before uploading invoices",
+        403,
+      );
+    }
+
+    const fileUrl = await uploadFile(req.file, "uploads/Repair/invoices");
+
+    const extracted = await extractInvoiceData({
+      filePath: req.file.path,
+      mimeType: req.file.mimetype,
+    });
+
+    const invoice = await Invoice.create({
+      serviceAgreement: id,
+      vendor: serviceAgreement.vendor,
+      fileUrl,
+      originalFileName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      fileSize: req.file.size,
+      status: "pending_confirmation",
+      extractedData: extracted,
+    });
+
+    return sendSuccess(res, "Invoice processed", {
+      invoiceId: invoice._id,
+      serviceAgreementNumber: serviceAgreement.serviceAgreementNumber,
       extracted,
     });
   } catch (err) {
@@ -132,8 +198,15 @@ exports.finalizeInvoiceLater = async (req, res) => {
       );
     }
 
-    await finalizeInvoice(workOrder, invoiceId, req.user._id);
+    if (workOrder.invoiceUploaded) {
+      return sendError(
+        res,
+        "An invoice has already been uploaded for this work order",
+        409,
+      );
+    }
 
+    await finalizeInvoice(workOrder, invoiceId, req.user._id);
     // ── Assign bill number now that the invoice is finalized ──────────
     await assignBillNumberIfMissing(invoiceId);
 
@@ -156,6 +229,84 @@ exports.finalizeInvoiceLater = async (req, res) => {
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
   } catch (err) {
     return sendError(res, err.message || "Failed to finalize invoice", 500);
+  }
+};
+
+exports.finalizeServiceAgreementInvoice = async (req, res) => {
+  try {
+    const { id } = req.params; // serviceAgreement id
+    const { invoiceId } = req.body;
+
+    const serviceAgreement = await ServiceAgreement.findById(id);
+    if (!serviceAgreement)
+      return sendError(res, "Service agreement not found", 404);
+
+    if (
+      req.user.role === "Vendor" &&
+      serviceAgreement.vendor?.toString() !== req.user._id.toString()
+    ) {
+      return sendError(res, "Not authorized", 403);
+    }
+
+    const invoice = await Invoice.findById(invoiceId);
+    if (!invoice) return sendError(res, "Invoice not found", 404);
+    if (invoice.serviceAgreement?.toString() !== id) {
+      return sendError(
+        res,
+        "Invoice does not belong to this service agreement",
+        400,
+      );
+    }
+    if (invoice.status !== "confirmed") {
+      return sendError(res, "Invoice must be confirmed before finalizing", 400);
+    }
+
+    let invoiceCategory = await NoteCategory.findOne({ name: "Invoice" });
+    if (!invoiceCategory) {
+      invoiceCategory = await NoteCategory.create({
+        name: "Invoice",
+        createdBy: req.user._id,
+      });
+    }
+
+    const doc = await Document.create({
+      fileName: invoice.originalFileName,
+      originalFileName: invoice.originalFileName,
+      description: invoice.confirmedData?.comments || "",
+      category: invoiceCategory._id,
+      fileType: getFileType(invoice.mimeType),
+      mimeType: invoice.mimeType,
+      fileSize: invoice.fileSize,
+      fileUrl: invoice.fileUrl,
+      sourceType: "serviceAgreement",
+      sourceId: id,
+      uploadedBy: req.user._id,
+    });
+    serviceAgreement.invoiceUploaded = true;
+    serviceAgreement.lastInvoiceUploadedAt = new Date();
+    serviceAgreement.invoiceDocuments.push(doc._id);
+    await serviceAgreement.save();
+
+    invoice.status = "posted";
+    await invoice.save();
+
+    await notifyInternalUsers({
+      eventType: "SERVICE_AGREEMENT_INVOICE_UPLOADED",
+      title: "Service Agreement Invoice Uploaded",
+      message: `An invoice was uploaded for ${serviceAgreement.serviceAgreementNumber}`,
+      entityType: "ServiceAgreement",
+      entityId: serviceAgreement._id,
+    }).catch(console.error);
+
+    return sendSuccess(res, "Invoice uploaded successfully", {
+      serviceAgreement,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to finalize service agreement invoice",
+      500,
+    );
   }
 };
 
