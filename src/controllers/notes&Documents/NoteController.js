@@ -4,6 +4,7 @@ const Building = require("../../models/Building");
 const Portfolio = require("../../models/Portfolio");
 const { sendSuccess, sendError } = require("../../utils/response");
 const WorkOrder = require("../../models/WorkOrder");
+const { getVendorEntityConfig } = require("../../utils/vendorEntityRegistry");
 
 // Create Note
 exports.createNote = async (req, res) => {
@@ -212,6 +213,69 @@ exports.vendorCreateNote = async (req, res) => {
       description,
       category: finalCategory,
       workOrder: workOrder._id,
+      createdBy: vendorId,
+    });
+
+    return sendSuccess(res, "Vendor note created successfully", { note });
+  } catch (err) {
+    console.error("Vendor note creation failed:", err);
+    return sendError(res, "Failed to create vendor note", 500);
+  }
+};
+
+// Generic: Create Note by Vendor for any registered entity type
+exports.vendorCreateNoteForEntity = async (req, res) => {
+  try {
+    const { entityType, entityId } = req.params;
+    const { description } = req.body;
+    const vendorId = req.user._id;
+
+    const config = getVendorEntityConfig(entityType);
+    if (!config) {
+      return sendError(res, `Unsupported entity type: ${entityType}`, 400);
+    }
+
+    if (!description || !description.trim()) {
+      return sendError(res, "Description is required", 400);
+    }
+
+    let query = config.model.findOne({ _id: entityId, vendor: vendorId });
+    config.populate.forEach((p) => (query = query.populate(p)));
+    const entity = await query;
+
+    if (!entity) {
+      return sendError(
+        res,
+        `You are not allowed to add notes for this ${config.label}`,
+        403,
+      );
+    }
+
+    if (config.isDeclined(entity)) {
+      return sendError(
+        res,
+        `You cannot add notes because this ${config.label} is Declined`,
+        403,
+      );
+    }
+
+    let vendorCategory = await NoteCategory.findOne({
+      name: { $regex: /^vendor$/i },
+    });
+    if (!vendorCategory) {
+      vendorCategory = await NoteCategory.create({
+        name: "Vendor",
+        createdBy: vendorId,
+      });
+    }
+
+    const note = await Note.create({
+      subject: "Message from Vendor",
+      description,
+      category: vendorCategory._id,
+      ...(config.linkField ? { [config.linkField]: entity._id } : {}),
+      sourceType: entityType,
+      sourceId: entity._id,
       createdBy: vendorId,
     });
 

@@ -13,6 +13,7 @@ const {
   vendorUploadDocuments,
   getDocumentsByWorkOrder,
   getDocumentsByEntity,
+  vendorUploadDocumentsForEntity,
 } = require("../../controllers/notes&Documents/DocumentController");
 
 const router = express.Router();
@@ -46,6 +47,14 @@ router.post(
   vendorUploadDocuments
 );
 
+router.post(
+  "/vendor-upload/entity/:entityType/:entityId",
+  protect,
+  authorize("Vendor"),
+  documentUpload.array("files", 10),
+  vendorUploadDocumentsForEntity
+);
+
 // Get all documents
 router.get("/", protect, authorize(...ALLOWED_ROLES), getDocuments);
 
@@ -77,7 +86,7 @@ router.get(
 router.get(
   "/entity/:sourceType/:sourceId",
   protect,
-  authorize(...ALLOWED_ROLES),
+  authorize(...ALLOWED_ROLES, "Vendor"),
   getDocumentsByEntity
 )
 

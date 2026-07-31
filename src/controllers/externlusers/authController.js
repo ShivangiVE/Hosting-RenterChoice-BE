@@ -18,6 +18,8 @@ const generateToken = require("../../utils/generateToken");
 // Generate 4-digit OTP
 const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 
+const ALLOWED_PLATFORMS = ["web", "mobile"];
+
 // External Register (Vendor, Owner, Tenant)
 exports.register = async (req, res, next) => {
   try {
@@ -127,7 +129,15 @@ exports.verifyCompanyAccount = async (req, res) => {
 // Login (strict role-based)
 exports.login = async (req, res, next) => {
   try {
-    const { email, password, role, platform = "web" } = req.body;
+    const { email, password, role, platform } = req.body;
+
+    if (!platform || !ALLOWED_PLATFORMS.includes(platform)) {
+      return sendError(
+        res,
+        "A valid platform ('web' or 'mobile') is required",
+        400,
+      );
+    }
 
     if (!email || !password) {
       return sendError(res, "Email and password are required", 400);
