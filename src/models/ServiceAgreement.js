@@ -72,6 +72,12 @@ const serviceAgreementSchema = new mongoose.Schema(
     reopenComments: { type: String },
     reopenedAt: { type: Date },
     reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+
+    invoiceUploaded: { type: Boolean, default: false },
+    lastInvoiceUploadedAt: { type: Date, default: null },
+    invoiceDocuments: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "Document" },
+    ],
   },
   { timestamps: true },
 );

@@ -13,6 +13,7 @@ const {
 } = require("../../utils/storageService");
 const WorkOrder = require("../../models/WorkOrder");
 const { getFileType } = require("../../utils/fileType");
+const { getVendorEntityConfig } = require("../../utils/vendorEntityRegistry");
 
 // Upload multiple documents
 exports.uploadDocuments = async (req, res) => {
@@ -269,6 +270,154 @@ exports.vendorUploadDocuments = async (req, res) => {
         },
         { path: "building", select: "buildingAbbreviation formData.address" },
         { path: "portfolio", select: "portfolioAbbreviation formData.name" },
+      ]);
+
+      uploadedDocuments.push(document);
+    }
+
+    return sendSuccess(
+      res,
+      "Vendor documents uploaded successfully",
+      { documents: uploadedDocuments },
+      201,
+    );
+  } catch (err) {
+    console.error("Error uploading vendor documents:", err);
+
+    if (req.files) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (unlinkErr) {}
+      });
+    }
+
+    return sendError(
+      res,
+      err.message || "Failed to upload vendor documents",
+      500,
+    );
+  }
+};
+
+// Generic: Upload documents by Vendor for any registered entity type
+exports.vendorUploadDocumentsForEntity = async (req, res) => {
+  try {
+    const { entityType, entityId } = req.params;
+    const vendorId = req.user._id;
+
+    const config = getVendorEntityConfig(entityType);
+    if (!config) {
+      if (req.files) {
+        req.files.forEach((file) => {
+          try {
+            fs.unlinkSync(file.path);
+          } catch (err) {}
+        });
+      }
+      return sendError(res, `Unsupported entity type: ${entityType}`, 400);
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return sendError(res, "No files uploaded", 400);
+    }
+
+    let query = config.model.findOne({ _id: entityId, vendor: vendorId });
+    config.populate.forEach((p) => (query = query.populate(p)));
+    const entity = await query;
+
+    if (!entity) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (err) {}
+      });
+      return sendError(
+        res,
+        `You are not allowed to upload documents for this ${config.label}`,
+        403,
+      );
+    }
+
+    if (config.isDeclined(entity)) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch {}
+      });
+      return sendError(
+        res,
+        `You cannot upload documents because this ${config.label} is Declined`,
+        403,
+      );
+    }
+
+    // Only WorkOrder enforces "must have a building" today — driven by config, not a branch
+    if (config.requiresBuilding && !entity.building) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (err) {}
+      });
+      return sendError(
+        res,
+        `No building is associated with this ${config.label}`,
+        400,
+      );
+    }
+
+    let vendorCategory = await NoteCategory.findOne({
+      name: { $regex: /^vendor$/i },
+    });
+    if (!vendorCategory) {
+      vendorCategory = await NoteCategory.create({
+        name: "Vendor",
+        createdBy: vendorId,
+      });
+    }
+    const finalCategory = vendorCategory._id;
+
+    const { documents } = req.body;
+    let documentsMetadata = [];
+    if (documents) {
+      try {
+        documentsMetadata = JSON.parse(documents);
+      } catch (err) {
+        console.error("Error parsing documents metadata:", err);
+      }
+    }
+
+    const uploadedDocuments = [];
+
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const metadata = documentsMetadata[i] || {};
+
+      const fileUrl = await uploadFile(file, "uploads/documents");
+
+      const document = await Document.create({
+        fileName: metadata.fileName || file.originalname,
+        originalFileName: file.originalname,
+        description: metadata.description || "",
+        category: finalCategory,
+        fileType: getFileType(file.mimetype),
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        fileUrl,
+        ...(config.linkField ? { [config.linkField]: entity._id } : {}),
+        sourceType: entityType,
+        sourceId: entity._id,
+        building: null,
+        portfolio: null,
+        uploadedBy: vendorId,
+      });
+
+      await document.populate([
+        { path: "category", select: "name" },
+        {
+          path: "uploadedBy",
+          select: "preferredName technicianName companyName email",
+        },
       ]);
 
       uploadedDocuments.push(document);
@@ -750,7 +899,18 @@ exports.deleteDocument = async (req, res) => {
         document.workOrder.vendor &&
         document.workOrder.vendor.toString() === userId.toString();
 
-      if (!isOwner || !isVendorWorkOrder) {
+      let isVendorEntity = isVendorWorkOrder;
+      if (!isVendorEntity && document.sourceType && document.sourceId) {
+        const config = getVendorEntityConfig(document.sourceType);
+        if (config) {
+          const entity = await config.model
+            .findById(document.sourceId)
+            .select("vendor");
+          isVendorEntity = entity?.vendor?.toString() === userId.toString();
+        }
+      }
+
+      if (!isOwner || !isVendorEntity) {
         return sendError(
           res,
           "Deletion is not allowed because this document was not uploaded by you.",
