@@ -35,6 +35,10 @@ const {
 } = require("../../utils/generateAccountNumber");
 const resolveCompanyVendorIds = require("../../utils/resolveCompanyVendorIds");
 const buildCompanyScopeFilter = require("../../utils/buildCompanyScopeFilter");
+const {
+  buildVendorWorkOrderMatch,
+  buildVendorServiceAgreementMatch,
+} = require("./workOrderQueryBuilder");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -89,8 +93,8 @@ exports.createWorkOrder = async (req, res) => {
       category,
       building,
       description,
-      vendor, // direct-assign path (legacy) — single vendor userId
-      company, // NEW — company-assign path
+      vendor,
+      company,
       keyIssued,
       dueDate,
     } = req.body;
@@ -104,13 +108,6 @@ exports.createWorkOrder = async (req, res) => {
       );
     }
     if (dueDate) validateFutureOrTodayDate(dueDate, "Due date");
-    if (!vendor && !company) {
-      return sendError(
-        res,
-        "Either a vendor or a company must be assigned",
-        400,
-      );
-    }
 
     const fileUrl = req.file
       ? `/uploads/Repair/workOrders/${req.file.filename}`
@@ -124,11 +121,15 @@ exports.createWorkOrder = async (req, res) => {
       return s === "closed" ? "closed" : "open";
     };
 
-    let assignmentType = "direct";
+    // ── Resolve assignment: direct vendor > company pool > unassigned ──
+    let assignmentType = "unassigned";
     let vendorResponses = [];
-    let resolvedVendor = vendor || null;
+    let resolvedVendor = null;
 
-    if (company && !vendor) {
+    if (vendor) {
+      assignmentType = "direct";
+      resolvedVendor = vendor;
+    } else if (company) {
       assignmentType = "company";
       const vendorIds = await resolveCompanyVendorIds(company);
 
@@ -144,7 +145,6 @@ exports.createWorkOrder = async (req, res) => {
         user: userId,
         response: "pending",
       }));
-      resolvedVendor = null; // nobody has accepted yet
     }
 
     const workOrder = await WorkOrder.create({
@@ -174,6 +174,7 @@ exports.createWorkOrder = async (req, res) => {
       const vendorIds = vendorResponses.map((v) => v.user);
       await notifyVendorAssigned(workOrder, vendorIds);
     }
+    // assignmentType === "unassigned" → no notification, nothing to do
   } catch (err) {
     return sendError(res, err.message || "Failed to create work order", 500);
   }
@@ -647,6 +648,139 @@ exports.getVendorWorkOrders = async (req, res) => {
   } catch (err) {
     console.error("Error in getVendorWorkOrders:", err);
     return sendError(res, err.message || "Failed to fetch vendor work orders");
+  }
+};
+
+exports.getVendorEntities = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const { sortBy, sortOrder = "asc" } = req.query;
+
+    const woMatch = await buildVendorWorkOrderMatch(vendorId, req.query);
+    const saMatch = await buildVendorServiceAgreementMatch(vendorId, req.query);
+
+    const woBranch = woMatch
+      ? [
+          { $match: woMatch },
+          {
+            $addFields: {
+              entityType: "WorkOrder",
+              sortCreatedAt: "$createdAt",
+              sortDueDate: "$dueDate",
+              sortCompletedDate: "$completeDate",
+            },
+          },
+        ]
+      : [{ $match: { _id: null } }];
+
+    const saBranch = saMatch
+      ? [
+          { $match: saMatch },
+          {
+            $addFields: {
+              entityType: "ServiceAgreement",
+              sortCreatedAt: "$createdAt",
+              sortDueDate: "$initialDueDate",
+              sortCompletedDate: "$closedAt",
+            },
+          },
+        ]
+      : [{ $match: { _id: null } }];
+
+    const sortFieldMap = {
+      dueDate: "sortDueDate",
+      completedDate: "sortCompletedDate",
+      declinedDate: "declinedDate",
+      workStatus: "sortCreatedAt",
+    };
+    const sortField = sortBy
+      ? sortFieldMap[sortBy] || "sortCreatedAt"
+      : "sortCreatedAt";
+    const sortDir = sortOrder === "asc" ? 1 : -1;
+
+    const pipeline = [
+      ...woBranch,
+      {
+        $unionWith: {
+          coll: "serviceagreements",
+          pipeline: saBranch,
+        },
+      },
+      { $sort: { [sortField]: sortDir, createdAt: -1 } },
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: limit }],
+          totalCount: [{ $count: "count" }],
+        },
+      },
+    ];
+
+    const [result] = await WorkOrder.aggregate(pipeline);
+    const rawEntities = result?.data || [];
+    const total = result?.totalCount?.[0]?.count || 0;
+
+    const populated = await WorkOrder.populate(rawEntities, [
+      {
+        path: "building",
+        select:
+          "formData.address formData.fullAddress formData.city formData.keyNumber formData.lockCode buildingAbbreviation status",
+      },
+      { path: "dynamicStatus", select: "name" },
+    ]);
+
+    if (req.query.vendorResponse === "pending") {
+      await Promise.all([
+        WorkOrder.updateMany(
+          {
+            "vendorResponses.user": vendorId,
+            "vendorResponses.response": "pending",
+            "vendorResponses.seenAt": null,
+          },
+          { $set: { "vendorResponses.$[elem].seenAt": new Date() } },
+          {
+            arrayFilters: [
+              { "elem.user": vendorId, "elem.response": "pending" },
+            ],
+          },
+        ),
+        ServiceAgreement.updateMany(
+          {
+            "vendorResponses.user": vendorId,
+            "vendorResponses.response": "pending",
+            "vendorResponses.seenAt": null,
+          },
+          { $set: { "vendorResponses.$[elem].seenAt": new Date() } },
+          {
+            arrayFilters: [
+              { "elem.user": vendorId, "elem.response": "pending" },
+            ],
+          },
+        ),
+      ]);
+    }
+
+    const formatted = populated.map((entity) => {
+      if (entity.entityType !== "WorkOrder") return entity;
+      const dyn = entity.dynamicStatus?.name || "";
+      const canEditStatus =
+        entity.status === "open" && !["Completed", "Declined"].includes(dyn);
+      return { ...entity, canEditStatus };
+    });
+
+    return sendSuccess(res, "Vendor entities fetched", {
+      entities: formatted,
+      pagination: { current: page, pages: Math.ceil(total / limit), total },
+    });
+  } catch (err) {
+    console.error("Error in getVendorEntities:", err);
+    return sendError(
+      res,
+      err.message || "Failed to fetch vendor entities",
+      500,
+    );
   }
 };
 
@@ -3155,14 +3289,6 @@ exports.createServiceAgreement = async (req, res) => {
       company,
     } = req.body;
 
-    if (!vendor && !company) {
-      return sendError(
-        res,
-        "Either a vendor or a company must be assigned",
-        400,
-      );
-    }
-
     let fileUrl = null;
     if (req.file) {
       fileUrl = await uploadFile(req.file, "uploads/Repair/serviceAgreements");
@@ -3171,11 +3297,15 @@ exports.createServiceAgreement = async (req, res) => {
     const sequence = await getNextSequence("serviceAgreement");
     const serviceAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
 
-    let assignmentType = "direct";
+    // ── Resolve assignment: direct vendor > company pool > unassigned ──
+    let assignmentType = "unassigned";
     let vendorResponses = [];
-    let resolvedVendor = vendor || null;
+    let resolvedVendor = null;
 
-    if (company && !vendor) {
+    if (vendor) {
+      assignmentType = "direct";
+      resolvedVendor = vendor;
+    } else if (company) {
       assignmentType = "company";
       const vendorIds = await resolveCompanyVendorIds(company);
 
@@ -3191,7 +3321,6 @@ exports.createServiceAgreement = async (req, res) => {
         user: userId,
         response: "pending",
       }));
-      resolvedVendor = null;
     }
 
     const serviceAgreement = await ServiceAgreement.create({
@@ -3223,6 +3352,7 @@ exports.createServiceAgreement = async (req, res) => {
       const vendorIds = vendorResponses.map((v) => v.user);
       await notifyVendorAssignedSA(serviceAgreement, vendorIds);
     }
+    // assignmentType === "unassigned" → no notification, nothing to do
   } catch (err) {
     return sendError(
       res,
@@ -3970,7 +4100,6 @@ exports.getVendorNewServiceAgreementCount = async (req, res) => {
     return sendError(res, err.message || "Failed to fetch count", 500);
   }
 };
-
 
 // Update Service Agreement
 exports.updateServiceAgreement = async (req, res) => {
