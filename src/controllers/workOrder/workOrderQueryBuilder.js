@@ -4,6 +4,10 @@ const User = require("../../models/User");
 const WODynamicStatus = require("../../models/WODynamicStatus");
 const Category = require("../../models/repairCategories");
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const buildWorkOrderFilter = async (query, baseFilter = {}) => {
   const filter = { ...baseFilter };
   const {
@@ -196,4 +200,240 @@ const buildServiceAgreementFilter = async (query, baseFilter = {}) => {
   return filter;
 };
 
-module.exports = { buildWorkOrderFilter, buildServiceAgreementFilter };
+const buildVendorWorkOrderMatch = async (vendorId, query) => {
+  const {
+    tab,
+    category,
+    dynamicStatus,
+    dueDate,
+    completedDate,
+    declinedStartDate,
+    declinedEndDate,
+    search,
+  } = query;
+
+  let match = {
+    $or: [
+      { vendor: vendorId },
+      {
+        "vendorResponses.user": vendorId,
+        "vendorResponses.response": "pending",
+      },
+    ],
+  };
+
+  if (query.vendorResponse === "pending") {
+    match.vendorResponse = "pending";
+    match.status = "open";
+  }
+
+  if (!query.vendorResponse) {
+    if (tab === "Pending") {
+      const excluded = await WODynamicStatus.find({
+        name: { $in: ["Completed", "Declined"] },
+      }).distinct("_id");
+      match.status = "open";
+      match.vendorResponse = "accepted";
+      if (excluded.length > 0) match.dynamicStatus = { $nin: excluded };
+    } else if (tab === "Completed") {
+      const completedStatus = await WODynamicStatus.findOne({
+        name: "Completed",
+      });
+      match.$or = [
+        { status: "closed" },
+        completedStatus ? { dynamicStatus: completedStatus._id } : null,
+      ].filter(Boolean);
+    } else if (tab === "Declined") {
+      match.$or = [
+        { vendor: vendorId, vendorResponse: "declined" },
+        {
+          "vendorResponses.user": vendorId,
+          "vendorResponses.response": "declined",
+        },
+      ];
+    }
+  }
+
+  if (category && category !== "All") match.category = category;
+
+  if (dynamicStatus && dynamicStatus !== "All") {
+    if (dynamicStatus === "primary-closed") {
+      if (tab === "Completed") {
+        match.status = "closed";
+        delete match.dynamicStatus;
+      } else {
+        return null;
+      }
+    } else {
+      const dyn = await findDynamicStatus(dynamicStatus);
+      if (!dyn) return null;
+
+      if (tab === "Pending") {
+        if (["Completed", "Declined"].includes(dyn.name)) return null;
+        match.dynamicStatus = dyn._id;
+      } else if (tab === "Completed") {
+        if (dyn.name !== "Completed") return null;
+      } else if (tab === "Declined") {
+        if (dyn.name !== "Declined") return null;
+      } else {
+        match.dynamicStatus = dyn._id;
+      }
+    }
+  }
+
+  if (dueDate && dueDate !== "All") {
+    const start = new Date(dueDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(dueDate);
+    end.setHours(23, 59, 59, 999);
+    match.dueDate = { $gte: start, $lte: end };
+  }
+
+  if (completedDate && completedDate !== "All") {
+    const start = new Date(completedDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(completedDate);
+    end.setHours(23, 59, 59, 999);
+    match.completeDate = { $gte: start, $lte: end };
+  }
+
+  if (declinedStartDate || declinedEndDate) {
+    match.declinedDate = {};
+    if (declinedStartDate) {
+      const start = new Date(declinedStartDate);
+      start.setHours(0, 0, 0, 0);
+      match.declinedDate.$gte = start;
+    }
+    if (declinedEndDate) {
+      const end = new Date(declinedEndDate);
+      end.setHours(23, 59, 59, 999);
+      match.declinedDate.$lte = end;
+    }
+  }
+
+  if (search && search.trim() !== "") {
+    const regex = new RegExp(search, "i");
+    const buildingIds = await Building.find({
+      $or: [
+        { "formData.address": regex },
+        { "formData.fullAddress": regex },
+        { buildingAbbreviation: regex },
+      ],
+    }).distinct("_id");
+    if (buildingIds.length === 0) return null;
+    match.building = { $in: buildingIds };
+  }
+
+  return match;
+};
+
+const buildVendorServiceAgreementMatch = async (vendorId, query) => {
+  const {
+    tab,
+    category,
+    search,
+    dueDate,
+    completedDate,
+    declinedStartDate,
+    declinedEndDate,
+    dynamicStatus,
+  } = query;
+
+  if (dynamicStatus && dynamicStatus !== "All" && dynamicStatus !== "") {
+    return null;
+  }
+
+  let match = {
+    $or: [
+      { vendor: vendorId },
+      {
+        "vendorResponses.user": vendorId,
+        "vendorResponses.response": "pending",
+      },
+    ],
+  };
+
+  if (query.vendorResponse === "pending") {
+    match.vendorResponse = "pending";
+    match.status = "open";
+  }
+
+  if (!query.vendorResponse) {
+    if (tab === "Pending") {
+      match.status = "open";
+      match.vendorResponse = "accepted";
+    } else if (tab === "Completed") {
+      match.status = "closed";
+    } else if (tab === "Declined") {
+      match.$or = [
+        { vendor: vendorId, vendorResponse: "declined" },
+        {
+          "vendorResponses.user": vendorId,
+          "vendorResponses.response": "declined",
+        },
+      ];
+    }
+  }
+
+  if (category && category !== "All") {
+    let categoryName = null;
+    if (category.startsWith("sa:")) {
+      categoryName = category.slice(3);
+    } else {
+      const catDoc = await Category.findById(category).select("name").lean();
+      categoryName = catDoc ? catDoc.name : null;
+    }
+    match.category = categoryName
+      ? { $regex: `^${escapeRegex(categoryName)}$`, $options: "i" }
+      : "__no_match__";
+  }
+
+  if (dueDate) {
+    const start = new Date(dueDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(dueDate);
+    end.setHours(23, 59, 59, 999);
+    match.initialDueDate = { $gte: start, $lte: end };
+  }
+
+  if (completedDate) {
+    const start = new Date(completedDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(completedDate);
+    end.setHours(23, 59, 59, 999);
+    match.closedAt = { $gte: start, $lte: end };
+  }
+
+  if (declinedStartDate || declinedEndDate) {
+    match.declinedDate = {};
+    if (declinedStartDate)
+      match.declinedDate.$gte = new Date(declinedStartDate);
+    if (declinedEndDate) {
+      const end = new Date(declinedEndDate);
+      end.setHours(23, 59, 59, 999);
+      match.declinedDate.$lte = end;
+    }
+  }
+
+  if (search && search.trim() !== "") {
+    const regex = new RegExp(search, "i");
+    const buildingIds = await Building.find({
+      $or: [
+        { "formData.address": regex },
+        { "formData.fullAddress": regex },
+        { buildingAbbreviation: regex },
+      ],
+    }).distinct("_id");
+    if (buildingIds.length === 0) return null;
+    match.building = { $in: buildingIds };
+  }
+
+  return match;
+};
+
+module.exports = {
+  buildWorkOrderFilter,
+  buildServiceAgreementFilter,
+  buildVendorWorkOrderMatch,
+  buildVendorServiceAgreementMatch,
+};
