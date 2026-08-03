@@ -58,6 +58,7 @@ const {
   getVendorNewServiceAgreementCount,
   vendorAcceptServiceAgreement,
   vendorDeclineServiceAgreement,
+  getVendorEntities,
 } = require("../../controllers/workOrder/workOrderController");
 const {
   createAppointment,
@@ -105,6 +106,13 @@ router.get(
   protect,
   authorize("Vendor"),
   getVendorWorkOrders,
+);
+
+router.get(
+  "/vendor/my-entities",
+  protect,
+  authorize("Vendor"),
+  getVendorEntities,
 );
 
 // Get Work Orders by Building
@@ -315,6 +323,7 @@ router.post(
 
 router.patch(
   "/work-orders/:id/reassign",
+  protect,
   authorize("Admin", "OfficeAdmin"),
   reassignWorkOrder,
 );
@@ -575,6 +584,7 @@ router.post(
 
 router.patch(
   "/service-agreements/:id/reassign",
+  protect,
   authorize("Admin", "OfficeAdmin"),
   reassignServiceAgreement,
 );

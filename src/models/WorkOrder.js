@@ -64,7 +64,7 @@ const workOrderSchema = new mongoose.Schema(
 
     assignmentType: {
       type: String,
-      enum: ["direct", "company"],
+      enum: ["unassigned", "direct", "company"],
       default: "direct",
     },
 
