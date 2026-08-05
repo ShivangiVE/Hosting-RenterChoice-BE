@@ -14,6 +14,7 @@ const {
   getDocumentsByWorkOrder,
   getDocumentsByEntity,
   vendorUploadDocumentsForEntity,
+  getDocumentViewUrl,
 } = require("../../controllers/notes&Documents/DocumentController");
 
 const router = express.Router();
@@ -35,7 +36,7 @@ router.post(
   protect,
   authorize(...ALLOWED_ROLES),
   documentUpload.array("files", 10), // Max 10 files at once
-  uploadDocuments
+  uploadDocuments,
 );
 
 // Upload documents by Vendor for a specific Work Order
@@ -44,7 +45,7 @@ router.post(
   protect,
   authorize("Vendor"),
   documentUpload.array("files", 10),
-  vendorUploadDocuments
+  vendorUploadDocuments,
 );
 
 router.post(
@@ -52,7 +53,7 @@ router.post(
   protect,
   authorize("Vendor"),
   documentUpload.array("files", 10),
-  vendorUploadDocumentsForEntity
+  vendorUploadDocumentsForEntity,
 );
 
 // Get all documents
@@ -63,7 +64,7 @@ router.get(
   "/building/:buildingId",
   protect,
   authorize(...ALLOWED_ROLES),
-  getDocumentsByBuilding
+  getDocumentsByBuilding,
 );
 
 // Get documents by portfolio
@@ -71,7 +72,7 @@ router.get(
   "/portfolio/:portfolioId",
   protect,
   authorize(...ALLOWED_ROLES),
-  getDocumentsByPortfolio
+  getDocumentsByPortfolio,
 );
 
 // Get documents by Work Order
@@ -79,7 +80,7 @@ router.get(
   "/work-order/:workOrderId",
   protect,
   authorize(...ALLOWED_ROLES, "Vendor"),
-  getDocumentsByWorkOrder
+  getDocumentsByWorkOrder,
 );
 
 // Get Documents By Entity
@@ -87,8 +88,8 @@ router.get(
   "/entity/:sourceType/:sourceId",
   protect,
   authorize(...ALLOWED_ROLES, "Vendor"),
-  getDocumentsByEntity
-)
+  getDocumentsByEntity,
+);
 
 // Get single document
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getDocumentById);
@@ -97,14 +98,27 @@ router.get("/:id", protect, authorize(...ALLOWED_ROLES), getDocumentById);
 router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateDocument);
 
 // Delete document
-router.delete("/:id", protect, authorize(...ALLOWED_ROLES, "Vendor"), deleteDocument);
+router.delete(
+  "/:id",
+  protect,
+  authorize(...ALLOWED_ROLES, "Vendor"),
+  deleteDocument,
+);
+
+// Get a viewable URL for a document (preview / open-in-new-tab)
+router.get(
+  "/:id/view-url",
+  protect,
+  authorize(...ALLOWED_ROLES, "Vendor"),
+  getDocumentViewUrl,
+);
 
 // Download document
 router.get(
   "/:id/download",
   protect,
-  authorize(...ALLOWED_ROLES,"Vendor"),
-  downloadDocument
+  authorize(...ALLOWED_ROLES, "Vendor"),
+  downloadDocument,
 );
 
 module.exports = router;
