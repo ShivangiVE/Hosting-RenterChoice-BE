@@ -657,7 +657,7 @@ exports.getVendorEntities = async (req, res) => {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    const { sortBy, sortOrder = "asc" } = req.query;
+     const { sortBy, sortOrder, tab } = req.query;
 
     const woMatch = await buildVendorWorkOrderMatch(vendorId, req.query);
     const saMatch = await buildVendorServiceAgreementMatch(vendorId, req.query);
@@ -696,10 +696,27 @@ exports.getVendorEntities = async (req, res) => {
       declinedDate: "declinedDate",
       workStatus: "sortCreatedAt",
     };
+
+    const TAB_DEFAULT_SORT = {
+      Pending: { field: "sortDueDate", order: "asc" },
+      Completed: { field: "sortCompletedDate", order: "desc" },
+      Declined: { field: "declinedDate", order: "desc" },
+    };
+    const defaultSort = TAB_DEFAULT_SORT[tab] || {
+      field: "sortCreatedAt",
+      order: "desc",
+    };
+
     const sortField = sortBy
       ? sortFieldMap[sortBy] || "sortCreatedAt"
-      : "sortCreatedAt";
-    const sortDir = sortOrder === "asc" ? 1 : -1;
+      : defaultSort.field;
+    const sortDir = sortBy
+      ? sortOrder === "asc"
+        ? 1
+        : -1
+      : defaultSort.order === "asc"
+        ? 1
+        : -1;
 
     const pipeline = [
       ...woBranch,
