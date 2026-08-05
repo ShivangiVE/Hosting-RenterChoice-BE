@@ -10,10 +10,12 @@ const {
   deleteFile,
   getFileStream,
   fileExists,
+  getFileViewUrl,
 } = require("../../utils/storageService");
 const WorkOrder = require("../../models/WorkOrder");
 const { getFileType } = require("../../utils/fileType");
 const { getVendorEntityConfig } = require("../../utils/vendorEntityRegistry");
+const { assertVendorCanAccessDocument } = require("../../utils/vendorGuards");
 
 // Upload multiple documents
 exports.uploadDocuments = async (req, res) => {
@@ -888,47 +890,64 @@ exports.deleteDocument = async (req, res) => {
       return sendError(res, "Document not found", 404);
     }
 
-    // If vendor is deleting
     if (userRole === "Vendor") {
-      // Check if this document was uploaded by the same vendor
-      const isOwner = document.uploadedBy.toString() === userId.toString();
-
-      // Ensure the work order belongs to this vendor
-      const isVendorWorkOrder =
-        document.workOrder &&
-        document.workOrder.vendor &&
-        document.workOrder.vendor.toString() === userId.toString();
-
-      let isVendorEntity = isVendorWorkOrder;
-      if (!isVendorEntity && document.sourceType && document.sourceId) {
-        const config = getVendorEntityConfig(document.sourceType);
-        if (config) {
-          const entity = await config.model
-            .findById(document.sourceId)
-            .select("vendor");
-          isVendorEntity = entity?.vendor?.toString() === userId.toString();
-        }
-      }
-
-      if (!isOwner || !isVendorEntity) {
+      try {
+        await assertVendorCanAccessDocument(document, userId);
+      } catch (guardErr) {
         return sendError(
           res,
           "Deletion is not allowed because this document was not uploaded by you.",
-          403,
+          guardErr.statusCode || 403,
         );
       }
     }
 
-    // Internal team can delete ANY document → no restrictions
-    // Delete the physical file
     await deleteFile(document.fileUrl);
-
     await document.deleteOne();
 
     return sendSuccess(res, "Document deleted successfully");
   } catch (err) {
     console.error("Error deleting document:", err);
     return sendError(res, err.message || "Failed to delete document", 500);
+  }
+};
+
+// Get a short-lived, viewable URL for a document (used for preview/open-in-new-tab)
+exports.getDocumentViewUrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const document = await Document.findById(id).populate(
+      "workOrder",
+      "vendor",
+    );
+    if (!document) {
+      return sendError(res, "Document not found", 404);
+    }
+
+    if (req.user.role === "Vendor") {
+      try {
+        await assertVendorCanAccessDocument(document, req.user._id);
+      } catch (guardErr) {
+        return sendError(
+          res,
+          guardErr.message || "You do not have access to this document",
+          guardErr.statusCode || 403,
+        );
+      }
+    }
+
+    const url = await getFileViewUrl(document.fileUrl);
+
+    return sendSuccess(res, "Document view URL generated", {
+      url,
+      fileName: document.fileName,
+      fileType: document.fileType,
+      mimeType: document.mimeType,
+    });
+  } catch (err) {
+    console.error("Error generating document view URL:", err);
+    return sendError(res, err.message || "Failed to generate view URL", 500);
   }
 };
 
@@ -940,6 +959,18 @@ exports.downloadDocument = async (req, res) => {
     const document = await Document.findById(id);
     if (!document) {
       return sendError(res, "Document not found", 404);
+    }
+
+    if (req.user.role === "Vendor") {
+      try {
+        await assertVendorCanAccessDocument(document, req.user._id);
+      } catch (guardErr) {
+        return sendError(
+          res,
+          guardErr.message || "You do not have access to this document",
+          guardErr.statusCode || 403,
+        );
+      }
     }
 
     if (!fileExists(document.fileUrl)) {
