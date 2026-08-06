@@ -149,7 +149,7 @@ const getFileViewUrl = async (fileUrl) => {
   }
 
   // const serverPublicUrl = process.env.SERVER_PUBLIC_URL;
-  const serverPublicUrl ="https://hosting-renterchoice-be.onrender.com/api/";
+  const serverPublicUrl ="https://hosting-renterchoice-be.onrender.com";
 
   if (!serverPublicUrl) {
     throw new Error("SERVER_PUBLIC_URL environment variable is not configured");
