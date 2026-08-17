@@ -5,7 +5,20 @@ const workOrderAppointmentSchema = new mongoose.Schema(
     workOrder: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "WorkOrder",
+      // required: true,
+      index: true,
+    },
+
+    entityType: {
+      type: String,
+      enum: ["WorkOrder", "ServiceAgreement"],
       required: true,
+      default: "WorkOrder",
+    },
+    entityId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      refPath: "entityType",
       index: true,
     },
 
@@ -81,13 +94,34 @@ const workOrderAppointmentSchema = new mongoose.Schema(
     completionNotes: { type: String, maxlength: 1000 },
   },
 
-  { timestamps: true }
+  { timestamps: true },
 );
+
+workOrderAppointmentSchema.pre("validate", function (next) {
+  if (this.entityType === "ServiceAgreement") {
+    if (!this.entityId) {
+      return next(
+        new Error("entityId is required for ServiceAgreement appointments"),
+      );
+    }
+    return next();
+  }
+
+  // entityType === "WorkOrder" (default / legacy path)
+  if (!this.workOrder && this.entityId) this.workOrder = this.entityId;
+  if (!this.entityId && this.workOrder) this.entityId = this.workOrder;
+
+  if (!this.workOrder) {
+    return next(new Error("workOrder is required for WorkOrder appointments"));
+  }
+  next();
+});
 
 workOrderAppointmentSchema.index({ vendor: 1, status: 1, scheduledDate: 1 });
 workOrderAppointmentSchema.index({ workOrder: 1, status: 1 });
+workOrderAppointmentSchema.index({ entityType: 1, entityId: 1, status: 1 });
 
 module.exports = mongoose.model(
   "WorkOrderAppointment",
-  workOrderAppointmentSchema
+  workOrderAppointmentSchema,
 );
