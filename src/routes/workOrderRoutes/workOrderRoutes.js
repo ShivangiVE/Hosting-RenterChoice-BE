@@ -81,6 +81,11 @@ const {
   createServiceAgreementInvoiceDraft,
   finalizeServiceAgreementInvoice,
 } = require("../../controllers/workOrder/invoiceController");
+const {
+  getEligibleServiceAgreementsForScheduling,
+  createServiceAgreementAppointment,
+  getServiceAgreementAppointment,
+} = require("../../controllers/workOrder/serviceAgreementAppointmentController");
 
 const router = express.Router();
 
@@ -587,6 +592,32 @@ router.patch(
   protect,
   authorize("Admin", "OfficeAdmin"),
   reassignServiceAgreement,
+);
+
+// ── Service Agreement scheduling (Vendor) ──────────────────────────────
+
+// Eligible service agreements for scheduling
+router.get(
+  "/eligible-service-agreements",
+  protect,
+  authorize("Vendor"),
+  getEligibleServiceAgreementsForScheduling,
+);
+
+// Create SA appointment
+router.post(
+  "/vendor/service-agreements/appointments",
+  protect,
+  authorize("Vendor"),
+  createServiceAgreementAppointment,
+);
+
+// Get active appointment for one SA
+router.get(
+  "/vendor/service-agreements/:serviceAgreementId/appointment",
+  protect,
+  authorize("Vendor"),
+  getServiceAgreementAppointment,
 );
 
 // ========================= Counter =========================
