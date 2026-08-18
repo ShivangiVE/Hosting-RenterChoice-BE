@@ -10,14 +10,7 @@ exports.assertVendorAccepted = (workOrder) => {
   }
 };
 
-/**
- * Throws if the given vendor (userId) does not have access to this
- * document — i.e. they didn't upload it, and it doesn't belong to a
- * work order or registered vendor entity (service agreement, etc.)
- * assigned to them.
- * Internal roles should never call this — callers check
- * req.user.role === "Vendor" before invoking.
- */
+
 exports.assertVendorCanAccessDocument = async (document, userId) => {
   const isOwner = document.uploadedBy?.toString() === userId.toString();
 

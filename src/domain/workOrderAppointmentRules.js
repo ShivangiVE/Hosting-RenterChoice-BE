@@ -47,6 +47,51 @@ exports.canScheduleAppointment = (workOrder, scheduledDate) => {
 };
 
 /**
+ * Determines if a service agreement is eligible for appointment scheduling.
+ * Mirrors canScheduleAppointment(workOrder, scheduledDate) rule-for-rule,
+ * minus the dynamicStatus check — ServiceAgreement has no dynamicStatus,
+ * only `status` (open/closed) and `vendorResponse`.
+ */
+exports.canScheduleServiceAgreementAppointment = (
+  serviceAgreement,
+  scheduledDate,
+) => {
+  // Rule 0: Vendor must have accepted the service agreement
+  if (serviceAgreement.vendorResponse !== "accepted") {
+    return {
+      allowed: false,
+      reason:
+        "You must accept this service agreement before scheduling an appointment",
+    };
+  }
+
+  // Rule 1: Closed → BLOCK
+  if (serviceAgreement.status === "closed") {
+    return {
+      allowed: false,
+      reason: "Cannot schedule appointment for a closed service agreement",
+    };
+  }
+
+  // Rule 2: Initial due date + 7 day grace window
+  if (serviceAgreement.initialDueDate) {
+    const graceEndDate = new Date(serviceAgreement.initialDueDate);
+    graceEndDate.setDate(graceEndDate.getDate() + 7);
+    graceEndDate.setHours(23, 59, 59, 999);
+
+    if (scheduledDate > graceEndDate) {
+      return {
+        allowed: false,
+        reason:
+          "Appointment can only be scheduled up to 7 days after the service agreement due date",
+      };
+    }
+  }
+
+  return { allowed: true };
+};
+
+/**
  * Check if an appointment can be rescheduled
  */
 exports.canRescheduleAppointment = (appointment) => {
