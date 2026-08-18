@@ -3,7 +3,9 @@ const {
   canRescheduleAppointment,
   canCancelAppointment,
   isAppointmentInPast,
+  canScheduleServiceAgreementAppointment,
 } = require("../../domain/workOrderAppointmentRules");
+const ServiceAgreement = require("../../models/ServiceAgreement");
 const WODynamicStatus = require("../../models/WODynamicStatus");
 const WorkOrder = require("../../models/WorkOrder");
 const WorkOrderAppointment = require("../../models/WorkOrderAppointment");
@@ -35,7 +37,7 @@ exports.getEligibleWorkOrdersForScheduling = async (req, res) => {
       {
         vendor: vendorId,
         status: { $in: ["scheduled", "rescheduled"] },
-      }
+      },
     );
 
     // STRICT BASE FILTER - All conditions must be met
@@ -87,7 +89,7 @@ exports.getEligibleWorkOrdersForScheduling = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch eligible work orders",
-      500
+      500,
     );
   }
 };
@@ -170,7 +172,7 @@ exports.createAppointment = async (req, res) => {
     // 9. Business rules validation
     const eligibility = await canScheduleAppointment(
       workOrder,
-      scheduleDateObj
+      scheduleDateObj,
     );
     if (!eligibility.allowed) {
       return sendError(res, eligibility.reason, 400);
@@ -181,7 +183,7 @@ exports.createAppointment = async (req, res) => {
       return sendError(
         res,
         "Cannot schedule appointment for a closed work order",
-        400
+        400,
       );
     }
 
@@ -189,7 +191,7 @@ exports.createAppointment = async (req, res) => {
       return sendError(
         res,
         `Cannot schedule appointment for a ${workOrder.dynamicStatus.name.toLowerCase()} work order`,
-        400
+        400,
       );
     }
 
@@ -203,7 +205,7 @@ exports.createAppointment = async (req, res) => {
       return sendError(
         res,
         "An active appointment already exists for this work order. Please cancel or reschedule the existing appointment.",
-        409
+        409,
       );
     }
 
@@ -223,7 +225,7 @@ exports.createAppointment = async (req, res) => {
 
     // 13. Populate for response
     const populatedAppointment = await WorkOrderAppointment.findById(
-      appointment._id
+      appointment._id,
     )
       .populate("workOrder", "workOrderNumber description")
       .populate("building", "buildingAbbreviation formData.address");
@@ -234,7 +236,7 @@ exports.createAppointment = async (req, res) => {
       {
         appointment: populatedAppointment,
       },
-      201
+      201,
     );
   } catch (err) {
     console.error("Error creating appointment:", err);
@@ -261,18 +263,16 @@ exports.rescheduleAppointment = async (req, res) => {
     if (!timeRegex.test(timeSlot.start) || !timeRegex.test(timeSlot.end)) {
       return sendError(res, "Invalid time format. Use HH:MM format", 400);
     }
-
     if (timeSlot.start >= timeSlot.end) {
       return sendError(res, "End time must be after start time", 400);
     }
 
-    // 3. Find appointment
-    const appointment = await WorkOrderAppointment.findById(id)
-      .populate({
-        path: "workOrder",
-        populate: { path: "dynamicStatus", select: "name" },
-      })
-      .populate("building", "buildingAbbreviation");
+    // 3. Find appointment — building populated generically; entity-specific
+    //    populate happens further down once we know entityType.
+    const appointment = await WorkOrderAppointment.findById(id).populate(
+      "building",
+      "buildingAbbreviation",
+    );
 
     if (!appointment) {
       return sendError(res, "Appointment not found", 404);
@@ -283,7 +283,7 @@ exports.rescheduleAppointment = async (req, res) => {
       return sendError(
         res,
         "You are not authorized to reschedule this appointment",
-        403
+        403,
       );
     }
 
@@ -296,7 +296,6 @@ exports.rescheduleAppointment = async (req, res) => {
     // 6. Validate new date
     const newScheduleDateObj = new Date(scheduledDate);
     newScheduleDateObj.setHours(0, 0, 0, 0);
-
     if (isNaN(newScheduleDateObj.getTime())) {
       return sendError(res, "Invalid scheduled date format", 400);
     }
@@ -304,7 +303,6 @@ exports.rescheduleAppointment = async (req, res) => {
     // 7. Prevent past bookings
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     if (newScheduleDateObj < today) {
       return sendError(res, "Cannot reschedule to a past date", 400);
     }
@@ -316,18 +314,32 @@ exports.rescheduleAppointment = async (req, res) => {
         .getMinutes()
         .toString()
         .padStart(2, "0")}`;
-
       if (timeSlot.start < currentTime) {
         return sendError(res, "Cannot reschedule to a past time", 400);
       }
     }
 
-    // 9. Check work order eligibility
-    const workOrder = appointment.workOrder;
-    const scheduleEligibility = await canScheduleAppointment(
-      workOrder,
-      newScheduleDateObj
-    );
+    // 9. Entity-aware eligibility check 
+    let scheduleEligibility;
+    if (appointment.entityType === "ServiceAgreement") {
+      const serviceAgreement = await ServiceAgreement.findById(
+        appointment.entityId,
+      );
+      scheduleEligibility = canScheduleServiceAgreementAppointment(
+        serviceAgreement,
+        newScheduleDateObj,
+      );
+    } else {
+      // ── EXACT PRE-EXISTING BEHAVIOR ──
+      const workOrder = await WorkOrder.findById(
+        appointment.workOrder,
+      ).populate("dynamicStatus", "name");
+      scheduleEligibility = await canScheduleAppointment(
+        workOrder,
+        newScheduleDateObj,
+      );
+    }
+
     if (!scheduleEligibility.allowed) {
       return sendError(res, scheduleEligibility.reason, 400);
     }
@@ -336,7 +348,6 @@ exports.rescheduleAppointment = async (req, res) => {
     if (!appointment.rescheduleHistory) {
       appointment.rescheduleHistory = [];
     }
-
     appointment.rescheduleHistory.push({
       scheduledDate: appointment.scheduledDate,
       timeSlot: {
@@ -358,9 +369,16 @@ exports.rescheduleAppointment = async (req, res) => {
 
     await appointment.save();
 
-    // 12. Populate for response
+    // 12. Populate for response — entity-aware populate path only
+    const entityPopulatePath =
+      appointment.entityType === "ServiceAgreement" ? "entityId" : "workOrder";
+    const entityPopulateSelect =
+      appointment.entityType === "ServiceAgreement"
+        ? "serviceAgreementNumber description"
+        : "workOrderNumber description";
+
     const updatedAppointment = await WorkOrderAppointment.findById(id)
-      .populate("workOrder", "workOrderNumber description")
+      .populate(entityPopulatePath, entityPopulateSelect)
       .populate("building", "buildingAbbreviation formData.address")
       .populate("rescheduleHistory.rescheduledBy", "preferredName email");
 
@@ -372,7 +390,7 @@ exports.rescheduleAppointment = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to reschedule appointment",
-      500
+      500,
     );
   }
 };
@@ -386,10 +404,11 @@ exports.cancelAppointment = async (req, res) => {
     const { reason } = req.body;
     const vendorId = req.user._id;
 
-    // 1. Find appointment
-    const appointment = await WorkOrderAppointment.findById(id)
-      .populate("workOrder", "workOrderNumber")
-      .populate("building", "buildingAbbreviation");
+    // 1. Find appointment — building populated generically
+    const appointment = await WorkOrderAppointment.findById(id).populate(
+      "building",
+      "buildingAbbreviation",
+    );
 
     if (!appointment) {
       return sendError(res, "Appointment not found", 404);
@@ -400,7 +419,7 @@ exports.cancelAppointment = async (req, res) => {
       return sendError(
         res,
         "You are not authorized to cancel this appointment",
-        403
+        403,
       );
     }
 
@@ -415,7 +434,7 @@ exports.cancelAppointment = async (req, res) => {
       return sendError(
         res,
         "Cannot cancel a past appointment. You can only cancel upcoming or current appointments.",
-        400
+        400,
       );
     }
 
@@ -427,9 +446,16 @@ exports.cancelAppointment = async (req, res) => {
 
     await appointment.save();
 
-    // 6. Populate for response
+    // 6. Populate for response — entity-aware populate path only
+    const entityPopulatePath =
+      appointment.entityType === "ServiceAgreement" ? "entityId" : "workOrder";
+    const entityPopulateSelect =
+      appointment.entityType === "ServiceAgreement"
+        ? "serviceAgreementNumber description"
+        : "workOrderNumber description";
+
     const cancelledAppointment = await WorkOrderAppointment.findById(id)
-      .populate("workOrder", "workOrderNumber description")
+      .populate(entityPopulatePath, entityPopulateSelect)
       .populate("building", "buildingAbbreviation formData.address")
       .populate("cancelledBy", "preferredName email");
 
@@ -454,41 +480,26 @@ exports.getVendorAppointments = async (req, res) => {
     status: { $ne: "cancelled" },
   };
 
-  const pipeline = [{ $match: match }];
-
-  if (address) {
-    pipeline.push({
-      $match: {
-        "building.formData.address": {
-          $regex: address,
-          $options: "i",
-        },
-      },
-    });
-  }
-
-  if (workOrderNumber) {
-    pipeline.push({
-      $match: {
-        "workOrder.workOrderNumber": {
-          $regex: workOrderNumber,
-          $options: "i",
-        },
-      },
-    });
-  }
-
   const appointments = await WorkOrderAppointment.aggregate([
-    ...pipeline,
+    { $match: match },
+
     {
       $lookup: {
         from: "workorders",
-        localField: "workOrder",
+        localField: "entityId",
         foreignField: "_id",
-        as: "workOrder",
+        as: "workOrderLookup",
       },
     },
-    { $unwind: "$workOrder" },
+
+    {
+      $lookup: {
+        from: "serviceagreements",
+        localField: "entityId",
+        foreignField: "_id",
+        as: "serviceAgreementLookup",
+      },
+    },
     {
       $lookup: {
         from: "buildings",
@@ -498,12 +509,47 @@ exports.getVendorAppointments = async (req, res) => {
       },
     },
     { $unwind: "$building" },
+    {
+      $addFields: {
+        workOrder: { $first: "$workOrderLookup" },
+        serviceAgreement: { $first: "$serviceAgreementLookup" },
+      },
+    },
+
+    {
+      $match: {
+        $or: [
+          { workOrder: { $ne: null } },
+          { serviceAgreement: { $ne: null } },
+        ],
+      },
+    },
+    { $project: { workOrderLookup: 0, serviceAgreementLookup: 0 } },
     { $sort: { scheduledDate: 1 } },
   ]);
 
-  const appointmentsWithPermissions = appointments.map((apt) => {
-    const isPast = isAppointmentInPast(apt.scheduledDate, apt.timeSlot);
+  const filtered = appointments.filter((apt) => {
+    const addr =
+      apt.building?.formData?.address ||
+      apt.building?.formData?.fullAddress ||
+      "";
+    const number =
+      apt.entityType === "ServiceAgreement"
+        ? apt.serviceAgreement?.serviceAgreementNumber
+        : apt.workOrder?.workOrderNumber;
 
+    const addressMatch = address
+      ? addr.toLowerCase().includes(address.toLowerCase())
+      : true;
+    const numberMatch = workOrderNumber
+      ? (number || "").toLowerCase().includes(workOrderNumber.toLowerCase())
+      : true;
+
+    return addressMatch && numberMatch;
+  });
+
+  const appointmentsWithPermissions = filtered.map((apt) => {
+    const isPast = isAppointmentInPast(apt.scheduledDate, apt.timeSlot);
     return {
       ...apt,
       isPast,
@@ -526,18 +572,21 @@ exports.getAppointmentDetails = async (req, res) => {
     const { id } = req.params;
     const vendorId = req.user._id;
 
+    const raw = await WorkOrderAppointment.findById(id);
+    if (!raw) return sendError(res, "Appointment not found", 404);
+
+    const isSA = raw.entityType === "ServiceAgreement";
+
     const appointment = await WorkOrderAppointment.findById(id)
-      .populate({
-        path: "workOrder",
-        select: "workOrderNumber description dueDate vendorResponse",
-        populate: [
-          { path: "dynamicStatus", select: "name" },
-          { path: "building", select: "buildingAbbreviation formData.address" },
-        ],
-      })
+      .populate(
+        isSA ? "entityId" : "workOrder",
+        isSA
+          ? "serviceAgreementNumber description initialDueDate vendorResponse"
+          : "workOrderNumber description dueDate vendorResponse",
+      )
       .populate(
         "building",
-        "buildingAbbreviation formData.address formData.city"
+        "buildingAbbreviation formData.address formData.city",
       )
       .populate("vendor", "companyName technicianName email")
       .populate("createdBy", "preferredName email")
@@ -553,14 +602,14 @@ exports.getAppointmentDetails = async (req, res) => {
       return sendError(
         res,
         "You are not authorized to view this appointment",
-        403
+        403,
       );
     }
 
-    // Add metadata
+    // Metadata
     const isPast = isAppointmentInPast(
       appointment.scheduledDate,
-      appointment.timeSlot
+      appointment.timeSlot,
     );
     const canReschedule =
       !isPast && ["scheduled", "rescheduled"].includes(appointment.status);
@@ -581,7 +630,7 @@ exports.getAppointmentDetails = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch appointment details",
-      500
+      500,
     );
   }
 };
@@ -611,7 +660,7 @@ exports.getWorkOrderAppointment = async (req, res) => {
       return sendError(
         res,
         "No active appointment found for this work order",
-        404
+        404,
       );
     }
 
