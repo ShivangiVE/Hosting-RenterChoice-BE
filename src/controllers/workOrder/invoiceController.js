@@ -22,8 +22,13 @@ const {
 const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
 const Document = require("../../models/Notes&Documents/Document");
 const { getFileType } = require("../../utils/fileType");
+const {
+  verifyInvoiceFileSignature,
+} = require("../../utils/fileSignatureValidator");
+const fs = require("fs/promises");
 
 exports.createInvoiceDraft = async (req, res) => {
+  let fileUrl;
   try {
     const { id } = req.params;
     if (!req.file) return sendError(res, "Invoice file is required", 400);
@@ -46,7 +51,14 @@ exports.createInvoiceDraft = async (req, res) => {
       );
     }
 
-    const fileUrl = await uploadFile(req.file, "uploads/Repair/invoices");
+    try {
+      await verifyInvoiceFileSignature(req.file.path);
+    } catch (sigErr) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return sendError(res, sigErr.message, sigErr.statusCode || 400);
+    }
+
+    fileUrl = await uploadFile(req.file, "uploads/Repair/invoices");
 
     const extracted = await extractInvoiceData({
       filePath: req.file.path,
@@ -73,11 +85,15 @@ exports.createInvoiceDraft = async (req, res) => {
       extracted,
     });
   } catch (err) {
+    if (fileUrl) {
+      await deleteFile(fileUrl).catch(() => {});
+    }
     return sendError(res, err.message || "Invoice extraction failed", 500);
   }
 };
 
 exports.createServiceAgreementInvoiceDraft = async (req, res) => {
+  let fileUrl;
   try {
     const { id } = req.params;
     if (!req.file) return sendError(res, "Invoice file is required", 400);
@@ -101,7 +117,14 @@ exports.createServiceAgreementInvoiceDraft = async (req, res) => {
       );
     }
 
-    const fileUrl = await uploadFile(req.file, "uploads/Repair/invoices");
+    try {
+      await verifyInvoiceFileSignature(req.file.path);
+    } catch (sigErr) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return sendError(res, sigErr.message, sigErr.statusCode || 400);
+    }
+
+    fileUrl = await uploadFile(req.file, "uploads/Repair/invoices");
 
     const extracted = await extractInvoiceData({
       filePath: req.file.path,
@@ -125,6 +148,9 @@ exports.createServiceAgreementInvoiceDraft = async (req, res) => {
       extracted,
     });
   } catch (err) {
+    if (fileUrl) {
+      await deleteFile(fileUrl).catch(() => {});
+    }
     return sendError(res, err.message || "Invoice extraction failed", 500);
   }
 };

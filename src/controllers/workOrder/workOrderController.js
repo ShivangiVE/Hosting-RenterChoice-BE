@@ -54,6 +54,15 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const resolveCategoryName = async (categoryValue) => {
+  if (!categoryValue) return categoryValue;
+  if (mongoose.Types.ObjectId.isValid(categoryValue)) {
+    const categoryDoc = await Category.findById(categoryValue).select("name");
+    return categoryDoc ? categoryDoc.name : categoryValue;
+  }
+  return categoryValue;
+};
+
 // Peek next sequence number without incrementing
 exports.getNextCounterValue = async (req, res) => {
   try {
@@ -657,7 +666,7 @@ exports.getVendorEntities = async (req, res) => {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-     const { sortBy, sortOrder, tab } = req.query;
+    const { sortBy, sortOrder, tab } = req.query;
 
     const woMatch = await buildVendorWorkOrderMatch(vendorId, req.query);
     const saMatch = await buildVendorServiceAgreementMatch(vendorId, req.query);
@@ -683,7 +692,7 @@ exports.getVendorEntities = async (req, res) => {
             $addFields: {
               entityType: "ServiceAgreement",
               sortCreatedAt: "$createdAt",
-              sortDueDate: "$initialDueDate",
+              sortDueDate: "$startDate",
               sortCompletedDate: "$closedAt",
             },
           },
@@ -3300,13 +3309,26 @@ exports.createServiceAgreement = async (req, res) => {
       category,
       building,
       description,
-      initialDueDate,
+      startDate,
+      endDate,
       recurringSchedule,
       vendor,
       company,
     } = req.body;
 
+    if (!startDate || !endDate) {
+      return sendError(res, "Start date and end date are required", 400);
+    }
+
+    validateFutureOrTodayDate(endDate, "End date");
+    if (new Date(endDate) < new Date(startDate)) {
+      return sendError(res, "End date cannot be before start date", 400);
+    }
+
+    const resolvedCategory = await resolveCategoryName(category);
+
     let fileUrl = null;
+
     if (req.file) {
       fileUrl = await uploadFile(req.file, "uploads/Repair/serviceAgreements");
     }
@@ -3342,10 +3364,11 @@ exports.createServiceAgreement = async (req, res) => {
 
     const serviceAgreement = await ServiceAgreement.create({
       serviceAgreementNumber,
-      category,
+      category: resolvedCategory,
       building,
       description,
-      initialDueDate,
+      startDate,
+      endDate,
       recurringSchedule,
       assignmentType,
       assignedCompany: assignmentType === "company" ? company : undefined,
@@ -3437,7 +3460,7 @@ exports.getServiceAgreements = async (req, res) => {
       const end = new Date(dueDate);
       end.setHours(23, 59, 59, 999);
 
-      filter.initialDueDate = { $gte: start, $lte: end };
+      filter.startDate = { $gte: start, $lte: end };
     }
 
     //  Category
@@ -3521,16 +3544,23 @@ exports.getServiceAgreements = async (req, res) => {
         populate: { path: "company", select: "companyName" },
       })
       .populate("assignedCompany", "companyName")
-      .populate("category", "name")
       .populate("createdBy", "preferredName email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
+    const serviceAgreementsWithCategory = await Promise.all(
+      serviceAgreements.map(async (sa) => {
+        const doc = sa.toObject();
+        doc.category = await resolveCategoryName(doc.category);
+        return doc;
+      }),
+    );
+
     const total = await ServiceAgreement.countDocuments(filter);
 
     return sendSuccess(res, "Service agreements fetched successfully", {
-      serviceAgreements,
+      serviceAgreements: serviceAgreementsWithCategory,
       pagination: {
         current: page,
         pages: Math.ceil(total / limit),
@@ -3655,7 +3685,7 @@ exports.getServiceAgreementsByBuilding = async (req, res) => {
       const end = new Date(dueDate);
       start.setHours(0, 0, 0, 0);
       end.setHours(23, 59, 59, 999);
-      filter.initialDueDate = { $gte: start, $lte: end };
+      filter.startDate = { $gte: start, $lte: end };
     }
 
     const [serviceAgreements, total] = await Promise.all([
@@ -4012,7 +4042,7 @@ exports.getVendorServiceAgreements = async (req, res) => {
       start.setHours(0, 0, 0, 0);
       const end = new Date(dueDate);
       end.setHours(23, 59, 59, 999);
-      filter.initialDueDate = { $gte: start, $lte: end };
+      filter.startDate = { $gte: start, $lte: end };
     }
 
     // Completed Date filter → ServiceAgreement.closedAt ──
@@ -4135,6 +4165,26 @@ exports.updateServiceAgreement = async (req, res) => {
     const serviceAgreement = await ServiceAgreement.findById(id);
     if (!serviceAgreement)
       return sendError(res, "Service agreement not found", 404);
+
+    if (updateData.startDate || updateData.endDate) {
+      if (updateData.endDate) {
+        validateFutureOrTodayDate(updateData.endDate, "End date");
+      }
+
+      const effectiveStart = new Date(
+        updateData.startDate || serviceAgreement.startDate,
+      );
+      const effectiveEnd = new Date(
+        updateData.endDate || serviceAgreement.endDate,
+      );
+      if (effectiveEnd < effectiveStart) {
+        return sendError(res, "End date cannot be before start date", 400);
+      }
+    }
+
+    if (updateData.category) {
+      updateData.category = await resolveCategoryName(updateData.category);
+    }
 
     if (req.body.removeExistingFile === "true" && serviceAgreement.fileUrl) {
       await deleteFile(serviceAgreement.fileUrl);

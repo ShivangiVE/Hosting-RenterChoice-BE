@@ -8,42 +8,61 @@ const { sendError, sendSuccess } = require("../../utils/response");
 const ACTIVE_STATUSES = ["scheduled", "rescheduled"];
 const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
 
+const toDateKey = (date) => {
+  const d = new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+};
+
 exports.getEligibleServiceAgreementsForScheduling = async (req, res) => {
   try {
     const vendorId = req.user._id;
-
-    // Service agreements that already have an active appointment
-    const activeApptEntityIds = await WorkOrderAppointment.distinct(
-      "entityId",
-      {
-        vendor: vendorId,
-        entityType: "ServiceAgreement",
-        status: { $in: ACTIVE_STATUSES },
-      },
-    );
 
     const filter = {
       vendor: vendorId,
       vendorResponse: "accepted",
       status: "open",
-      ...(activeApptEntityIds.length && {
-        _id: { $nin: activeApptEntityIds },
-      }),
     };
 
     const serviceAgreements = await ServiceAgreement.find(filter)
-      .select("serviceAgreementNumber building initialDueDate vendorResponse")
+      .select(
+        "serviceAgreementNumber building startDate endDate vendorResponse",
+      )
       .populate({
         path: "building",
         select: "buildingAbbreviation formData.address",
       })
-      .sort({ initialDueDate: 1, createdAt: -1 })
+      .sort({ startDate: 1, createdAt: -1 })
       .lean();
+
+    const activeAppointments = await WorkOrderAppointment.find({
+      vendor: vendorId,
+      entityType: "ServiceAgreement",
+      entityId: { $in: serviceAgreements.map((sa) => sa._id) },
+      status: { $in: ACTIVE_STATUSES },
+    })
+      .select("entityId scheduledDate")
+      .lean();
+
+    const bookedDatesByEntity = {};
+    activeAppointments.forEach((appt) => {
+      const key = appt.entityId.toString();
+      (bookedDatesByEntity[key] ||= []).push(toDateKey(appt.scheduledDate));
+    });
+
+    const serviceAgreementsWithBookedDates = serviceAgreements.map((sa) => ({
+      ...sa,
+      bookedDates: bookedDatesByEntity[sa._id.toString()] || [],
+    }));
 
     return sendSuccess(
       res,
       "Eligible service agreements fetched successfully",
-      { serviceAgreements, total: serviceAgreements.length },
+      {
+        serviceAgreements: serviceAgreementsWithBookedDates,
+        total: serviceAgreementsWithBookedDates.length,
+      },
     );
   } catch (err) {
     console.error("Error fetching eligible service agreements:", err);
@@ -153,16 +172,17 @@ exports.createServiceAgreementAppointment = async (req, res) => {
     }
 
     // 11. Prevent duplicate active appointments
-    const existingAppointment = await WorkOrderAppointment.findOne({
+    const sameDateAppointment = await WorkOrderAppointment.findOne({
       entityType: "ServiceAgreement",
       entityId: serviceAgreementId,
       status: { $in: ACTIVE_STATUSES },
+      scheduledDate: scheduleDateObj,
     });
 
-    if (existingAppointment) {
+    if (sameDateAppointment) {
       return sendError(
         res,
-        "An active appointment already exists for this service agreement. Please cancel or reschedule the existing appointment.",
+        "You have already scheduled an appointment for this service agreement on this date. Please choose a different date, or reschedule the existing appointment for this date instead.",
         409,
       );
     }
@@ -201,7 +221,43 @@ exports.createServiceAgreementAppointment = async (req, res) => {
   }
 };
 
-exports.getServiceAgreementAppointment = async (req, res) => {
+// exports.getServiceAgreementAppointment = async (req, res) => {
+//   try {
+//     const { serviceAgreementId } = req.params;
+//     const vendorId = req.user._id;
+
+//     if (!serviceAgreementId) {
+//       return sendError(res, "Service agreement ID is required", 400);
+//     }
+
+//     const appointment = await WorkOrderAppointment.findOne({
+//       entityType: "ServiceAgreement",
+//       entityId: serviceAgreementId,
+//       vendor: vendorId,
+//       status: { $in: ACTIVE_STATUSES },
+//     })
+//       .populate("entityId", "serviceAgreementNumber")
+//       .populate("building", "buildingAbbreviation formData.address")
+//       .sort({ createdAt: -1 });
+
+//     if (!appointment) {
+//       return sendError(
+//         res,
+//         "No active appointment found for this service agreement",
+//         404,
+//       );
+//     }
+
+//     return sendSuccess(res, "Appointment fetched successfully", {
+//       appointment,
+//     });
+//   } catch (err) {
+//     console.error("Error fetching service agreement appointment:", err);
+//     return sendError(res, err.message || "Failed to fetch appointment", 500);
+//   }
+// };
+
+exports.getServiceAgreementAppointments = async (req, res) => {
   try {
     const { serviceAgreementId } = req.params;
     const vendorId = req.user._id;
@@ -210,7 +266,7 @@ exports.getServiceAgreementAppointment = async (req, res) => {
       return sendError(res, "Service agreement ID is required", 400);
     }
 
-    const appointment = await WorkOrderAppointment.findOne({
+    const appointments = await WorkOrderAppointment.find({
       entityType: "ServiceAgreement",
       entityId: serviceAgreementId,
       vendor: vendorId,
@@ -218,21 +274,14 @@ exports.getServiceAgreementAppointment = async (req, res) => {
     })
       .populate("entityId", "serviceAgreementNumber")
       .populate("building", "buildingAbbreviation formData.address")
-      .sort({ createdAt: -1 });
+      .sort({ scheduledDate: 1 });
 
-    if (!appointment) {
-      return sendError(
-        res,
-        "No active appointment found for this service agreement",
-        404,
-      );
-    }
-
-    return sendSuccess(res, "Appointment fetched successfully", {
-      appointment,
+    return sendSuccess(res, "Appointments fetched successfully", {
+      appointments,
+      bookedDates: appointments.map((a) => toDateKey(a.scheduledDate)),
     });
   } catch (err) {
-    console.error("Error fetching service agreement appointment:", err);
-    return sendError(res, err.message || "Failed to fetch appointment", 500);
+    console.error("Error fetching service agreement appointments:", err);
+    return sendError(res, err.message || "Failed to fetch appointments", 500);
   }
 };
