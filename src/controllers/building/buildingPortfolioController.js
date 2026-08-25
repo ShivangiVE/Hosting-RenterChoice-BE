@@ -72,9 +72,17 @@ const validateAgainstTemplate = (template, formData) => {
   return errors;
 };
 
+const normalizeBoolean = (val) => {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "string")
+    return ["yes", "true"].includes(val.trim().toLowerCase());
+  return false;
+};
+
 async function saveSubmission(formType, formData, userId) {
   if (formType === "building") {
-    const { buildingAbbreviation, portfolio, ...restData } = formData;
+    const { buildingAbbreviation, portfolio, isMultiUnit, ...restData } =
+      formData;
 
     const defaultFields = {
       address: "",
@@ -95,6 +103,7 @@ async function saveSubmission(formType, formData, userId) {
     return Building.create({
       buildingAbbreviation,
       portfolio,
+      isMultiUnit: normalizeBoolean(isMultiUnit),
       formData: { ...defaultFields, ...restData },
       status: formData.status || "vacant",
       createdBy: userId,
@@ -138,6 +147,18 @@ exports.createBuilding = async (req, res) => {
       );
     }
 
+    if (
+      formData.isMultiUnit === undefined ||
+      formData.isMultiUnit === null ||
+      formData.isMultiUnit === ""
+    ) {
+      return sendError(
+        res,
+        "Please specify whether this is a Multi-Unit Building (Yes/No)",
+        400,
+      );
+    }
+
     const errors = validateAgainstTemplate(template, formData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
 
@@ -154,7 +175,9 @@ exports.getBuildingDetails = async (req, res) => {
     const { id } = req.params;
     const building = await Building.findById(id)
       .populate("createdBy", "preferredName email")
-      .populate("portfolio", "portfolioAbbreviation");
+      .populate("portfolio", "portfolioAbbreviation")
+      .populate("parentBuilding", "buildingAbbreviation formData.address");
+
     if (!building) return sendError(res, "Building not found", 404);
 
     // Get all relevant templates
@@ -178,6 +201,16 @@ exports.getBuildingDetails = async (req, res) => {
       return sendError(res, "Building form template not found", 404);
     }
 
+    let units = [];
+    if (building.isMultiUnit) {
+      units = await Building.find({ parentBuilding: building._id })
+        .select(
+          "unitNumber buildingAbbreviation status formData.bedrooms formData.bathrooms formData.monthlyRent",
+        )
+        .sort({ unitNumber: 1 })
+        .lean();
+    }
+
     return sendSuccess(res, "Building details fetched", {
       building: {
         ...building.toObject(),
@@ -189,6 +222,7 @@ exports.getBuildingDetails = async (req, res) => {
         inspectionData: building.inspectionData || {},
         marketingData: building.marketingData || {},
       },
+      units,
       template: buildingTemplate,
       inspectionTemplate: inspectionTemplate || null,
       marketingTemplate: marketingTemplate || null,
@@ -225,6 +259,7 @@ exports.getAllBuildings = async (req, res) => {
     const allowedUserIds = await resolveTeamUserIds(req.user);
 
     const query = {};
+    query.parentBuilding = null;
 
     const andConditions = [];
 
@@ -347,7 +382,7 @@ exports.getAllBuildings = async (req, res) => {
 // Get buildings list for dropdowns & filters (no pagination, scoped to team)
 exports.getBuildingsList = async (req, res) => {
   try {
-    const { portfolioId } = req.query;
+    const { portfolioId, includeUnits } = req.query;
 
     const allowedUserIds = await resolveTeamUserIds(req.user);
 
@@ -361,6 +396,10 @@ exports.getBuildingsList = async (req, res) => {
     // Optionally filter by portfolio
     if (portfolioId && portfolioId !== "All") {
       query.portfolio = portfolioId;
+    }
+
+    if (includeUnits !== "true") {
+      query.parentBuilding = null;
     }
 
     const buildings = await Building.find(query)
@@ -413,6 +452,30 @@ exports.updateBuilding = async (req, res) => {
     });
     if (!template)
       return sendError(res, "Building form template not found", 404);
+
+    if (formData.isMultiUnit !== undefined) {
+      const nextIsMultiUnit = normalizeBoolean(formData.isMultiUnit);
+      if (building.parentBuilding && nextIsMultiUnit) {
+        return sendError(
+          res,
+          "A unit cannot itself be marked as a Multi-Unit Building",
+          400,
+        );
+      }
+      if (building.isMultiUnit && !nextIsMultiUnit) {
+        const unitCount = await Building.countDocuments({
+          parentBuilding: building._id,
+        });
+        if (unitCount > 0) {
+          return sendError(
+            res,
+            `Cannot disable Multi-Unit Building — ${unitCount} unit(s) are still attached. Remove or reassign them first.`,
+            400,
+          );
+        }
+      }
+      building.isMultiUnit = nextIsMultiUnit;
+    }
 
     if (
       formData.buildingType === "multi_family" &&
@@ -577,6 +640,17 @@ exports.deleteBuilding = async (req, res) => {
 
     const building = await Building.findById(id);
     if (!building) return sendError(res, "Building not found", 404);
+
+    if (building.isMultiUnit) {
+      const unitCount = await Building.countDocuments({ parentBuilding: id });
+      if (unitCount > 0) {
+        return sendError(
+          res,
+          `Cannot delete this building — ${unitCount} unit(s) are still attached. Delete or reassign the units first.`,
+          400,
+        );
+      }
+    }
 
     await building.deleteOne();
 
@@ -1304,7 +1378,10 @@ exports.getBuildingsByPortfolio = async (req, res) => {
     if (!portfolio) return sendError(res, "Portfolio not found", 404);
 
     // Fetch all buildings under this portfolio
-    const buildings = await Building.find({ portfolio: portfolioId })
+    const buildings = await Building.find({
+      portfolio: portfolioId,
+      parentBuilding: null, // exclude units — only top-level buildings belong in this list
+    })
       .populate("createdBy", "preferredName email")
       .populate("portfolio", "portfolioAbbreviation")
       .lean();
@@ -1319,6 +1396,7 @@ exports.getBuildingsByPortfolio = async (req, res) => {
       },
       buildings: buildings.map((b) => ({
         id: b._id,
+        _id: b._id,
         buildingAbbreviation: b.buildingAbbreviation,
         address: b.formData?.address || "",
         fullAddress: b.formData?.fullAddress || "",
@@ -1326,6 +1404,7 @@ exports.getBuildingsByPortfolio = async (req, res) => {
         status: b.status || "vacant",
         monthlyRent: b.formData?.monthlyRent || 0,
         buildingType: b.formData?.buildingType || "",
+        isMultiUnit: b.isMultiUnit || false,
       })),
     });
   } catch (err) {

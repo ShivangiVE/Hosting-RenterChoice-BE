@@ -1,6 +1,39 @@
 const mongoose = require("mongoose");
 const buildingSchema = new mongoose.Schema(
   {
+    isMultiUnit: {
+      type: Boolean,
+      required: [true, "Please specify whether this is a Multi-Unit Building"],
+    },
+
+    parentBuilding: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Building",
+      default: null,
+      index: true,
+      validate: {
+        validator: async function (value) {
+          if (!value) return true; // top-level building — nothing to validate
+          const parent = await mongoose.model("Building").findById(value);
+          if (!parent) return false;
+          // Parent must be a top-level building that is itself flagged
+          // multi-unit. Blocks both "unit under a non-multi-unit building"
+          // and "unit under another unit" (no nesting).
+          return parent.isMultiUnit === true && !parent.parentBuilding;
+        },
+        message:
+          "parentBuilding must reference a top-level building with isMultiUnit set to true",
+      },
+    },
+
+    unitNumber: {
+      type: String,
+      trim: true,
+      required: function () {
+        return !!this.parentBuilding;
+      },
+    },
+
     buildingAbbreviation: {
       type: String,
       required: function () {
@@ -56,7 +89,7 @@ const buildingSchema = new mongoose.Schema(
       required: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Building", buildingSchema);
