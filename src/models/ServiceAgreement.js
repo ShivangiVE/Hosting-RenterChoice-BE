@@ -24,7 +24,10 @@ const serviceAgreementSchema = new mongoose.Schema(
       required: true,
     },
     description: { type: String, required: true },
-    initialDueDate: { type: Date },
+
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
+
     recurringSchedule: {
       type: String,
       enum: ["Weekly", "Monthly", "Quarterly", "Bi-Annually", "Annually"],

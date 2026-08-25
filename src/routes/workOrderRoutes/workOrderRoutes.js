@@ -68,6 +68,7 @@ const {
   rescheduleAppointment,
   cancelAppointment,
   getWorkOrderAppointment,
+  getEligibleEntitiesForScheduling,
 } = require("../../controllers/workOrder/workOrderAppointmentController");
 const {
   WORK_ORDER_ROLES,
@@ -84,7 +85,8 @@ const {
 const {
   getEligibleServiceAgreementsForScheduling,
   createServiceAgreementAppointment,
-  getServiceAgreementAppointment,
+  // getServiceAgreementAppointment,
+  getServiceAgreementAppointments,
 } = require("../../controllers/workOrder/serviceAgreementAppointmentController");
 
 const router = express.Router();
@@ -341,6 +343,13 @@ router.get(
   protect,
   authorize("Vendor"),
   getEligibleWorkOrdersForScheduling,
+);
+
+router.get(
+  "/vendor/eligible-entities",
+  protect,
+  authorize("Vendor"),
+  getEligibleEntitiesForScheduling,
 );
 
 // Create appointment
@@ -613,11 +622,18 @@ router.post(
 );
 
 // Get active appointment for one SA
+// router.get(
+//   "/vendor/service-agreements/:serviceAgreementId/appointment",
+//   protect,
+//   authorize("Vendor"),
+//   getServiceAgreementAppointment,
+// );
+
 router.get(
-  "/vendor/service-agreements/:serviceAgreementId/appointment",
+  "/vendor/service-agreements/:serviceAgreementId/appointments",
   protect,
   authorize("Vendor"),
-  getServiceAgreementAppointment,
+  getServiceAgreementAppointments,
 );
 
 // ========================= Counter =========================
