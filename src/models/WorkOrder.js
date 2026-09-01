@@ -145,6 +145,9 @@ const workOrderSchema = new mongoose.Schema(
       enum: ["pending", "accepted", "declined"],
       default: "pending",
     },
+
+    acceptedAt: { type: Date, default: null },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

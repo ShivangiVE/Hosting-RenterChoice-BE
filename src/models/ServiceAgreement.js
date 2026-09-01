@@ -50,11 +50,15 @@ const serviceAgreementSchema = new mongoose.Schema(
       default: null,
     },
     vendorResponses: [vendorResponseSchema],
+
     vendorResponse: {
       type: String,
       enum: ["pending", "accepted", "declined"],
       default: "pending",
     },
+    
+    acceptedAt: { type: Date, default: null },
+
     declinedDate: { type: Date },
     vendorSeenAt: { type: Date, default: null },
     reassignedAt: { type: Date },
