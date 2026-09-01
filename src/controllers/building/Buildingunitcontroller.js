@@ -56,11 +56,28 @@ exports.createUnit = async (req, res) => {
 
     const { unitNumber, buildingAbbreviation, ...restFormData } = req.body;
 
-    // unitNumber is OPTIONAL on the request — if omitted, auto-generate the
-    // next sequential one. The schema still requires a non-empty value on
-    // every Unit document; this is where that value always comes from, so
-    // the API contract stays friction-free without ever allowing a blank
-    // identifier into the data.
+    if (!restFormData.unitType || !restFormData.unitType.toString().trim()) {
+      return sendError(res, "Unit Type is required", 400);
+    }
+    if (
+      restFormData.floorNumber === undefined ||
+      restFormData.floorNumber === null ||
+      restFormData.floorNumber.toString().trim() === ""
+    ) {
+      return sendError(res, "Floor Number is required", 400);
+    }
+
+    const template = await FormTemplate.findOne({
+      formType: "building",
+      isActive: true,
+    });
+    if (template) {
+      const templateErrors = validateAgainstTemplate(template, restFormData);
+      if (templateErrors.length) {
+        return sendError(res, templateErrors.join(", "), 400);
+      }
+    }
+
     let trimmedUnitNumber =
       unitNumber && unitNumber.toString().trim()
         ? unitNumber.toString().trim()

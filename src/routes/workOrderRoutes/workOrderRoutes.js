@@ -43,6 +43,7 @@ const {
   vendorBulkConfirmKeyReturn,
   getWorkOrderTimeline,
   getVendorChatWorkOrders,
+  getVendorChatEntities,
   reopenWorkOrder,
   getServiceAgreementById,
   getInspectionRequest,
@@ -405,6 +406,14 @@ router.get(
   protect,
   authorize("Vendor"),
   getVendorChatWorkOrders,
+);
+
+// Combined WO + SA picker for starting a chat
+router.get(
+  "/vendor/chat-entities",
+  protect,
+  authorize("Vendor"),
+  getVendorChatEntities,
 );
 
 // ========================= Inspection Requests =========================
