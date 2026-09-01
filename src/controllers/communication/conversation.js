@@ -95,7 +95,7 @@ const { canChat } = require("../../utils/chatPermissions");
 exports.createConversation = async (req, res) => {
   try {
     const sender = req.user;
-    let { receiverId, workOrderId } = req.body;
+    let { receiverId, workOrderId, serviceAgreementId } = req.body;
 
     // ========================================
     // CASE 1: Vendor starting chat
@@ -126,6 +126,60 @@ exports.createConversation = async (req, res) => {
             participants: [sender._id, receiver._id],
             type: "direct",
             workOrder: workOrderId || null,
+          });
+        }
+
+        return res.status(200).json({
+          success: true,
+          conversation,
+        });
+      }
+
+      // VENDOR → REPAIRS TEAM — SERVICE AGREEMENT (GROUP CHAT)
+      if (serviceAgreementId) {
+        const repairTeamMembers = await User.find({
+          role: "RepairsTeam",
+        }).select("_id role");
+
+        if (repairTeamMembers.length === 0) {
+          return res.status(404).json({
+            message: "No Repairs Team members found",
+          });
+        }
+
+        const adminUsers = await User.find({ role: "Admin" }).select(
+          "_id role",
+        );
+
+        const allParticipantIds = [
+          sender._id,
+          ...repairTeamMembers.map((m) => m._id),
+          ...adminUsers.map((a) => a._id),
+        ];
+
+        let conversation = await Conversation.findOne({
+          type: "group",
+          serviceAgreement: serviceAgreementId,
+          participants: { $all: [sender._id] },
+        });
+
+        if (conversation) {
+          const currentParticipants = conversation.participants.map((p) =>
+            p.toString(),
+          );
+          const newParticipants = allParticipantIds.filter(
+            (id) => !currentParticipants.includes(id.toString()),
+          );
+
+          if (newParticipants.length > 0) {
+            conversation.participants = allParticipantIds;
+            await conversation.save();
+          }
+        } else {
+          conversation = await Conversation.create({
+            participants: allParticipantIds,
+            type: "group",
+            serviceAgreement: serviceAgreementId,
           });
         }
 
@@ -282,6 +336,11 @@ exports.getConversations = async (req, res) => {
           },
         })
         .populate({
+          path: "serviceAgreement",
+          select: "serviceAgreementNumber status building",
+          populate: { path: "building", select: "formData.address" },
+        })
+        .populate({
           path: "lastMessage",
           populate: { path: "sender", select: "preferredName role" },
         })
@@ -316,6 +375,31 @@ exports.getConversationByWorkOrder = async (req, res) => {
 
     const conversation = await Conversation.findOne({
       workOrder: workOrderId,
+      participants: userId,
+    })
+      .populate("participants", "preferredName role profileImage")
+      .populate("lastMessage");
+
+    if (!conversation) {
+      return res.json({ success: true, conversation: null });
+    }
+
+    return res.json({ success: true, conversation });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to load conversation" });
+  }
+};
+
+/**
+ * GET Conversation by Service Agreement
+ */
+exports.getConversationByServiceAgreement = async (req, res) => {
+  try {
+    const { serviceAgreementId } = req.params;
+    const userId = req.user._id;
+
+    const conversation = await Conversation.findOne({
+      serviceAgreement: serviceAgreementId,
       participants: userId,
     })
       .populate("participants", "preferredName role profileImage")

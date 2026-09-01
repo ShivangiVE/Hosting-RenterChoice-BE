@@ -8,7 +8,16 @@ const conversationSchema = new mongoose.Schema(
       enum: ["direct", "group", "support"],
       default: "direct",
     },
-    workOrder: { type: mongoose.Schema.Types.ObjectId, ref: "WorkOrder" },
+    workOrder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WorkOrder",
+      default: null,
+    },
+    serviceAgreement: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceAgreement",
+      default: null,
+    },
     lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: "Message" },
   },
   { timestamps: true },

@@ -72,6 +72,8 @@ const validateAgainstTemplate = (template, formData) => {
   return errors;
 };
 
+exports.validateAgainstTemplate = validateAgainstTemplate;
+
 const normalizeBoolean = (val) => {
   if (typeof val === "boolean") return val;
   if (typeof val === "string")
@@ -89,7 +91,9 @@ async function saveSubmission(formType, formData, userId) {
       fullAddress: "",
       buildingType: "",
       unitType: "",
+      buildingName: "",
       floorNumber: "",
+      totalFloors: "",
       isCondo: false,
       bedrooms: 0,
       bathrooms: 0,

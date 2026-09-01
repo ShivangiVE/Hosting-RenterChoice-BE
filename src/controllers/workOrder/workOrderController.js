@@ -680,6 +680,7 @@ exports.getVendorEntities = async (req, res) => {
               sortCreatedAt: "$createdAt",
               sortDueDate: "$dueDate",
               sortCompletedDate: "$completeDate",
+              sortAcceptedAt: "$acceptedAt",
             },
           },
         ]
@@ -694,6 +695,7 @@ exports.getVendorEntities = async (req, res) => {
               sortCreatedAt: "$createdAt",
               sortDueDate: "$startDate",
               sortCompletedDate: "$closedAt",
+              sortAcceptedAt: "$acceptedAt",
             },
           },
         ]
@@ -707,7 +709,8 @@ exports.getVendorEntities = async (req, res) => {
     };
 
     const TAB_DEFAULT_SORT = {
-      Pending: { field: "sortDueDate", order: "asc" },
+      // Pending: { field: "sortDueDate", order: "asc" }, // sort as per due date
+      Pending: { field: "sortAcceptedAt", order: "desc" },
       Completed: { field: "sortCompletedDate", order: "desc" },
       Declined: { field: "declinedDate", order: "desc" },
     };
@@ -1179,6 +1182,7 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
         return sendError(res, "Work order already responded", 400);
       }
       wo.vendorResponse = "accepted";
+      wo.acceptedAt = new Date();
       await wo.save();
       return sendSuccess(res, "Work order accepted", { workOrder: wo });
     }
@@ -1214,6 +1218,7 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
         $set: {
           vendor: vendorId,
           vendorResponse: "accepted",
+          acceptedAt: new Date(),
           "vendorResponses.$.response": "accepted",
           "vendorResponses.$.respondedAt": new Date(),
         },
@@ -2402,6 +2407,54 @@ exports.getVendorChatWorkOrders = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err.message, 500);
+  }
+};
+
+// Combined WO + SA list for the "start a chat" picker.
+exports.getVendorChatEntities = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+
+    const pipeline = [
+      { $match: { vendor: vendorId } },
+      {
+        $project: {
+          entityType: { $literal: "WorkOrder" },
+          number: "$workOrderNumber",
+          status: "$status",
+          building: "$building",
+          createdAt: "$createdAt",
+        },
+      },
+      {
+        $unionWith: {
+          coll: "serviceagreements",
+          pipeline: [
+            { $match: { vendor: vendorId } },
+            {
+              $project: {
+                entityType: { $literal: "ServiceAgreement" },
+                number: "$serviceAgreementNumber",
+                status: "$status",
+                building: "$building",
+                createdAt: "$createdAt",
+              },
+            },
+          ],
+        },
+      },
+      { $sort: { createdAt: -1 } },
+    ];
+
+    const entities = await WorkOrder.aggregate(pipeline);
+    const populated = await WorkOrder.populate(entities, {
+      path: "building",
+      select: "formData.address",
+    });
+
+    return sendSuccess(res, "Chat entities fetched", { entities: populated });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch chat entities", 500);
   }
 };
 
