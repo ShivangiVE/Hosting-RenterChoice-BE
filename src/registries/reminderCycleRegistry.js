@@ -5,6 +5,7 @@ const MINUTES = {
   days3: 3 * 24 * 60,
   days7: 7 * 24 * 60,
   days14: 14 * 24 * 60,
+  days16: 16 * 24 * 60,
   days30: 30 * 24 * 60,
 };
 
@@ -24,6 +25,32 @@ const CYCLES = {
     MINUTES.days3, // reminder 4 → 3 days later
     MINUTES.days3, // reminder 5 → 3 days later
     // reminder 6+ → 1 day (repeating last entry)
+    MINUTES.day,
+  ],
+
+  // Service Agreement: escalating "still needs assignment" alert for an
+  // auto-created recurring cycle. Alert #1 fires at creation time — T-30
+  // days before the new cycle's start date (handled directly in
+  // serviceAgreementCycleService.createNextCycle). This table governs the
+  // follow-ups consumed by serviceAgreementCycleProcessor:
+  //   T-30d (already fired) -> T-14d -> T-7d -> daily through T-0 (and
+  //   beyond, since the last entry repeats, until someone routes it).
+  SA_NEW_CYCLE_ALERT: [
+    MINUTES.days16, // 30d -> 14d before start
+    MINUTES.days7, // 14d -> 7d before start
+    MINUTES.day, // 7d -> daily for the final week (repeats)
+  ],
+
+  // Service Agreement: insistent reminder once a cycle's end date has
+  // passed with zero invoices ever submitted for it. Mirrors
+  // VENDOR_DEFAULT's cadence intentionally — same "how urgent is this"
+  // shape, different concern.
+  SA_FINAL_INVOICE_PENDING: [
+    MINUTES.day,
+    MINUTES.days7,
+    MINUTES.days3,
+    MINUTES.days3,
+    MINUTES.days3,
     MINUTES.day,
   ],
 };

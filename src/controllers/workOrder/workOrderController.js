@@ -39,6 +39,11 @@ const {
   buildVendorWorkOrderMatch,
   buildVendorServiceAgreementMatch,
 } = require("./workOrderQueryBuilder");
+const {
+  cycleNumberToLetters,
+  buildCycleAgreementNumber,
+} = require("../../utils/serviceAgreementNumbering");
+const { computeNextCycleDates } = require("../../utils/dateMath");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -3387,7 +3392,19 @@ exports.createServiceAgreement = async (req, res) => {
     }
 
     const sequence = await getNextSequence("serviceAgreement");
-    const serviceAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
+    const baseAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
+
+    const isRecurring = !!recurringSchedule;
+    const cycleNumber = isRecurring ? 1 : null;
+    const cycleLetter = isRecurring ? cycleNumberToLetters(1) : null; // "a"
+    const serviceAgreementNumber = buildCycleAgreementNumber(
+      baseAgreementNumber,
+      cycleLetter,
+    );
+
+    // Pre-generate the _id so a recurring agreement's first cycle can point
+    // recurringGroupId at itself in a single create() call.
+    const _id = new mongoose.Types.ObjectId();
 
     // ── Resolve assignment: direct vendor > company pool > unassigned ──
     let assignmentType = "unassigned";
@@ -3415,8 +3432,23 @@ exports.createServiceAgreement = async (req, res) => {
       }));
     }
 
+    let nextCycleStartDate;
+    if (isRecurring) {
+      nextCycleStartDate = computeNextCycleDates(
+        startDate,
+        endDate,
+        recurringSchedule,
+      ).startDate;
+    }
+
     const serviceAgreement = await ServiceAgreement.create({
+      _id,
       serviceAgreementNumber,
+      baseAgreementNumber,
+      recurringGroupId: isRecurring ? _id : undefined,
+      cycleNumber,
+      cycleLetter,
+      nextCycleStartDate,
       category: resolvedCategory,
       building,
       description,
@@ -4290,6 +4322,7 @@ exports.updateServiceAgreement = async (req, res) => {
       updateData.vendorSeenAt = null;
       updateData.reassignedAt = new Date();
       updateData.reassignedBy = req.user._id;
+      updateData.awaitingCycleRouting = false;
 
       const updated = await ServiceAgreement.findByIdAndUpdate(id, updateData, {
         new: true,
@@ -4558,6 +4591,7 @@ exports.reassignServiceAgreement = async (req, res) => {
     sa.vendorSeenAt = null;
     sa.reassignedAt = new Date();
     sa.reassignedBy = req.user._id;
+    sa.awaitingCycleRouting = false;
 
     await sa.save();
 

@@ -21,6 +21,13 @@ const NOTIFICATION_EVENTS = {
   DUE_DATE_EXTENSION_REQUESTED: {
     roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
   },
+  SERVICE_AGREEMENT_NEW_CYCLE_CREATED: {
+    roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
+  },
+
+  SERVICE_AGREEMENT_FINAL_INVOICE_CHECK: {
+    roles: ["Admin", "OfficeAdmin", "AccountsTeam"],
+  },
 };
 
 module.exports = NOTIFICATION_EVENTS;
