@@ -1,0 +1,37 @@
+module.exports = {
+  types: {
+    WORK_ORDER_ACCEPT_DECLINE_REMINDER: "WORK_ORDER_ACCEPT_DECLINE_REMINDER",
+    WORK_ORDER_ACCEPT_DECLINE_EXPIRED: "WORK_ORDER_ACCEPT_DECLINE_EXPIRED",
+    WORK_ORDER_TENANT_CONTACT_REMINDER: "WORK_ORDER_TENANT_CONTACT_REMINDER",
+    WORK_ORDER_TENANT_CONTACT_EXPIRED: "WORK_ORDER_TENANT_CONTACT_EXPIRED",
+    WORK_ORDER_ATTACHMENT_UPLOADED: "WORK_ORDER_ATTACHMENT_UPLOADED",
+    WORK_ORDER_STATUS_CHANGED: "WORK_ORDER_STATUS_CHANGED",
+    WORK_ORDER_FOLLOW_UP_REQUIRED: "WORK_ORDER_FOLLOW_UP_REQUIRED",
+    WORK_ORDER_RETURN_VISIT_ALERT: "WORK_ORDER_RETURN_VISIT_ALERT",
+    WORK_ORDER_INVOICE_ACCOUNTS_ESCALATION:
+      "WORK_ORDER_INVOICE_ACCOUNTS_ESCALATION",
+  },
+  events: {
+    WORK_ORDER_ACCEPT_DECLINE_EXPIRED: {
+      roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
+    },
+    WORK_ORDER_TENANT_CONTACT_EXPIRED: {
+      roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
+    },
+    WORK_ORDER_ATTACHMENT_UPLOADED: {
+      roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
+    },
+    WORK_ORDER_STATUS_CHANGED: {
+      roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
+    },
+    WORK_ORDER_FOLLOW_UP_REQUIRED: {
+      roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
+    },
+    WORK_ORDER_RETURN_VISIT_ALERT: {
+      roles: ["Admin", "OfficeAdmin", "RepairsTeam"],
+    },
+    WORK_ORDER_INVOICE_ACCOUNTS_ESCALATION: {
+      roles: ["Admin", "OfficeAdmin", "AccountsTeam"],
+    },
+  },
+};
