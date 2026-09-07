@@ -9,8 +9,15 @@ const REMINDER_TYPES = [
   "INSPECTION_REPORT_PENDING",
   "LEASE_EXPIRY_NOTICE",
   "TASK_OVERDUE",
+  // Service Agreement recurring-cycle notifications — added so repeated
+  // sweep ticks within the same minute (or a re-run) can't double-fire.
   "SERVICE_AGREEMENT_NEW_CYCLE_CREATED",
   "SERVICE_AGREEMENT_FINAL_INVOICE_CHECK",
+  // Vendor Work Order lifecycle — the two new single-recipient reminder
+  // cascades driven through the generic engine (Accept/Decline,
+  // tenant-contact). Same reasoning as above.
+  "WORK_ORDER_ACCEPT_DECLINE_REMINDER",
+  "WORK_ORDER_TENANT_CONTACT_REMINDER",
 ];
 
 exports.createNotification = async ({

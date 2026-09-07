@@ -1,7 +1,12 @@
 const NotificationReminderSchedule = require("../models/NotificationReminderSchedule");
 const { isStillPending } = require("../registries/reminderResolverRegistry");
 const { computeNextFireAt } = require("../registries/reminderCycleRegistry");
-const { notify } = require("../routes/accountsRoutes/coaRoutes");
+const {
+  getEscalationConfig,
+} = require("../registries/reminderEscalationRegistry");
+
+const { createNotification } = require("../services/notificationService");
+const { registerJob } = require("../jobs/registry");
 
 const BATCH_SIZE = 100; // process at most N reminders per tick
 
@@ -29,6 +34,24 @@ async function processReminders() {
 }
 
 async function processOne(reminder, now) {
+  const escalation = getEscalationConfig(reminder.reminderType);
+  if (escalation && escalation.isExhausted(reminder, now)) {
+    try {
+      await escalation.onExhausted(reminder);
+    } catch (err) {
+      console.error(
+        `[ReminderProcessor] onExhausted failed for ${reminder.reminderType} (${reminder._id}):`,
+        err.message,
+      );
+
+      return;
+    }
+    await NotificationReminderSchedule.findByIdAndUpdate(reminder._id, {
+      $set: { status: "cancelled" },
+    });
+    return;
+  }
+
   // ── Check: is the action still pending? ───────────────────────────────────
   const stillPending = await isStillPending(
     reminder.reminderType,
@@ -43,7 +66,7 @@ async function processOne(reminder, now) {
   }
 
   // ── Fire the notification ─────────────────────────────────────────────────
-  await notify({
+  await createNotification({
     user: reminder.userId,
     role: reminder.role,
     type: reminder.reminderType,
@@ -71,3 +94,9 @@ async function processOne(reminder, now) {
 }
 
 module.exports = { processReminders };
+
+registerJob({
+  name: "processReminders",
+  cronExpression: "* * * * *",
+  task: processReminders,
+});

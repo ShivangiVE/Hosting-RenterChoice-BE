@@ -5,6 +5,7 @@ const {
 } = require("../services/internalNotificationService");
 const { getNextDelay } = require("../registries/reminderCycleRegistry");
 const { addDays, getCycleCreationLeadDays } = require("../utils/dateMath");
+const { registerJob } = require("../jobs/registry");
 
 const MS_PER_MINUTE = 60 * 1000;
 
@@ -33,7 +34,7 @@ async function processNextCycleCreation(now) {
       const leadDays = getCycleCreationLeadDays(sa.recurringSchedule);
       const dueBy = addDays(now, leadDays);
 
-      if (sa.nextCycleStartDate > dueBy) continue; 
+      if (sa.nextCycleStartDate > dueBy) continue;
 
       await createNextCycle(sa);
     } catch (err) {
@@ -145,3 +146,9 @@ async function processFinalInvoiceNotifications(now) {
 }
 
 module.exports = { processServiceAgreementCycles };
+
+registerJob({
+  name: "processServiceAgreementCycles",
+  cronExpression: "0 6 * * *",
+  task: processServiceAgreementCycles,
+});
