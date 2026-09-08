@@ -180,6 +180,7 @@ exports.createConversation = async (req, res) => {
             participants: allParticipantIds,
             type: "group",
             serviceAgreement: serviceAgreementId,
+             workOrder: null,                 // <-- add this
           });
         }
 
@@ -242,6 +243,7 @@ exports.createConversation = async (req, res) => {
           participants: allParticipantIds,
           type: "group",
           workOrder: workOrderId || null,
+          serviceAgreement: null,        // <-- add this for consistency
         });
       }
 
