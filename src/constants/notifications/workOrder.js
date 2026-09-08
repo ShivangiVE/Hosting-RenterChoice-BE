@@ -34,4 +34,27 @@ module.exports = {
       roles: ["Admin", "OfficeAdmin", "AccountsTeam"],
     },
   },
+  categories: {
+    WORK_ORDER_UPDATES: {
+      key: "WORK_ORDER_UPDATES",
+      label: "Work Order Updates",
+      roles: ["Vendor"],
+      types: [
+        "WORK_ORDER_ASSIGNED",
+        "WORK_ORDER_ACCEPTED",
+        "WORK_ORDER_DECLINED",
+        "WORK_ORDER_ACCEPT_DECLINE_REMINDER",
+        "WORK_ORDER_ACCEPT_DECLINE_EXPIRED",
+        "WORK_ORDER_TENANT_CONTACT_REMINDER",
+        "WORK_ORDER_TENANT_CONTACT_EXPIRED",
+        "DUE_DATE_EXTENSION_REVIEWED",
+      ],
+    },
+    INVOICE_UPDATES: {
+      key: "INVOICE_UPDATES",
+      label: "Invoice Updates",
+      roles: ["Vendor"],
+      types: ["INVOICE_UPLOAD_PENDING"],
+    },
+  },
 };
