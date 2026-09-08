@@ -39,6 +39,18 @@ const {
   buildVendorWorkOrderMatch,
   buildVendorServiceAgreementMatch,
 } = require("./workOrderQueryBuilder");
+const {
+  cycleNumberToLetters,
+  buildCycleAgreementNumber,
+} = require("../../utils/serviceAgreementNumbering");
+const { computeNextCycleDates } = require("../../utils/dateMath");
+const {
+  scheduleAcceptDeclineReminder,
+  resolveAcceptDeclineReminder,
+  scheduleTenantContactReminder,
+  applyDynamicStatusChangeSideEffects,
+  scheduleInvoiceVendorReminder,
+} = require("../../services/workOrderReminderService");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -212,6 +224,13 @@ async function notifyVendorAssigned(workOrder, vendorIds) {
       workOrderNumber: workOrder.workOrderNumber,
     });
   });
+
+  // ── REMINDER ENGINE: every 24h for 2 business days until they respond ──
+  await Promise.all(
+    vendorIds.map((vendorId) =>
+      scheduleAcceptDeclineReminder(workOrder, vendorId),
+    ),
+  );
 }
 
 // Get all work orders
@@ -1120,7 +1139,6 @@ exports.updateWorkOrder = async (req, res) => {
       );
     }
 
-    // ── No company change — behave exactly as before ───────────────────
     const updated = await WorkOrder.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -1170,7 +1188,7 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
     if (!wo) return sendError(res, "Work order not found", 404);
 
     if (wo.assignmentType === "direct") {
-      // ── Legacy single-vendor path (unchanged behavior) ──────────
+      // ── Legacy single-vendor path ──────────
       if (!wo.vendor || wo.vendor.toString() !== vendorId.toString()) {
         return sendError(
           res,
@@ -1184,6 +1202,8 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
       wo.vendorResponse = "accepted";
       wo.acceptedAt = new Date();
       await wo.save();
+      await resolveAcceptDeclineReminder(wo._id, vendorId);
+      await scheduleTenantContactReminder(wo);
       return sendSuccess(res, "Work order accepted", { workOrder: wo });
     }
 
@@ -1271,6 +1291,9 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
       });
     }
 
+    await resolveAcceptDeclineReminder(claimed._id, vendorId);
+    await scheduleTenantContactReminder(claimed);
+
     return sendSuccess(res, "Work order accepted", { workOrder: claimed });
   } catch (err) {
     return sendError(res, err.message || "Failed to accept work order", 500);
@@ -1290,7 +1313,7 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
     if (!wo) return sendError(res, "Work order not found", 404);
 
     if (wo.assignmentType === "direct") {
-      // ── Legacy path (unchanged) ─────────────────────────────────
+      // ── Legacy path
       if (!wo.vendor || wo.vendor.toString() !== vendorId.toString()) {
         return sendError(
           res,
@@ -1306,6 +1329,7 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
       wo.declinedDate = new Date();
       wo.status = "open";
       await wo.save();
+      await resolveAcceptDeclineReminder(wo._id, vendorId);
       return sendSuccess(res, "Work order declined", { workOrder: wo });
     }
 
@@ -1360,6 +1384,8 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
         entityId: updated._id,
       }).catch(console.error);
     }
+
+    await resolveAcceptDeclineReminder(updated._id, vendorId);
 
     return sendSuccess(res, "Work order declined", { workOrder: updated });
   } catch (err) {
@@ -1434,6 +1460,8 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
       );
     }
 
+    const previousStatusName = currentStatusName;
+
     if (newStatus && newStatus.name === "Declined") {
       workOrder.dynamicStatus = newStatus._id;
       workOrder.declinedDate = new Date();
@@ -1444,6 +1472,10 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
     }
 
     await workOrder.save();
+
+    if (updates.dynamicStatus) {
+      await applyDynamicStatusChangeSideEffects(workOrder, previousStatusName);
+    }
 
     const updated = await WorkOrder.findById(id).populate(
       "dynamicStatus",
@@ -1528,6 +1560,14 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
       updateFields.status = "open";
     }
     await WorkOrder.updateMany({ _id: { $in: ids } }, { $set: updateFields });
+
+    await Promise.all(
+      workOrders.map(async (wo) => {
+        const dyn = await WODynamicStatus.findById(wo.dynamicStatus);
+        const freshWo = await WorkOrder.findById(wo._id);
+        await applyDynamicStatusChangeSideEffects(freshWo, dyn?.name);
+      }),
+    );
 
     return sendSuccess(res, "Statuses updated successfully", {
       updatedCount: ids.length,
@@ -1992,18 +2032,22 @@ exports.markWorkOrderCompleted = async (req, res) => {
 
     // ── REMINDER ENGINE: schedule recurring reminders ─────────────────────
     // Invoice reminder — only when vendor chose "upload later"
+    // if (workOrder.invoicePending) {
+    //   await scheduleReminder({
+    //     reminderType: "INVOICE_UPLOAD_PENDING",
+    //     entityType: "WorkOrder",
+    //     entityId: workOrder._id,
+    //     userId: workOrder.vendor,
+    //     role: "Vendor",
+    //     cycleId: "VENDOR_DEFAULT",
+    //     title: "Invoice Upload Pending",
+    //     message: `Please upload the invoice for work order ${workOrder.workOrderNumber}.`,
+    //     metadata: { workOrderNumber: workOrder.workOrderNumber },
+    //   });
+    // }
+
     if (workOrder.invoicePending) {
-      await scheduleReminder({
-        reminderType: "INVOICE_UPLOAD_PENDING",
-        entityType: "WorkOrder",
-        entityId: workOrder._id,
-        userId: workOrder.vendor,
-        role: "Vendor",
-        cycleId: "VENDOR_DEFAULT",
-        title: "Invoice Upload Pending",
-        message: `Please upload the invoice for work order ${workOrder.workOrderNumber}.`,
-        metadata: { workOrderNumber: workOrder.workOrderNumber },
-      });
+      await scheduleInvoiceVendorReminder(workOrder);
     }
 
     // Key return reminder — only when key was issued and vendor chose "return later"
@@ -3387,7 +3431,19 @@ exports.createServiceAgreement = async (req, res) => {
     }
 
     const sequence = await getNextSequence("serviceAgreement");
-    const serviceAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
+    const baseAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
+
+    const isRecurring = !!recurringSchedule;
+    const cycleNumber = isRecurring ? 1 : null;
+    const cycleLetter = isRecurring ? cycleNumberToLetters(1) : null; // "a"
+    const serviceAgreementNumber = buildCycleAgreementNumber(
+      baseAgreementNumber,
+      cycleLetter,
+    );
+
+    // Pre-generate the _id so a recurring agreement's first cycle can point
+    // recurringGroupId at itself in a single create() call.
+    const _id = new mongoose.Types.ObjectId();
 
     // ── Resolve assignment: direct vendor > company pool > unassigned ──
     let assignmentType = "unassigned";
@@ -3415,8 +3471,23 @@ exports.createServiceAgreement = async (req, res) => {
       }));
     }
 
+    let nextCycleStartDate;
+    if (isRecurring) {
+      nextCycleStartDate = computeNextCycleDates(
+        startDate,
+        endDate,
+        recurringSchedule,
+      ).startDate;
+    }
+
     const serviceAgreement = await ServiceAgreement.create({
+      _id,
       serviceAgreementNumber,
+      baseAgreementNumber,
+      recurringGroupId: isRecurring ? _id : undefined,
+      cycleNumber,
+      cycleLetter,
+      nextCycleStartDate,
       category: resolvedCategory,
       building,
       description,
@@ -4290,6 +4361,7 @@ exports.updateServiceAgreement = async (req, res) => {
       updateData.vendorSeenAt = null;
       updateData.reassignedAt = new Date();
       updateData.reassignedBy = req.user._id;
+      updateData.awaitingCycleRouting = false;
 
       const updated = await ServiceAgreement.findByIdAndUpdate(id, updateData, {
         new: true,
@@ -4558,6 +4630,7 @@ exports.reassignServiceAgreement = async (req, res) => {
     sa.vendorSeenAt = null;
     sa.reassignedAt = new Date();
     sa.reassignedBy = req.user._id;
+    sa.awaitingCycleRouting = false;
 
     await sa.save();
 

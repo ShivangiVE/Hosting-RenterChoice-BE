@@ -221,6 +221,7 @@ exports.createConversation = async (req, res) => {
       let conversation = await Conversation.findOne({
         type: "group",
         workOrder: workOrderId || null,
+         serviceAgreement: null,
         participants: { $all: [sender._id] },
       });
 
@@ -242,6 +243,7 @@ exports.createConversation = async (req, res) => {
           participants: allParticipantIds,
           type: "group",
           workOrder: workOrderId || null,
+          serviceAgreement: null,
         });
       }
 

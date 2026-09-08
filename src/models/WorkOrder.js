@@ -37,7 +37,7 @@ const vendorResponseSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     response: {
       type: String,
-      enum: ["pending", "accepted", "declined", "superseded"],
+      enum: ["pending", "accepted", "declined", "superseded", "expired"],
       default: "pending",
     },
     respondedAt: Date,
@@ -114,6 +114,7 @@ const workOrderSchema = new mongoose.Schema(
 
     invoicePending: { type: Boolean, default: false },
     invoiceUploaded: { type: Boolean, default: false },
+    accountsInvoiceEscalationSent: { type: Boolean, default: false },
 
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
     invoiceStatus: {
@@ -142,9 +143,16 @@ const workOrderSchema = new mongoose.Schema(
 
     vendorResponse: {
       type: String,
-      enum: ["pending", "accepted", "declined"],
+      enum: ["pending", "accepted", "declined", "expired"],
       default: "pending",
     },
+
+    returnVisitStatusSetAt: { type: Date, default: null },
+    returnVisitAlertCount: { type: Number, default: 0 },
+    lastReturnVisitAlertFiredAt: { type: Date, default: null },
+    returnVisitAlertsSilencedUntil: { type: Date, default: null },
+    accountsInvoiceEscalationSent: { type: Boolean, default: false }, // wait — check this one first, see below
+    tenantContactConfirmedAt: { type: Date, default: null },
 
     acceptedAt: { type: Date, default: null },
 

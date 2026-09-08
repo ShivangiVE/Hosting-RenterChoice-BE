@@ -46,6 +46,35 @@ const resolvers = {
     if (!task) return false;
     return !["completed", "cancelled"].includes(task.status);
   },
+
+  async WORK_ORDER_ACCEPT_DECLINE_REMINDER(entityId) {
+    const WorkOrder = require("../../models/WorkOrder");
+    const wo = await WorkOrder.findById(entityId)
+      .select("assignmentType vendorResponse")
+      .lean();
+    if (!wo) return false;
+    if (wo.assignmentType === "direct") {
+      return wo.vendorResponse === "pending";
+    }
+    // Company pool: the reminder is scheduled per invited vendor (see
+    // notificationReminderService's userId-scoped idempotency). If THIS
+    // vendor already responded, vendorAcceptWorkOrder/vendorDeclineWorkOrder
+    // already called resolveAcceptDeclineReminder directly for them — so
+    // any schedule still "active" by the time this resolver runs is
+    // genuinely still pending. There's no per-vendor field to check here
+    // because isStillPending only receives (reminderType, entityId), not
+    // which vendor's schedule is being evaluated.
+    return true;
+  },
+
+  async WORK_ORDER_TENANT_CONTACT_REMINDER(entityId) {
+    const WorkOrder = require("../../models/WorkOrder");
+    const wo = await WorkOrder.findById(entityId)
+      .select("tenantContactConfirmedAt")
+      .lean();
+    if (!wo) return false;
+    return !wo.tenantContactConfirmedAt;
+  },
 };
 
 /**
