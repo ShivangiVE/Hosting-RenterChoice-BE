@@ -12,14 +12,6 @@ const WorkOrderAppointment = require("../../models/WorkOrderAppointment");
 const { sendError, sendSuccess } = require("../../utils/response");
 const ACTIVE_APPOINTMENT_STATUSES = ["scheduled", "rescheduled"];
 
-/**
- * Get eligible work orders for scheduling
- * Only returns work orders that:
- * 1. Are assigned to the logged-in vendor
- * 2. Have vendorResponse = "accepted"
- * 3. Don't have primary status = "closed"
- * 4. Don't have dynamic status = "Completed"
- */
 exports.getEligibleWorkOrdersForScheduling = async (req, res) => {
   try {
     const vendorId = req.user._id;
@@ -60,7 +52,7 @@ exports.getEligibleWorkOrdersForScheduling = async (req, res) => {
         select: "buildingAbbreviation formData.address",
       })
       .populate("dynamicStatus", "name")
-      .sort({ dueDate: 1, createdAt: -1 }) // Prioritize by due date
+      .sort({ dueDate: 1, createdAt: -1 })
       .lean();
 
     // Check for existing appointments
@@ -89,6 +81,92 @@ exports.getEligibleWorkOrdersForScheduling = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to fetch eligible work orders",
+      500,
+    );
+  }
+};
+
+exports.getEligibleEntitiesForScheduling = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+
+    // ── Work Orders eligible for scheduling ──
+    const excludedStatuses = await WODynamicStatus.find({
+      name: { $in: ["Completed", "Declined"] },
+    }).select("_id");
+    const excludedStatusIds = excludedStatuses.map((s) => s._id);
+
+    const activeWOAppointmentIds = await WorkOrderAppointment.distinct(
+      "workOrder",
+      { vendor: vendorId, status: { $in: ["scheduled", "rescheduled"] } },
+    );
+
+    const woMatch = {
+      vendor: vendorId,
+      vendorResponse: "accepted",
+      status: "open",
+      ...(excludedStatusIds.length && {
+        dynamicStatus: { $nin: excludedStatusIds },
+      }),
+      ...(activeWOAppointmentIds.length && {
+        _id: { $nin: activeWOAppointmentIds },
+      }),
+    };
+
+    // ── Service Agreements eligible for scheduling ──
+    const saMatch = {
+      vendor: vendorId,
+      vendorResponse: "accepted",
+      status: "open",
+    };
+
+    const pipeline = [
+      { $match: woMatch },
+      {
+        $project: {
+          entityType: { $literal: "WorkOrder" },
+          number: "$workOrderNumber",
+          dueDate: "$dueDate",
+          building: "$building",
+        },
+      },
+      {
+        $unionWith: {
+          coll: "serviceagreements",
+          pipeline: [
+            { $match: saMatch },
+            {
+              $project: {
+                entityType: { $literal: "ServiceAgreement" },
+                number: "$serviceAgreementNumber",
+                dueDate: "$startDate",
+                startDate: "$startDate",
+                endDate: "$endDate",
+                building: "$building",
+              },
+            },
+          ],
+        },
+      },
+      { $sort: { dueDate: 1 } },
+    ];
+
+    const entities = await WorkOrder.aggregate(pipeline);
+
+    const populated = await WorkOrder.populate(entities, {
+      path: "building",
+      select: "buildingAbbreviation formData.address",
+    });
+
+    return sendSuccess(res, "Eligible entities fetched successfully", {
+      entities: populated,
+      total: populated.length,
+    });
+  } catch (err) {
+    console.error("Error fetching eligible entities:", err);
+    return sendError(
+      res,
+      err.message || "Failed to fetch eligible entities",
       500,
     );
   }
@@ -293,6 +371,10 @@ exports.rescheduleAppointment = async (req, res) => {
       return sendError(res, rescheduleEligibility.reason, 400);
     }
 
+    if (isAppointmentInPast(appointment.scheduledDate, appointment.timeSlot)) {
+      return sendError(res, "Cannot reschedule a past appointment.", 400);
+    }
+
     // 6. Validate new date
     const newScheduleDateObj = new Date(scheduledDate);
     newScheduleDateObj.setHours(0, 0, 0, 0);
@@ -319,7 +401,7 @@ exports.rescheduleAppointment = async (req, res) => {
       }
     }
 
-    // 9. Entity-aware eligibility check 
+    // 9. Entity-aware eligibility check
     let scheduleEligibility;
     if (appointment.entityType === "ServiceAgreement") {
       const serviceAgreement = await ServiceAgreement.findById(
@@ -342,6 +424,29 @@ exports.rescheduleAppointment = async (req, res) => {
 
     if (!scheduleEligibility.allowed) {
       return sendError(res, scheduleEligibility.reason, 400);
+    }
+
+    // 9a. Service Agreement only: block moving this appointment onto a date
+    // another active appointment for the SAME SA already occupies. Scoped
+    // strictly to entityType === "ServiceAgreement" — Work Order reschedule
+    // behavior is completely untouched (a WO can only ever have one active
+    // appointment at all, so this branch never runs for WO appointments).
+    if (appointment.entityType === "ServiceAgreement") {
+      const sameDateConflict = await WorkOrderAppointment.findOne({
+        _id: { $ne: appointment._id },
+        entityType: "ServiceAgreement",
+        entityId: appointment.entityId,
+        status: { $in: ["scheduled", "rescheduled"] },
+        scheduledDate: newScheduleDateObj,
+      });
+
+      if (sameDateConflict) {
+        return sendError(
+          res,
+          "You already have an appointment scheduled for this service agreement on this date. Please choose a different date.",
+          409,
+        );
+      }
     }
 
     // 10. Save current appointment to history
@@ -581,7 +686,7 @@ exports.getAppointmentDetails = async (req, res) => {
       .populate(
         isSA ? "entityId" : "workOrder",
         isSA
-          ? "serviceAgreementNumber description initialDueDate vendorResponse"
+          ? "serviceAgreementNumber description startDate endDate vendorResponse"
           : "workOrderNumber description dueDate vendorResponse",
       )
       .populate(

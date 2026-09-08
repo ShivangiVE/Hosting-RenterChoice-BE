@@ -124,7 +124,7 @@ const buildServiceAgreementFilter = async (query, baseFilter = {}) => {
     const start = new Date(dueDate);
     const end = new Date(dueDate);
     end.setHours(23, 59, 59, 999);
-    filter.initialDueDate = { $gte: start, $lte: end };
+    filter.startDate = { $gte: start, $lte: end };
   }
 
   // Category
@@ -393,7 +393,7 @@ const buildVendorServiceAgreementMatch = async (vendorId, query) => {
     start.setHours(0, 0, 0, 0);
     const end = new Date(dueDate);
     end.setHours(23, 59, 59, 999);
-    match.initialDueDate = { $gte: start, $lte: end };
+    match.startDate = { $gte: start, $lte: end };
   }
 
   if (completedDate) {

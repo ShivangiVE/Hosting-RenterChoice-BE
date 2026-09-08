@@ -39,6 +39,18 @@ const {
   buildVendorWorkOrderMatch,
   buildVendorServiceAgreementMatch,
 } = require("./workOrderQueryBuilder");
+const {
+  cycleNumberToLetters,
+  buildCycleAgreementNumber,
+} = require("../../utils/serviceAgreementNumbering");
+const { computeNextCycleDates } = require("../../utils/dateMath");
+const {
+  scheduleAcceptDeclineReminder,
+  resolveAcceptDeclineReminder,
+  scheduleTenantContactReminder,
+  applyDynamicStatusChangeSideEffects,
+  scheduleInvoiceVendorReminder,
+} = require("../../services/workOrderReminderService");
 
 // Helper function to get next sequence number
 const getNextSequence = async (sequenceName) => {
@@ -53,6 +65,15 @@ const getNextSequence = async (sequenceName) => {
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+const resolveCategoryName = async (categoryValue) => {
+  if (!categoryValue) return categoryValue;
+  if (mongoose.Types.ObjectId.isValid(categoryValue)) {
+    const categoryDoc = await Category.findById(categoryValue).select("name");
+    return categoryDoc ? categoryDoc.name : categoryValue;
+  }
+  return categoryValue;
+};
 
 // Peek next sequence number without incrementing
 exports.getNextCounterValue = async (req, res) => {
@@ -203,6 +224,13 @@ async function notifyVendorAssigned(workOrder, vendorIds) {
       workOrderNumber: workOrder.workOrderNumber,
     });
   });
+
+  // ── REMINDER ENGINE: every 24h for 2 business days until they respond ──
+  await Promise.all(
+    vendorIds.map((vendorId) =>
+      scheduleAcceptDeclineReminder(workOrder, vendorId),
+    ),
+  );
 }
 
 // Get all work orders
@@ -657,7 +685,7 @@ exports.getVendorEntities = async (req, res) => {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-     const { sortBy, sortOrder, tab } = req.query;
+    const { sortBy, sortOrder, tab } = req.query;
 
     const woMatch = await buildVendorWorkOrderMatch(vendorId, req.query);
     const saMatch = await buildVendorServiceAgreementMatch(vendorId, req.query);
@@ -671,6 +699,7 @@ exports.getVendorEntities = async (req, res) => {
               sortCreatedAt: "$createdAt",
               sortDueDate: "$dueDate",
               sortCompletedDate: "$completeDate",
+              sortAcceptedAt: "$acceptedAt",
             },
           },
         ]
@@ -683,8 +712,9 @@ exports.getVendorEntities = async (req, res) => {
             $addFields: {
               entityType: "ServiceAgreement",
               sortCreatedAt: "$createdAt",
-              sortDueDate: "$initialDueDate",
+              sortDueDate: "$startDate",
               sortCompletedDate: "$closedAt",
+              sortAcceptedAt: "$acceptedAt",
             },
           },
         ]
@@ -698,7 +728,8 @@ exports.getVendorEntities = async (req, res) => {
     };
 
     const TAB_DEFAULT_SORT = {
-      Pending: { field: "sortDueDate", order: "asc" },
+      // Pending: { field: "sortDueDate", order: "asc" }, // sort as per due date
+      Pending: { field: "sortAcceptedAt", order: "desc" },
       Completed: { field: "sortCompletedDate", order: "desc" },
       Declined: { field: "declinedDate", order: "desc" },
     };
@@ -1108,7 +1139,6 @@ exports.updateWorkOrder = async (req, res) => {
       );
     }
 
-    // ── No company change — behave exactly as before ───────────────────
     const updated = await WorkOrder.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -1158,7 +1188,7 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
     if (!wo) return sendError(res, "Work order not found", 404);
 
     if (wo.assignmentType === "direct") {
-      // ── Legacy single-vendor path (unchanged behavior) ──────────
+      // ── Legacy single-vendor path ──────────
       if (!wo.vendor || wo.vendor.toString() !== vendorId.toString()) {
         return sendError(
           res,
@@ -1170,7 +1200,10 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
         return sendError(res, "Work order already responded", 400);
       }
       wo.vendorResponse = "accepted";
+      wo.acceptedAt = new Date();
       await wo.save();
+      await resolveAcceptDeclineReminder(wo._id, vendorId);
+      await scheduleTenantContactReminder(wo);
       return sendSuccess(res, "Work order accepted", { workOrder: wo });
     }
 
@@ -1205,6 +1238,7 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
         $set: {
           vendor: vendorId,
           vendorResponse: "accepted",
+          acceptedAt: new Date(),
           "vendorResponses.$.response": "accepted",
           "vendorResponses.$.respondedAt": new Date(),
         },
@@ -1257,6 +1291,9 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
       });
     }
 
+    await resolveAcceptDeclineReminder(claimed._id, vendorId);
+    await scheduleTenantContactReminder(claimed);
+
     return sendSuccess(res, "Work order accepted", { workOrder: claimed });
   } catch (err) {
     return sendError(res, err.message || "Failed to accept work order", 500);
@@ -1276,7 +1313,7 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
     if (!wo) return sendError(res, "Work order not found", 404);
 
     if (wo.assignmentType === "direct") {
-      // ── Legacy path (unchanged) ─────────────────────────────────
+      // ── Legacy path
       if (!wo.vendor || wo.vendor.toString() !== vendorId.toString()) {
         return sendError(
           res,
@@ -1292,6 +1329,7 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
       wo.declinedDate = new Date();
       wo.status = "open";
       await wo.save();
+      await resolveAcceptDeclineReminder(wo._id, vendorId);
       return sendSuccess(res, "Work order declined", { workOrder: wo });
     }
 
@@ -1346,6 +1384,8 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
         entityId: updated._id,
       }).catch(console.error);
     }
+
+    await resolveAcceptDeclineReminder(updated._id, vendorId);
 
     return sendSuccess(res, "Work order declined", { workOrder: updated });
   } catch (err) {
@@ -1420,6 +1460,8 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
       );
     }
 
+    const previousStatusName = currentStatusName;
+
     if (newStatus && newStatus.name === "Declined") {
       workOrder.dynamicStatus = newStatus._id;
       workOrder.declinedDate = new Date();
@@ -1430,6 +1472,10 @@ exports.vendorUpdateWorkOrder = async (req, res) => {
     }
 
     await workOrder.save();
+
+    if (updates.dynamicStatus) {
+      await applyDynamicStatusChangeSideEffects(workOrder, previousStatusName);
+    }
 
     const updated = await WorkOrder.findById(id).populate(
       "dynamicStatus",
@@ -1514,6 +1560,14 @@ exports.vendorBulkUpdateWorkOrderStatus = async (req, res) => {
       updateFields.status = "open";
     }
     await WorkOrder.updateMany({ _id: { $in: ids } }, { $set: updateFields });
+
+    await Promise.all(
+      workOrders.map(async (wo) => {
+        const dyn = await WODynamicStatus.findById(wo.dynamicStatus);
+        const freshWo = await WorkOrder.findById(wo._id);
+        await applyDynamicStatusChangeSideEffects(freshWo, dyn?.name);
+      }),
+    );
 
     return sendSuccess(res, "Statuses updated successfully", {
       updatedCount: ids.length,
@@ -1978,18 +2032,22 @@ exports.markWorkOrderCompleted = async (req, res) => {
 
     // ── REMINDER ENGINE: schedule recurring reminders ─────────────────────
     // Invoice reminder — only when vendor chose "upload later"
+    // if (workOrder.invoicePending) {
+    //   await scheduleReminder({
+    //     reminderType: "INVOICE_UPLOAD_PENDING",
+    //     entityType: "WorkOrder",
+    //     entityId: workOrder._id,
+    //     userId: workOrder.vendor,
+    //     role: "Vendor",
+    //     cycleId: "VENDOR_DEFAULT",
+    //     title: "Invoice Upload Pending",
+    //     message: `Please upload the invoice for work order ${workOrder.workOrderNumber}.`,
+    //     metadata: { workOrderNumber: workOrder.workOrderNumber },
+    //   });
+    // }
+
     if (workOrder.invoicePending) {
-      await scheduleReminder({
-        reminderType: "INVOICE_UPLOAD_PENDING",
-        entityType: "WorkOrder",
-        entityId: workOrder._id,
-        userId: workOrder.vendor,
-        role: "Vendor",
-        cycleId: "VENDOR_DEFAULT",
-        title: "Invoice Upload Pending",
-        message: `Please upload the invoice for work order ${workOrder.workOrderNumber}.`,
-        metadata: { workOrderNumber: workOrder.workOrderNumber },
-      });
+      await scheduleInvoiceVendorReminder(workOrder);
     }
 
     // Key return reminder — only when key was issued and vendor chose "return later"
@@ -2393,6 +2451,54 @@ exports.getVendorChatWorkOrders = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err.message, 500);
+  }
+};
+
+// Combined WO + SA list for the "start a chat" picker.
+exports.getVendorChatEntities = async (req, res) => {
+  try {
+    const vendorId = req.user._id;
+
+    const pipeline = [
+      { $match: { vendor: vendorId } },
+      {
+        $project: {
+          entityType: { $literal: "WorkOrder" },
+          number: "$workOrderNumber",
+          status: "$status",
+          building: "$building",
+          createdAt: "$createdAt",
+        },
+      },
+      {
+        $unionWith: {
+          coll: "serviceagreements",
+          pipeline: [
+            { $match: { vendor: vendorId } },
+            {
+              $project: {
+                entityType: { $literal: "ServiceAgreement" },
+                number: "$serviceAgreementNumber",
+                status: "$status",
+                building: "$building",
+                createdAt: "$createdAt",
+              },
+            },
+          ],
+        },
+      },
+      { $sort: { createdAt: -1 } },
+    ];
+
+    const entities = await WorkOrder.aggregate(pipeline);
+    const populated = await WorkOrder.populate(entities, {
+      path: "building",
+      select: "formData.address",
+    });
+
+    return sendSuccess(res, "Chat entities fetched", { entities: populated });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch chat entities", 500);
   }
 };
 
@@ -3300,19 +3406,44 @@ exports.createServiceAgreement = async (req, res) => {
       category,
       building,
       description,
-      initialDueDate,
+      startDate,
+      endDate,
       recurringSchedule,
       vendor,
       company,
     } = req.body;
 
+    if (!startDate || !endDate) {
+      return sendError(res, "Start date and end date are required", 400);
+    }
+
+    validateFutureOrTodayDate(endDate, "End date");
+    if (new Date(endDate) < new Date(startDate)) {
+      return sendError(res, "End date cannot be before start date", 400);
+    }
+
+    const resolvedCategory = await resolveCategoryName(category);
+
     let fileUrl = null;
+
     if (req.file) {
       fileUrl = await uploadFile(req.file, "uploads/Repair/serviceAgreements");
     }
 
     const sequence = await getNextSequence("serviceAgreement");
-    const serviceAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
+    const baseAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
+
+    const isRecurring = !!recurringSchedule;
+    const cycleNumber = isRecurring ? 1 : null;
+    const cycleLetter = isRecurring ? cycleNumberToLetters(1) : null; // "a"
+    const serviceAgreementNumber = buildCycleAgreementNumber(
+      baseAgreementNumber,
+      cycleLetter,
+    );
+
+    // Pre-generate the _id so a recurring agreement's first cycle can point
+    // recurringGroupId at itself in a single create() call.
+    const _id = new mongoose.Types.ObjectId();
 
     // ── Resolve assignment: direct vendor > company pool > unassigned ──
     let assignmentType = "unassigned";
@@ -3340,12 +3471,28 @@ exports.createServiceAgreement = async (req, res) => {
       }));
     }
 
+    let nextCycleStartDate;
+    if (isRecurring) {
+      nextCycleStartDate = computeNextCycleDates(
+        startDate,
+        endDate,
+        recurringSchedule,
+      ).startDate;
+    }
+
     const serviceAgreement = await ServiceAgreement.create({
+      _id,
       serviceAgreementNumber,
-      category,
+      baseAgreementNumber,
+      recurringGroupId: isRecurring ? _id : undefined,
+      cycleNumber,
+      cycleLetter,
+      nextCycleStartDate,
+      category: resolvedCategory,
       building,
       description,
-      initialDueDate,
+      startDate,
+      endDate,
       recurringSchedule,
       assignmentType,
       assignedCompany: assignmentType === "company" ? company : undefined,
@@ -3437,7 +3584,7 @@ exports.getServiceAgreements = async (req, res) => {
       const end = new Date(dueDate);
       end.setHours(23, 59, 59, 999);
 
-      filter.initialDueDate = { $gte: start, $lte: end };
+      filter.startDate = { $gte: start, $lte: end };
     }
 
     //  Category
@@ -3521,16 +3668,23 @@ exports.getServiceAgreements = async (req, res) => {
         populate: { path: "company", select: "companyName" },
       })
       .populate("assignedCompany", "companyName")
-      .populate("category", "name")
       .populate("createdBy", "preferredName email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
+    const serviceAgreementsWithCategory = await Promise.all(
+      serviceAgreements.map(async (sa) => {
+        const doc = sa.toObject();
+        doc.category = await resolveCategoryName(doc.category);
+        return doc;
+      }),
+    );
+
     const total = await ServiceAgreement.countDocuments(filter);
 
     return sendSuccess(res, "Service agreements fetched successfully", {
-      serviceAgreements,
+      serviceAgreements: serviceAgreementsWithCategory,
       pagination: {
         current: page,
         pages: Math.ceil(total / limit),
@@ -3655,7 +3809,7 @@ exports.getServiceAgreementsByBuilding = async (req, res) => {
       const end = new Date(dueDate);
       start.setHours(0, 0, 0, 0);
       end.setHours(23, 59, 59, 999);
-      filter.initialDueDate = { $gte: start, $lte: end };
+      filter.startDate = { $gte: start, $lte: end };
     }
 
     const [serviceAgreements, total] = await Promise.all([
@@ -4012,7 +4166,7 @@ exports.getVendorServiceAgreements = async (req, res) => {
       start.setHours(0, 0, 0, 0);
       const end = new Date(dueDate);
       end.setHours(23, 59, 59, 999);
-      filter.initialDueDate = { $gte: start, $lte: end };
+      filter.startDate = { $gte: start, $lte: end };
     }
 
     // Completed Date filter → ServiceAgreement.closedAt ──
@@ -4136,6 +4290,26 @@ exports.updateServiceAgreement = async (req, res) => {
     if (!serviceAgreement)
       return sendError(res, "Service agreement not found", 404);
 
+    if (updateData.startDate || updateData.endDate) {
+      if (updateData.endDate) {
+        validateFutureOrTodayDate(updateData.endDate, "End date");
+      }
+
+      const effectiveStart = new Date(
+        updateData.startDate || serviceAgreement.startDate,
+      );
+      const effectiveEnd = new Date(
+        updateData.endDate || serviceAgreement.endDate,
+      );
+      if (effectiveEnd < effectiveStart) {
+        return sendError(res, "End date cannot be before start date", 400);
+      }
+    }
+
+    if (updateData.category) {
+      updateData.category = await resolveCategoryName(updateData.category);
+    }
+
     if (req.body.removeExistingFile === "true" && serviceAgreement.fileUrl) {
       await deleteFile(serviceAgreement.fileUrl);
       updateData.fileUrl = null;
@@ -4187,6 +4361,7 @@ exports.updateServiceAgreement = async (req, res) => {
       updateData.vendorSeenAt = null;
       updateData.reassignedAt = new Date();
       updateData.reassignedBy = req.user._id;
+      updateData.awaitingCycleRouting = false;
 
       const updated = await ServiceAgreement.findByIdAndUpdate(id, updateData, {
         new: true,
@@ -4455,6 +4630,7 @@ exports.reassignServiceAgreement = async (req, res) => {
     sa.vendorSeenAt = null;
     sa.reassignedAt = new Date();
     sa.reassignedBy = req.user._id;
+    sa.awaitingCycleRouting = false;
 
     await sa.save();
 

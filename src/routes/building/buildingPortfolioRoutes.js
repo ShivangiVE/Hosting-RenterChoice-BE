@@ -25,6 +25,10 @@ const {
   getBuildingsList,
 } = require("../../controllers/building/buildingPortfolioController");
 const { ALLOWED_INTERNAL_ROLES } = require("../../constants/roles");
+const {
+  createUnit,
+  getUnitsByBuilding,
+} = require("../../controllers/building/Buildingunitcontroller");
 
 // ========================= Buildings =========================
 router.post(
@@ -32,6 +36,13 @@ router.post(
   protect,
   authorize(...ALLOWED_INTERNAL_ROLES),
   createBuilding,
+);
+
+router.post(
+  "/building/:id/units",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  createUnit,
 );
 
 router.get(
@@ -46,6 +57,13 @@ router.get(
   protect,
   authorize(...ALLOWED_INTERNAL_ROLES),
   getBuildingsList,
+);
+
+router.get(
+  "/building/:id/units",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  getUnitsByBuilding,
 );
 
 router.get(

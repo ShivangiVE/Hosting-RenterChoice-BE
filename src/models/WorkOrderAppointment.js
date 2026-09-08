@@ -120,6 +120,13 @@ workOrderAppointmentSchema.pre("validate", function (next) {
 workOrderAppointmentSchema.index({ vendor: 1, status: 1, scheduledDate: 1 });
 workOrderAppointmentSchema.index({ workOrder: 1, status: 1 });
 workOrderAppointmentSchema.index({ entityType: 1, entityId: 1, status: 1 });
+workOrderAppointmentSchema.index(
+  { entityType: 1, entityId: 1, scheduledDate: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ["scheduled", "rescheduled"] } },
+  },
+);
 
 module.exports = mongoose.model(
   "WorkOrderAppointment",

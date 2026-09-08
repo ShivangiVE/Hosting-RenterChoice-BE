@@ -1,17 +1,24 @@
 const cron = require("node-cron");
-const { processReminders } = require("../processors/reminderProcessor");
+
+require("../processors/reminderProcessor");
+require("../processors/serviceAgreementCycleProcessor");
+require("../processors/broadcastAlertProcessor");
+require("../processors/notificationDigestProcessor");
+require("../registries/rules");
+
+const { getJobs } = require("./registry");
 
 function startJobs() {
-  // Every minute — processor is self-batching (BATCH_SIZE = 100)
-  cron.schedule("* * * * *", async () => {
-    try {
-      await processReminders();
-    } catch (err) {
-      console.error("[Jobs] processReminders error:", err.message);
-    }
-  });
-
-  console.log("[Jobs] Reminder engine started");
+  for (const job of getJobs()) {
+    cron.schedule(job.cronExpression, async () => {
+      try {
+        await job.task();
+      } catch (err) {
+        console.error(`[Jobs] ${job.name} error:`, err.message);
+      }
+    });
+    console.log(`[Jobs] ${job.name} started (${job.cronExpression})`);
+  }
 }
 
 module.exports = { startJobs };

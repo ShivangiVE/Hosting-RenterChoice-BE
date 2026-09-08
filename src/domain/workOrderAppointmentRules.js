@@ -56,7 +56,6 @@ exports.canScheduleServiceAgreementAppointment = (
   serviceAgreement,
   scheduledDate,
 ) => {
-  // Rule 0: Vendor must have accepted the service agreement
   if (serviceAgreement.vendorResponse !== "accepted") {
     return {
       allowed: false,
@@ -65,7 +64,6 @@ exports.canScheduleServiceAgreementAppointment = (
     };
   }
 
-  // Rule 1: Closed → BLOCK
   if (serviceAgreement.status === "closed") {
     return {
       allowed: false,
@@ -73,17 +71,29 @@ exports.canScheduleServiceAgreementAppointment = (
     };
   }
 
-  // Rule 2: Initial due date + 7 day grace window
-  if (serviceAgreement.initialDueDate) {
-    const graceEndDate = new Date(serviceAgreement.initialDueDate);
-    graceEndDate.setDate(graceEndDate.getDate() + 7);
-    graceEndDate.setHours(23, 59, 59, 999);
+  // Must fall within the Service Agreement's Start Date–End Date window
+  if (serviceAgreement.startDate) {
+    const windowStart = new Date(serviceAgreement.startDate);
+    windowStart.setHours(0, 0, 0, 0);
 
-    if (scheduledDate > graceEndDate) {
+    if (scheduledDate < windowStart) {
       return {
         allowed: false,
         reason:
-          "Appointment can only be scheduled up to 7 days after the service agreement due date",
+          "Appointment cannot be scheduled before the service agreement start date",
+      };
+    }
+  }
+
+  if (serviceAgreement.endDate) {
+    const windowEnd = new Date(serviceAgreement.endDate);
+    windowEnd.setHours(23, 59, 59, 999);
+
+    if (scheduledDate > windowEnd) {
+      return {
+        allowed: false,
+        reason:
+          "Appointment cannot be scheduled after the service agreement end date",
       };
     }
   }
