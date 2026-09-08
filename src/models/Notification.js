@@ -52,8 +52,12 @@ const notificationSchema = new mongoose.Schema(
     metadata: {
       type: Object, // flexible (invoiceId, dueDate, status, etc)
     },
+
+    snoozedUntil: { type: Date, default: null },
+    pinnedAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
     actionTakenAt: { type: Date, default: null },
+    hidden: { type: Boolean, default: false },
 
     readAt: { type: Date, default: null },
   },

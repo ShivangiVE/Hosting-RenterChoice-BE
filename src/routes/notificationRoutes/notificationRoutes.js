@@ -6,6 +6,9 @@ const {
   markAllNotificationsRead,
   deleteNotification,
   markNotificationActionTaken,
+  snoozeNotification,
+  unsnoozeNotification,
+  pinNotification,
 } = require("../../controllers/Notifications/NotificationsController");
 
 const router = express.Router();
@@ -21,6 +24,10 @@ router.put("/read-all", protect, markAllNotificationsRead);
 
 // Mark notification action handled (read + auto cleanup)
 router.put("/:id/action", protect, markNotificationActionTaken);
+
+router.patch("/:id/snooze", protect, snoozeNotification);
+router.patch("/:id/unsnooze", protect, unsnoozeNotification);
+router.patch("/:id/pin", protect, pinNotification);
 
 // Delete single notification (soft delete)
 router.delete("/:id", protect, deleteNotification);

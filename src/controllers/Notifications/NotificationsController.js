@@ -12,10 +12,15 @@ exports.getNotifications = async (req, res) => {
       user: req.user._id,
       deletedAt: null,
       actionTakenAt: null,
+      hidden: { $ne: true },
+      $or: [{ snoozedUntil: null }, { snoozedUntil: { $lte: new Date() } }],
     };
 
     const [notifications, total, unreadCount] = await Promise.all([
-      Notification.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Notification.find(filter)
+        .sort({ pinnedAt: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
 
       Notification.countDocuments(filter),
 
@@ -28,7 +33,6 @@ exports.getNotifications = async (req, res) => {
     return sendSuccess(res, "Notifications fetched", {
       notifications,
       unreadCount,
-
       pagination: {
         current: page,
         pages: Math.ceil(total / limit),
@@ -44,6 +48,75 @@ exports.getNotifications = async (req, res) => {
   }
 };
 
+// SNOOZE a notification until a given time
+exports.snoozeNotification = async (req, res) => {
+  const { snoozeUntil } = req.body;
+  const max = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+  if (!snoozeUntil || new Date(snoozeUntil) > max) {
+    return res.status(400).json({
+      success: false,
+      message: "snoozeUntil must be a valid date within 30 days",
+    });
+  }
+
+  const updated = await Notification.findOneAndUpdate(
+    { _id: req.params.id, user: req.user._id },
+    { $set: { snoozedUntil: snoozeUntil } },
+    { new: true },
+  );
+
+  if (!updated) {
+    return res.status(404).json({
+      success: false,
+      message: "Notification not found",
+    });
+  }
+
+  return sendSuccess(res, "Notification snoozed", { notification: updated });
+};
+
+// UNSNOOZE a notification
+exports.unsnoozeNotification = async (req, res) => {
+  const updated = await Notification.findOneAndUpdate(
+    { _id: req.params.id, user: req.user._id },
+    { $set: { snoozedUntil: null } },
+    { new: true },
+  );
+
+  if (!updated) {
+    return res.status(404).json({
+      success: false,
+      message: "Notification not found",
+    });
+  }
+
+  return sendSuccess(res, "Notification unsnoozed", { notification: updated });
+};
+
+// PIN / unpin a notification
+exports.pinNotification = async (req, res) => {
+  const updated = await Notification.findOneAndUpdate(
+    { _id: req.params.id, user: req.user._id },
+    { $set: { pinnedAt: req.body.pinned ? new Date() : null } },
+    { new: true },
+  );
+
+  if (!updated) {
+    return res.status(404).json({
+      success: false,
+      message: "Notification not found",
+    });
+  }
+
+  return sendSuccess(
+    res,
+    req.body.pinned ? "Notification pinned" : "Notification unpinned",
+    {
+      notification: updated,
+    },
+  );
+};
 // MARK single notification read
 exports.markNotificationRead = async (req, res) => {
   await Notification.findOneAndUpdate(

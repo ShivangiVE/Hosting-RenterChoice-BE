@@ -3,6 +3,7 @@ const cron = require("node-cron");
 require("../processors/reminderProcessor");
 require("../processors/serviceAgreementCycleProcessor");
 require("../processors/broadcastAlertProcessor");
+require("../processors/notificationDigestProcessor");
 require("../registries/rules");
 
 const { getJobs } = require("./registry");
