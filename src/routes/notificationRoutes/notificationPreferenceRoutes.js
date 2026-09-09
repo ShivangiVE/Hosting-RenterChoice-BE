@@ -5,7 +5,7 @@ const {
   getFrequencyOptions,
   getMyPreferences,
   updateMyPreferences,
-} = require("../../controllers/Notifications/NotificationPreferenceController");
+} = require("../../controllers/Notifications/notificationPreferenceController");
 
 const router = express.Router();
 
