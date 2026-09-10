@@ -36,6 +36,7 @@ const userPreferenceRoutes = require("./src/routes/userPreferenceRoutes/userPref
 const contactRoutes = require("./src/routes/contactCards/contactCardRoutes");
 const companyRoutes = require("./src/routes/contactCards/companyRoutes");
 const vendorTypeRoutes = require("./src/routes/contactCards/vendorTypeRoutes");
+const searchRoutes = require("./src/routes/searchRoutes/searchRoutes");
 
 const app = express();
 app.use(cors());
@@ -81,6 +82,7 @@ app.use("/api", userPreferenceRoutes);
 app.use("/api/contacts", contactRoutes);
 app.use("/api/companies", companyRoutes);
 app.use("/api/vendor-types", vendorTypeRoutes);
+app.use("/api/search", searchRoutes);
 
 app.use(errorHandler);
 

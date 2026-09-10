@@ -1,6 +1,7 @@
 const Building = require("../../models/Building");
 const AuditService = require("../../services/auditService");
 const { sendError, sendSuccess } = require("../../utils/response");
+const { validateAgainstTemplate } = require("./buildingPortfolioController");
 
 /**
  * Auto-generates the next sequential unit number for a parent building
@@ -65,17 +66,6 @@ exports.createUnit = async (req, res) => {
       restFormData.floorNumber.toString().trim() === ""
     ) {
       return sendError(res, "Floor Number is required", 400);
-    }
-
-    const template = await FormTemplate.findOne({
-      formType: "building",
-      isActive: true,
-    });
-    if (template) {
-      const templateErrors = validateAgainstTemplate(template, restFormData);
-      if (templateErrors.length) {
-        return sendError(res, templateErrors.join(", "), 400);
-      }
     }
 
     let trimmedUnitNumber =

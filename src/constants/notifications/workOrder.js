@@ -48,6 +48,7 @@ module.exports = {
         "WORK_ORDER_TENANT_CONTACT_REMINDER",
         "WORK_ORDER_TENANT_CONTACT_EXPIRED",
         "DUE_DATE_EXTENSION_REVIEWED",
+        "KEY_RETURN_PENDING",
       ],
     },
     INVOICE_UPDATES: {
