@@ -38,4 +38,23 @@ module.exports = {
       roles: ["Admin", "OfficeAdmin", "AccountsTeam"],
     },
   },
+  categories: {
+    SERVICE_AGREEMENT_UPDATES: {
+      key: "SERVICE_AGREEMENT_UPDATES",
+      label: "Service Agreement Updates",
+      roles: ["Vendor"],
+      types: ["SERVICE_AGREEMENT_ASSIGNED"],
+    },
+    INSPECTION_UPDATES: {
+      key: "INSPECTION_UPDATES",
+      label: "Inspection Updates",
+      roles: ["InspectionClerk"],
+      types: [
+        "INSPECTION_REQUEST_ASSIGNED",
+        "WORK_ORDER_ASSIGNED_CLERK",
+        "TASK_ASSIGNED_CLERK",
+        "TODO_ASSIGNED_CLERK",
+      ],
+    },
+  },
 };
