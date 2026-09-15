@@ -14,6 +14,7 @@ const Company = require("../../models/ContactCards/Company");
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
 
 const generateToken = require("../../utils/generateToken");
+const assertOwnerPortfolioActive = require("../../utils/portfolioAccess/assertOwnerPortfolioActive");
 
 // Generate 4-digit OTP
 const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
@@ -179,6 +180,19 @@ exports.login = async (req, res, next) => {
         `Role mismatch. You are registered as ${user.role}. Please log in using the correct role.`,
         403,
       );
+    }
+
+    // Owner-specific gate: block only when EVERY portfolio this owner
+    // belongs to is Deactivated (an owner with at least one Active
+    // portfolio, or with none assigned at all, passes through untouched).
+    if (user.role === "Owner") {
+      try {
+        await assertOwnerPortfolioActive(user._id);
+      } catch (err) {
+        return sendError(res, err.message, err.statusCode || 403, {
+          code: err.code,
+        });
+      }
     }
 
     if (platform === "web") {

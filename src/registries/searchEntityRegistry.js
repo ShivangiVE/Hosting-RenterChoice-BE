@@ -207,10 +207,15 @@ const searchEntityRegistry = {
     allowedRoles: (role) => ALLOWED_INTERNAL_ROLES.includes(role),
     buildScope: createdByOnlyScope,
     buildSearchMatch: (regex) => ({
-      $or: [
-        { portfolioName: regex },
-        { portfolioAbbreviation: regex },
-        { portfolioAccountNumber: regex },
+      $and: [
+        { status: "Active" },
+        {
+          $or: [
+            { portfolioName: regex },
+            { portfolioAbbreviation: regex },
+            { portfolioAccountNumber: regex },
+          ],
+        },
       ],
     }),
     project: {

@@ -4,10 +4,8 @@ const { sendDigestEmail } = require("../services/notificationEmailService");
 const { registerJob } = require("../jobs/registry");
 
 const TIERS = [
-  { frequency: "every15min", cron: "*/15 * * * *", label: "15-Minute" },
-  { frequency: "every30min", cron: "*/30 * * * *", label: "30-Minute" },
-  { frequency: "hourly", cron: "0 * * * *", label: "Hourly" },
   { frequency: "daily", cron: "0 7 * * *", label: "Daily" },
+  { frequency: "every3days", cron: "0 7 */3 * *", label: "Every 3 Days" },
   { frequency: "weekly", cron: "0 7 * * 1", label: "Weekly" },
 ];
 
