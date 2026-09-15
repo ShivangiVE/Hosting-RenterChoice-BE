@@ -5,7 +5,6 @@ const {
   scheduleReminder,
 } = require("./notificationReminderService");
 const { notifyInternalUsers } = require("./internalNotificationService");
-const { addBusinessDays } = require("../utils/businessDayMath");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -216,14 +215,15 @@ async function expireTenantContactReminder(schedule) {
   }).catch(console.error);
 }
 
-// ── Completed → invoice pending (vendor-facing weekly leg) ───────────────
+// ── Completed → invoice pending (vendor-facing leg) ──────────────────────
 
 /**
- * Call from markWorkOrderCompleted, in place of the old immediate
- * VENDOR_DEFAULT scheduling, when the vendor chose "upload later". Starts
- * 3 BUSINESS days after Completed, then weekly (WO_INVOICE_VENDOR_WEEKLY).
- * Resolved by the existing resolveReminders(workOrder._id,
- * "INVOICE_UPLOAD_PENDING") call in vendorUploadInvoiceLater — unchanged.
+ * Call from markWorkOrderCompleted, when the vendor chose "upload later".
+ * Uses the client's Vendor Notification Cycle: 1 day, 7 days, 3/3/3 days,
+ * then daily forever (CYCLES.VENDOR_DEFAULT) — starting from the moment
+ * the work order is marked Completed. Resolved by the existing
+ * resolveReminders(workOrder._id, "INVOICE_UPLOAD_PENDING") call in
+ * vendorUploadInvoiceLater — unchanged.
  */
 async function scheduleInvoiceVendorReminder(workOrder) {
   await scheduleReminder({
@@ -232,11 +232,31 @@ async function scheduleInvoiceVendorReminder(workOrder) {
     entityId: workOrder._id,
     userId: workOrder.vendor,
     role: "Vendor",
-    cycleId: "WO_INVOICE_VENDOR_WEEKLY",
+    cycleId: "VENDOR_DEFAULT",
     title: "Invoice Upload Pending",
     message: `Please upload the invoice for work order ${workOrder.workOrderNumber}.`,
     metadata: { workOrderNumber: workOrder.workOrderNumber },
-    startAt: addBusinessDays(new Date(), 3),
+  });
+}
+
+/**
+ * Call from wherever key return is set to "pending" (markWorkOrderCompleted
+ * or equivalent) — mirrors scheduleInvoiceVendorReminder exactly, same
+ * client-specified cadence (CYCLES.VENDOR_DEFAULT): 1 day, 7 days, 3/3/3
+ * days, then daily forever. Resolved by resolveReminders(workOrder._id,
+ * "KEY_RETURN_PENDING") wherever the key return is actually confirmed.
+ */
+async function scheduleKeyReturnReminder(workOrder) {
+  await scheduleReminder({
+    reminderType: "KEY_RETURN_PENDING",
+    entityType: "WorkOrder",
+    entityId: workOrder._id,
+    userId: workOrder.vendor,
+    role: "Vendor",
+    cycleId: "VENDOR_DEFAULT",
+    title: "Key Return Pending",
+    message: `Please return the key for work order ${workOrder.workOrderNumber}.`,
+    metadata: { workOrderNumber: workOrder.workOrderNumber },
   });
 }
 
@@ -313,6 +333,7 @@ module.exports = {
   resolveTenantContactReminder,
   expireTenantContactReminder,
   scheduleInvoiceVendorReminder,
+  scheduleKeyReturnReminder,
   applyDynamicStatusChangeSideEffects,
   notifyAttachmentUploaded,
 };

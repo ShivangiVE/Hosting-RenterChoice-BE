@@ -43,12 +43,14 @@ module.exports = {
       key: "SERVICE_AGREEMENT_UPDATES",
       label: "Service Agreement Updates",
       roles: ["Vendor"],
+      mandatory: true,
       types: ["SERVICE_AGREEMENT_ASSIGNED"],
     },
     INSPECTION_UPDATES: {
       key: "INSPECTION_UPDATES",
       label: "Inspection Updates",
       roles: ["InspectionClerk"],
+      frequencyLocked: true,
       types: [
         "INSPECTION_REQUEST_ASSIGNED",
         "WORK_ORDER_ASSIGNED_CLERK",

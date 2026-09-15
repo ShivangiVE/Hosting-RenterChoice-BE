@@ -23,6 +23,7 @@ const {
   updateBuildingInspection,
   getPortfoliosList,
   getBuildingsList,
+  updatePortfolioStatus,
 } = require("../../controllers/building/buildingPortfolioController");
 const { ALLOWED_INTERNAL_ROLES } = require("../../constants/roles");
 const {
@@ -143,6 +144,13 @@ router.put(
   protect,
   authorize(...ALLOWED_INTERNAL_ROLES),
   bulkUpdatePortfolios,
+);
+
+router.patch(
+  "/portfolios/status",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  updatePortfolioStatus,
 );
 
 // Delete Portfolio

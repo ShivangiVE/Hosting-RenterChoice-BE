@@ -50,6 +50,7 @@ const {
   scheduleTenantContactReminder,
   applyDynamicStatusChangeSideEffects,
   scheduleInvoiceVendorReminder,
+  scheduleKeyReturnReminder,
 } = require("../../services/workOrderReminderService");
 
 // Helper function to get next sequence number
@@ -2052,19 +2053,8 @@ exports.markWorkOrderCompleted = async (req, res) => {
 
     // Key return reminder — only when key was issued and vendor chose "return later"
     if (workOrder.keyReturn?.status === "pending") {
-      await scheduleReminder({
-        reminderType: "KEY_RETURN_PENDING",
-        entityType: "WorkOrder",
-        entityId: workOrder._id,
-        userId: workOrder.vendor,
-        role: "Vendor",
-        cycleId: "VENDOR_DEFAULT",
-        title: "Key Return Pending",
-        message: `Please confirm key return for work order ${workOrder.workOrderNumber}.`,
-        metadata: { workOrderNumber: workOrder.workOrderNumber },
-      });
+      await scheduleKeyReturnReminder(workOrder);
     }
-    // ─────────────────────────────────────────────────────────────────────
 
     return sendSuccess(res, "Work order marked as completed", { workOrder });
   } catch (err) {

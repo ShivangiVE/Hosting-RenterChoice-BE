@@ -92,7 +92,7 @@ exports.createNotification = async ({
   // ── Email / digest delivery ───────────────────────────────────────────────
   if (pref.emailEnabled) {
     try {
-      if (pref.frequency === "immediately") {
+      if (pref.emailFrequency === "immediately") {
         const recipientUser = await User.findById(user).select(
           "email preferredName firstName",
         );
