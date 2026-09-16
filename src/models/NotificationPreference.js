@@ -1,19 +1,20 @@
 const mongoose = require("mongoose");
 
+const FREQUENCY_ENUM = ["immediately", "every3days", "daily", "weekly"];
+
 const categoryPrefSchema = new mongoose.Schema(
   {
     emailEnabled: { type: Boolean, default: true },
     inAppEnabled: { type: Boolean, default: true },
-    frequency: {
+   
+    appFrequency: {
       type: String,
-      enum: [
-        "immediately",
-        "every15min",
-        "every30min",
-        "hourly",
-        "daily",
-        "weekly",
-      ],
+      enum: FREQUENCY_ENUM,
+      default: "immediately",
+    },
+    emailFrequency: {
+      type: String,
+      enum: FREQUENCY_ENUM,
       default: "immediately",
     },
   },

@@ -19,17 +19,23 @@ exports.getMyPreferences = async (req, res) => {
 };
 
 exports.updateMyPreferences = async (req, res) => {
-  const pref = await updatePreferences(req.user._id, req.body.categories);
-  return sendSuccess(res, "Preferences updated", pref);
+  try {
+    const pref = await updatePreferences(req.user._id, req.body.categories);
+    return sendSuccess(res, "Preferences updated", pref);
+  } catch (err) {
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 };
 
 exports.getFrequencyOptions = async (req, res) => {
   return sendSuccess(res, "Frequency options fetched", [
-    { value: "immediately", label: "Immediately" },
-    { value: "every15min", label: "Every 15 Minutes" },
-    { value: "every30min", label: "Every 30 Minutes" },
-    { value: "hourly", label: "Hourly" },
+    { value: "immediately", label: "Real-time" },
+
     { value: "daily", label: "Daily" },
+    { value: "every3days", label: "Every 3 Days" },
     { value: "weekly", label: "Weekly" },
   ]);
 };

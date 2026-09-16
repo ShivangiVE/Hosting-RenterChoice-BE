@@ -4,6 +4,9 @@ const Portfolio = require("../../models/Portfolio");
 const User = require("../../models/User");
 const AuditService = require("../../services/auditService");
 const { generateAccountNumber } = require("../../utils/generateAccountNumber");
+const {
+  invalidateSessionsForOwnersWithNoActivePortfolio,
+} = require("../../utils/portfolioAccess/invalidateOwnerSessions");
 const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
 const { sendSuccess, sendError } = require("../../utils/response");
 
@@ -74,6 +77,21 @@ const validateAgainstTemplate = (template, formData) => {
 
 exports.validateAgainstTemplate = validateAgainstTemplate;
 
+const ALLOWED_PORTFOLIO_STATUSES = ["Active", "Deactivated"];
+
+async function findActivePortfolioOrError(portfolioId) {
+  const portfolio = await Portfolio.findById(portfolioId).select("status");
+  if (!portfolio) return { error: "Selected portfolio not found", status: 404 };
+  if (portfolio.status === "Deactivated") {
+    return {
+      error:
+        "Cannot attach a building to a deactivated portfolio. Reactivate the portfolio first.",
+      status: 400,
+    };
+  }
+  return { error: null };
+}
+
 const normalizeBoolean = (val) => {
   if (typeof val === "boolean") return val;
   if (typeof val === "string")
@@ -138,6 +156,11 @@ exports.createBuilding = async (req, res) => {
       return sendError(res, "Building form template not found", 404);
 
     const formData = req.body;
+
+    if (formData.portfolio) {
+      const check = await findActivePortfolioOrError(formData.portfolio);
+      if (check.error) return sendError(res, check.error, check.status);
+    }
 
     // CONDITIONAL VALIDATION: Only require buildingAbbreviation for multi_family
     if (
@@ -544,7 +567,10 @@ exports.updateBuilding = async (req, res) => {
     if (formData.buildingAbbreviation !== undefined) {
       building.buildingAbbreviation = formData.buildingAbbreviation;
     }
+
     if (formData.portfolio !== undefined) {
+      const check = await findActivePortfolioOrError(formData.portfolio);
+      if (check.error) return sendError(res, check.error, check.status);
       building.portfolio = formData.portfolio;
     }
 
@@ -615,10 +641,15 @@ exports.bulkUpdateBuildings = async (req, res) => {
       if (formData.buildingAbbreviation !== undefined) {
         building.buildingAbbreviation = formData.buildingAbbreviation;
       }
+
       if (formData.portfolio !== undefined) {
+        const check = await findActivePortfolioOrError(formData.portfolio);
+        if (check.error) {
+          results.push({ id, success: false, message: check.error });
+          continue;
+        }
         building.portfolio = formData.portfolio;
       }
-
       // Save merged formData
       building.formData = mergedData;
 
@@ -1041,6 +1072,7 @@ exports.getAllPortfolios = async (req, res) => {
       repairType,
       sortBy,
       sortOrder = "asc",
+      statusFilter,
     } = req.query;
 
     // Convert to numbers
@@ -1056,6 +1088,10 @@ exports.getAllPortfolios = async (req, res) => {
     // Apply team scope — null means Admin (no restriction)
     if (allowedUserIds !== null) {
       query.createdBy = { $in: allowedUserIds };
+    }
+
+    if (statusFilter && statusFilter !== "All") {
+      query.status = statusFilter;
     }
 
     // Search functionality
@@ -1207,7 +1243,7 @@ exports.getAllPortfolios = async (req, res) => {
 exports.getPortfoliosList = async (req, res) => {
   try {
     const allowedUserIds = await resolveTeamUserIds(req.user);
-    const query = {};
+    const query = { status: "Active" };
     if (allowedUserIds !== null) {
       query.createdBy = { $in: allowedUserIds };
     }
@@ -1349,6 +1385,100 @@ exports.bulkUpdatePortfolios = async (req, res) => {
     return sendError(
       res,
       err.message || "Failed to bulk update portfolios",
+      500,
+    );
+  }
+};
+
+// Update Portfolio Status
+exports.updatePortfolioStatus = async (req, res) => {
+  try {
+    const { ids, status } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return sendError(res, "Portfolio id(s) are required", 400);
+    }
+    if (!ALLOWED_PORTFOLIO_STATUSES.includes(status)) {
+      return sendError(
+        res,
+        `status must be one of: ${ALLOWED_PORTFOLIO_STATUSES.join(", ")}`,
+        400,
+      );
+    }
+
+    const portfolios = await Portfolio.find({ _id: { $in: ids } })
+      .select("_id portfolioAbbreviation owners status")
+      .lean();
+
+    if (portfolios.length === 0) {
+      return sendError(res, "No matching portfolios found", 404);
+    }
+
+    const foundIds = portfolios.map((p) => String(p._id));
+    const notFound = ids.map(String).filter((id) => !foundIds.includes(id));
+
+    const toChange = portfolios.filter(
+      (p) => (p.status || "Active") !== status,
+    );
+    const toChangeIds = toChange.map((p) => String(p._id));
+
+    if (toChangeIds.length > 0) {
+      await Portfolio.updateMany(
+        { _id: { $in: toChangeIds } },
+        {
+          $set: {
+            status,
+            statusChangedAt: new Date(),
+            statusChangedBy: req.user._id,
+          },
+        },
+      );
+
+      if (status === "Deactivated") {
+        const ownerIds = [
+          ...new Set(toChange.flatMap((p) => p.owners.map(String))),
+        ];
+        await invalidateSessionsForOwnersWithNoActivePortfolio(ownerIds);
+      }
+
+      await Promise.all(
+        toChange.map((p) =>
+          AuditService.logActivity({
+            entityType: "portfolio",
+            entityId: p._id,
+            action: "updated",
+            actionDetails: `Portfolio ${p.portfolioAbbreviation} ${status.toLowerCase()}`,
+            changes: [
+              {
+                field: "status",
+                oldValue: p.status || "Active",
+                newValue: status,
+              },
+            ],
+            performedBy: req.user._id,
+            ipAddress: req.ip,
+            userAgent: req.get("User-Agent"),
+          }),
+        ),
+      );
+    }
+
+    return sendSuccess(
+      res,
+      toChangeIds.length > 0
+        ? `Portfolio(s) ${status.toLowerCase()} successfully`
+        : `Selected portfolio(s) are already ${status.toLowerCase()}`,
+      {
+        updatedCount: toChangeIds.length, // real count, not "matched" count
+        updatedIds: toChangeIds,
+        alreadyInStatusCount: portfolios.length - toChangeIds.length,
+        notFound,
+      },
+    );
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to update portfolio status",
       500,
     );
   }
