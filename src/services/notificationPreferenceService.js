@@ -4,8 +4,9 @@ const {
 } = require("../constants/notifications/registry");
 
 const categoriesForRole = (role) =>
-  Object.values(NOTIFICATION_CATEGORIES).filter((c) => c.roles.includes(role));
-// (add a `roles: ["vendor"]` / `["inspection"]` array to each category definition in Step 2)
+  Object.values(NOTIFICATION_CATEGORIES).filter(
+    (c) => c.roles.includes(role) && !c.mandatory,
+  );
 
 const getPreferences = async (userId) => {
   let pref = await NotificationPreference.findOne({ user: userId });
@@ -19,23 +20,60 @@ const getPreferences = async (userId) => {
 
 const updatePreferences = async (userId, categoryUpdates) => {
   const pref = await getPreferences(userId);
+
   Object.entries(categoryUpdates).forEach(([key, val]) => {
+    const categoryDef = NOTIFICATION_CATEGORIES[key];
+
+    if (categoryDef?.mandatory) {
+      const err = new Error(
+        `${categoryDef.label} is mandatory and cannot be configured.`,
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (categoryDef?.frequencyLocked) {
+      const offendingField = ["appFrequency", "emailFrequency"].find(
+        (field) => val[field] && val[field] !== "immediately",
+      );
+      if (offendingField) {
+        const err = new Error(
+          `${categoryDef.label} is time-sensitive and can only be set to "immediately".`,
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
     pref.categories.set(key, {
       ...(pref.categories.get(key)?.toObject() || {}),
       ...val,
     });
   });
+
   await pref.save();
   return pref;
 };
 
 const getCategoryPreference = async (userId, categoryKey) => {
+  const categoryDef = NOTIFICATION_CATEGORIES[categoryKey];
+
+  if (categoryDef?.mandatory) {
+    return {
+      emailEnabled: true,
+      inAppEnabled: true,
+      appFrequency: "immediately",
+      emailFrequency: "immediately",
+    };
+  }
+
   const pref = await getPreferences(userId);
   return (
     pref.categories.get(categoryKey) || {
       emailEnabled: false,
       inAppEnabled: true,
-      frequency: "immediately",
+      appFrequency: "immediately",
+      emailFrequency: "immediately",
     }
   );
 };

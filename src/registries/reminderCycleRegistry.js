@@ -80,15 +80,6 @@ const CYCLES = {
   // done or until 1 full week has passed (exhaustion — see
   // reminderEscalationRegistry.WORK_ORDER_TENANT_CONTACT_REMINDER).
   WO_TENANT_CONTACT: [MINUTES.day],
-
-  // Completed-but-no-invoice, vendor-facing leg: starts 3 BUSINESS days
-  // after "Completed" (the start delay is applied once, at scheduling time,
-  // via scheduleReminder's `startAt` override — see
-  // services/workOrderReminderService.js) then repeats weekly forever,
-  // resolved only when the vendor uploads the invoice. The separate
-  // Accounts Clerk "phone the vendor" alert at the 3-week mark is a
-  // team-wide broadcast, not a single-recipient reminder, so it does NOT
-  WO_INVOICE_VENDOR_WEEKLY: [MINUTES.days7],
 };
 
 /**
