@@ -14,6 +14,9 @@ const {
   resolveReminders,
 } = require("../../services/notificationReminderService");
 const {
+  resolveNotificationsForEntity,
+} = require("../../services/notificationService");
+const {
   notifyInternalUsers,
 } = require("../../services/internalNotificationService");
 const {
@@ -250,7 +253,10 @@ exports.finalizeInvoiceLater = async (req, res) => {
       entityId: workOrder._id,
     }).catch(console.error);
 
-    await resolveReminders(workOrder._id, "INVOICE_UPLOAD_PENDING");
+    await resolveNotificationsForEntity(
+      workOrder._id,
+      "INVOICE_UPLOAD_PENDING",
+    );
 
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
   } catch (err) {

@@ -1,4 +1,8 @@
 const mongoose = require("mongoose");
+const {
+  SNOOZE_DURATION_VALUES,
+  DEFAULT_SNOOZE_DURATION,
+} = require("../constants/notifications/snoozeOptions");
 
 const FREQUENCY_ENUM = ["immediately", "every3days", "daily", "weekly"];
 
@@ -6,7 +10,7 @@ const categoryPrefSchema = new mongoose.Schema(
   {
     emailEnabled: { type: Boolean, default: true },
     inAppEnabled: { type: Boolean, default: true },
-   
+
     appFrequency: {
       type: String,
       enum: FREQUENCY_ENUM,
@@ -21,6 +25,18 @@ const categoryPrefSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const snoozeSettingsSchema = new mongoose.Schema(
+  {
+    enabled: { type: Boolean, default: true },
+    defaultDuration: {
+      type: String,
+      enum: SNOOZE_DURATION_VALUES,
+      default: DEFAULT_SNOOZE_DURATION,
+    },
+  },
+  { _id: false },
+);
+
 const notificationPreferenceSchema = new mongoose.Schema(
   {
     user: {
@@ -30,6 +46,7 @@ const notificationPreferenceSchema = new mongoose.Schema(
       unique: true,
     },
     categories: { type: Map, of: categoryPrefSchema, default: {} },
+    snoozeSettings: { type: snoozeSettingsSchema, default: () => ({}) },
   },
   { timestamps: true },
 );

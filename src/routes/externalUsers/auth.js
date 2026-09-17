@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
+const rateLimit = require("express-rate-limit");
 
-const { protect } = require("../../middleware/authMiddleware"); // You’ll create this
+const { protect } = require("../../middleware/authMiddleware");
 const {
   register,
   login,
@@ -12,6 +13,7 @@ const {
   verifyOtp,
   uploadProfileImage,
   verifyCompanyAccount,
+  notifyTeamAdminOfDeactivatedPortfolio,
 } = require("../../controllers/externlusers/authController");
 const {
   registerValidator,
@@ -35,6 +37,24 @@ router.post(
   loginValidator,
   validate,
   login,
+);
+
+// Portfolio deactivation notice — public (owner isn't logged in when
+// they hit this), so it's rate-limited: 5 requests per IP per 15 min.
+const notifyAdminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: false,
+    message: "Too many requests. Please try again later.",
+  },
+});
+router.post(
+  "/portfolio-deactivated/notify",
+  notifyAdminLimiter,
+  notifyTeamAdminOfDeactivatedPortfolio,
 );
 
 // Forgot / Reset

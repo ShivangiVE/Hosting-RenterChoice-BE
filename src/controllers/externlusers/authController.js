@@ -1,10 +1,16 @@
 const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const Portfolio = require("../../models/Portfolio");
+const {
+  verifyPortfolioNotifyToken,
+  signPortfolioNotifyToken,
+} = require("../../utils/portfolioAccess/notifyToken");
 
 const {
   sendForgotPasswordEmail,
   sendForgotPasswordOTPEmail,
+  sendPortfolioDeactivatedNotice,
 } = require("../../services/emailService");
 const { sendError, sendSuccess } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
@@ -15,6 +21,10 @@ const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
 
 const generateToken = require("../../utils/generateToken");
 const assertOwnerPortfolioActive = require("../../utils/portfolioAccess/assertOwnerPortfolioActive");
+const {
+  getNotifyStatus,
+  MAX_SENDS,
+} = require("../../utils/portfolioAccess/notifyThrottle");
 
 // Generate 4-digit OTP
 const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
@@ -182,16 +192,19 @@ exports.login = async (req, res, next) => {
       );
     }
 
-    // Owner-specific gate: block only when EVERY portfolio this owner
-    // belongs to is Deactivated (an owner with at least one Active
-    // portfolio, or with none assigned at all, passes through untouched).
     if (user.role === "Owner") {
       try {
         await assertOwnerPortfolioActive(user._id);
       } catch (err) {
-        return sendError(res, err.message, err.statusCode || 403, {
-          code: err.code,
-        });
+        const extra = { code: err.code };
+        if (err.code === "PORTFOLIO_DEACTIVATED" && err.portfolioIds?.length) {
+          extra.notifyToken = signPortfolioNotifyToken({
+            userId: String(user._id),
+            portfolioIds: err.portfolioIds,
+          });
+          extra.notifyStatus = getNotifyStatus(user);
+        }
+        return sendError(res, err.message, err.statusCode || 403, extra);
       }
     }
 
@@ -216,6 +229,95 @@ exports.login = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+exports.notifyTeamAdminOfDeactivatedPortfolio = async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return sendError(res, "Token is required", 400);
+
+    let payload;
+    try {
+      payload = verifyPortfolioNotifyToken(token);
+    } catch {
+      return sendError(
+        res,
+        "This request has expired. Please try logging in again.",
+        400,
+      );
+    }
+
+    const [owner, portfolios] = await Promise.all([
+      User.findById(payload.userId).select(
+        "preferredName firstName lastName email portfolioNoticeCount lastPortfolioNoticeAt",
+      ),
+      Portfolio.find({
+        _id: { $in: payload.portfolioIds },
+        status: "Deactivated",
+      })
+        .select("portfolioName")
+        .lean(),
+    ]);
+
+    if (!owner || portfolios.length === 0) {
+      return sendError(
+        res,
+        "Nothing to notify — the portfolio status may have changed.",
+        400,
+      );
+    }
+
+    // ── Throttle: max 3 notifications ever, with a 3-day gap required
+    // between each send. Prevents a blocked owner from spamming
+    // OfficeAdmins by repeatedly retrying login and clicking "Send Email".
+    const notifyStatus = getNotifyStatus(owner);
+
+    if (!notifyStatus.canSend) {
+      const message = notifyStatus.maxReached
+        ? `You've already sent this notification ${MAX_SENDS} times. Please contact your team admin directly.`
+        : `You've already sent this notification. You can send it again on ${new Date(
+            notifyStatus.nextAvailableAt,
+          ).toDateString()}.`;
+
+      return sendError(res, message, 429, { notifyStatus });
+    }
+
+    const officeAdmins = await User.find({
+      role: "OfficeAdmin",
+      isActive: true,
+    })
+      .select("email preferredName")
+      .lean();
+
+    if (officeAdmins.length === 0) {
+      return sendError(
+        res,
+        "No team admin is currently configured to receive this request.",
+        500,
+      );
+    }
+
+    await sendPortfolioDeactivatedNotice({
+      admins: officeAdmins,
+      owner,
+      portfolios,
+    });
+
+    // Record the send only after it succeeds.
+    owner.portfolioNoticeCount = notifyStatus.sentCount + 1;
+    owner.lastPortfolioNoticeAt = new Date();
+    await owner.save();
+
+    return sendSuccess(res, "Your team admin has been notified.", {
+      notifyStatus: getNotifyStatus(owner),
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      "Failed to send notification. Please try again.",
+      500,
+    );
   }
 };
 

@@ -2,6 +2,10 @@ const NotificationPreference = require("../models/NotificationPreference");
 const {
   NOTIFICATION_CATEGORIES,
 } = require("../constants/notifications/registry");
+const {
+  SNOOZE_OPTIONS,
+  SNOOZE_DURATION_VALUES,
+} = require("../constants/notifications/snoozeOptions");
 
 const categoriesForRole = (role) =>
   Object.values(NOTIFICATION_CATEGORIES).filter(
@@ -78,9 +82,64 @@ const getCategoryPreference = async (userId, categoryKey) => {
   );
 };
 
+const getSnoozeSettings = async (userId) => {
+  const pref = await getPreferences(userId);
+  return pref.snoozeSettings;
+};
+
+const updateSnoozeSettings = async (userId, updates = {}) => {
+  const pref = await getPreferences(userId);
+
+  if (typeof updates.enabled === "boolean") {
+    pref.snoozeSettings.enabled = updates.enabled;
+  }
+
+  if (updates.defaultDuration !== undefined) {
+    if (!SNOOZE_DURATION_VALUES.includes(updates.defaultDuration)) {
+      const err = new Error(
+        `defaultDuration must be one of: ${SNOOZE_DURATION_VALUES.join(", ")}`,
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    pref.snoozeSettings.defaultDuration = updates.defaultDuration;
+  }
+
+  await pref.save();
+  return pref.snoozeSettings;
+};
+
+const resolveSnoozeUntil = async (userId, requestedDuration) => {
+  const settings = await getSnoozeSettings(userId);
+
+  if (!settings.enabled) {
+    const err = new Error(
+      "Snoozing is turned off in your notification settings.",
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const duration = requestedDuration || settings.defaultDuration;
+  const option = SNOOZE_OPTIONS.find((opt) => opt.value === duration);
+
+  if (!option) {
+    const err = new Error(
+      `duration must be one of: ${SNOOZE_OPTIONS.map((o) => o.value).join(", ")}`,
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return new Date(Date.now() + option.ms);
+};
+
 module.exports = {
   categoriesForRole,
   getPreferences,
   updatePreferences,
   getCategoryPreference,
+  getSnoozeSettings,
+  updateSnoozeSettings,
+  resolveSnoozeUntil,
 };
