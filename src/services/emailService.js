@@ -58,6 +58,7 @@ const sendEmail = async (to, subject, text, html) => {
 // };
 
 // Send OTP email
+
 const sendForgotPasswordOTPEmail = async (email, otp) => {
   const subject = "Password Reset Verification Code";
   const text = `
@@ -83,7 +84,58 @@ If you did not request a password reset, please ignore this message or contact s
   await sendEmail(email, subject, text, html);
 };
 
+const escapeHtml = (str = "") =>
+  String(str).replace(
+    /[&<>"']/g,
+    (ch) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        ch
+      ],
+  );
+
+const sendPortfolioDeactivatedNotice = async ({
+  admins,
+  owner,
+  portfolios,
+}) => {
+  const adminEmails = admins.map((a) => a.email).filter(Boolean);
+  if (adminEmails.length === 0) return;
+
+  const ownerName =
+    owner.preferredName ||
+    `${owner.firstName || ""} ${owner.lastName || ""}`.trim() ||
+    owner.email;
+
+  const portfolioNames = portfolios.map((p) => p.portfolioName).filter(Boolean);
+  const nameList = portfolioNames.join(", ");
+  const isPlural = portfolioNames.length > 1;
+
+  const subject = `Owner login attempt on deactivated portfolio${isPlural ? "s" : ""}: ${nameList}`;
+
+  const text = `
+Hi,
+
+${ownerName} (${owner.email}) attempted to log in to the Owner Portal but was blocked because ${isPlural ? "these portfolios are" : "this portfolio is"} deactivated:
+
+${portfolioNames.map((n) => `- ${n}`).join("\n")}
+
+If access should be restored, reactivate ${isPlural ? "them" : "it"} from the Portfolio list.
+  `;
+
+  const html = `
+    <p>Hi,</p>
+    <p><strong>${escapeHtml(ownerName)}</strong> (${escapeHtml(owner.email)}) attempted to log in to the Owner Portal but was blocked because ${isPlural ? "these portfolios are" : "this portfolio is"} deactivated:</p>
+    <ul>
+      ${portfolioNames.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}
+    </ul>
+    <p>If access should be restored, reactivate ${isPlural ? "them" : "it"} from the Portfolio list.</p>
+  `;
+
+  await sendEmail(adminEmails.join(","), subject, text, html);
+};
+
 module.exports = {
   sendEmail,
   sendForgotPasswordOTPEmail,
+  sendPortfolioDeactivatedNotice,
 };

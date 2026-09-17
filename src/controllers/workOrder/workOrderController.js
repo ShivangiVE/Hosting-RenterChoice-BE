@@ -16,7 +16,10 @@ const { TYPE_MAP, normalize } = require("../../utils/inspectionType");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const { getIO } = require("../../../socket");
-const { createNotification } = require("../../services/notificationService");
+const {
+  createNotification,
+  resolveNotificationsForEntity,
+} = require("../../services/notificationService");
 const { validateFutureOrTodayDate } = require("../../utils/dateValidator");
 const { assertVendorAccepted } = require("../../utils/vendorGuards");
 const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
@@ -1205,6 +1208,11 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
       await wo.save();
       await resolveAcceptDeclineReminder(wo._id, vendorId);
       await scheduleTenantContactReminder(wo);
+      await resolveNotificationsForEntity(
+        wo._id,
+        ["WORK_ORDER_ASSIGNED", "WORK_ORDER_ACCEPT_DECLINE_REMINDER"],
+        { userId: vendorId },
+      );
       return sendSuccess(res, "Work order accepted", { workOrder: wo });
     }
 
@@ -1292,6 +1300,11 @@ exports.vendorAcceptWorkOrder = async (req, res) => {
       });
     }
 
+    await resolveNotificationsForEntity(claimed._id, [
+      "WORK_ORDER_ASSIGNED",
+      "WORK_ORDER_ACCEPT_DECLINE_REMINDER",
+    ]);
+
     await resolveAcceptDeclineReminder(claimed._id, vendorId);
     await scheduleTenantContactReminder(claimed);
 
@@ -1331,6 +1344,11 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
       wo.status = "open";
       await wo.save();
       await resolveAcceptDeclineReminder(wo._id, vendorId);
+      await resolveNotificationsForEntity(
+        wo._id,
+        ["WORK_ORDER_ASSIGNED", "WORK_ORDER_ACCEPT_DECLINE_REMINDER"],
+        { userId: vendorId },
+      );
       return sendSuccess(res, "Work order declined", { workOrder: wo });
     }
 
@@ -1387,6 +1405,12 @@ exports.vendorDeclineWorkOrder = async (req, res) => {
     }
 
     await resolveAcceptDeclineReminder(updated._id, vendorId);
+
+    await resolveNotificationsForEntity(
+      updated._id,
+      ["WORK_ORDER_ASSIGNED", "WORK_ORDER_ACCEPT_DECLINE_REMINDER"],
+      { userId: vendorId },
+    );
 
     return sendSuccess(res, "Work order declined", { workOrder: updated });
   } catch (err) {
@@ -2143,7 +2167,10 @@ exports.vendorUploadInvoiceLater = async (req, res) => {
     }).catch(console.error);
 
     // ── REMINDER ENGINE: stop invoice reminders — action is done ─────────
-    await resolveReminders(workOrder._id, "INVOICE_UPLOAD_PENDING");
+    await resolveNotificationsForEntity(
+      workOrder._id,
+      "INVOICE_UPLOAD_PENDING",
+    );
 
     return sendSuccess(res, "Invoice uploaded successfully", { workOrder });
   } catch (err) {
@@ -2191,7 +2218,7 @@ exports.vendorConfirmKeyReturn = async (req, res) => {
   }).catch(console.error);
 
   // ── REMINDER ENGINE: stop key return reminders — action is done ───────
-  await resolveReminders(workOrder._id, "KEY_RETURN_PENDING");
+  await resolveNotificationsForEntity(workOrder._id, "KEY_RETURN_PENDING");
 
   return sendSuccess(res, "Key return confirmed", { workOrder });
 };
@@ -2264,7 +2291,7 @@ exports.vendorBulkConfirmKeyReturn = async (req, res) => {
     // ── REMINDER ENGINE: resolve key reminders for all confirmed IDs ──────
     await Promise.all(
       eligibleIds.map((entityId) =>
-        resolveReminders(entityId, "KEY_RETURN_PENDING"),
+        resolveNotificationsForEntity(entityId, "KEY_RETURN_PENDING"),
       ),
     );
 
@@ -3898,6 +3925,13 @@ exports.vendorAcceptServiceAgreement = async (req, res) => {
       }
       sa.vendorResponse = "accepted";
       await sa.save();
+      await resolveNotificationsForEntity(
+        sa._id,
+        "SERVICE_AGREEMENT_ASSIGNED",
+        {
+          userId: vendorId,
+        },
+      );
       return sendSuccess(res, "Service agreement accepted", {
         serviceAgreement: sa,
       });
@@ -3982,6 +4016,11 @@ exports.vendorAcceptServiceAgreement = async (req, res) => {
       });
     }
 
+    await resolveNotificationsForEntity(
+      claimed._id,
+      "SERVICE_AGREEMENT_ASSIGNED",
+    );
+
     return sendSuccess(res, "Service agreement accepted", {
       serviceAgreement: claimed,
     });
@@ -4017,6 +4056,13 @@ exports.vendorDeclineServiceAgreement = async (req, res) => {
       sa.vendorResponse = "declined";
       sa.declinedDate = new Date();
       await sa.save();
+      await resolveNotificationsForEntity(
+        sa._id,
+        "SERVICE_AGREEMENT_ASSIGNED",
+        {
+          userId: vendorId,
+        },
+      );
       return sendSuccess(res, "Service agreement declined", {
         serviceAgreement: sa,
       });
@@ -4070,6 +4116,12 @@ exports.vendorDeclineServiceAgreement = async (req, res) => {
         entityId: updated._id,
       }).catch(console.error);
     }
+
+    await resolveNotificationsForEntity(
+      updated._id,
+      "SERVICE_AGREEMENT_ASSIGNED",
+      { userId: vendorId },
+    );
 
     return sendSuccess(res, "Service agreement declined", {
       serviceAgreement: updated,
