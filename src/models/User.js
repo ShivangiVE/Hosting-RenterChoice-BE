@@ -107,6 +107,11 @@ const userSchema = new mongoose.Schema(
     // resetPasswordToken: { type: String },
     resetPasswordOTP: { type: String }, // 4-digit code
     resetPasswordExpires: { type: Date }, // OTP expiration time
+
+    // Portfolio-deactivation "notify team admin" throttling (Owner login
+    // flow): max 3 sends total, 3-day gap required between each.
+    portfolioNoticeCount: { type: Number, default: 0 },
+    lastPortfolioNoticeAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

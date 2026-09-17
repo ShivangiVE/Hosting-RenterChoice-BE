@@ -5,6 +5,7 @@ const { TYPE_TO_CATEGORY } = require("../constants/notifications/registry");
 const { getCategoryPreference } = require("./notificationPreferenceService");
 const { sendNotificationEmailNow } = require("./notificationEmailService");
 const NotificationDigestQueueItem = require("../models/NotificationDigestQueueItem");
+const { resolveReminders } = require("./notificationReminderService");
 
 const DEDUP_WINDOW_MS = 60 * 1000;
 
@@ -30,7 +31,6 @@ exports.createNotification = async ({
   entityId,
   metadata = {},
 }) => {
-  // ── Dedup guard (reminder types only) ────────────────────────────────────
   if (REMINDER_TYPES.includes(type)) {
     const recentCutoff = new Date(Date.now() - DEDUP_WINDOW_MS);
     const duplicate = await Notification.findOne({
@@ -53,7 +53,6 @@ exports.createNotification = async ({
     pref = await getCategoryPreference(user, categoryKey);
   }
 
-  // ── Persist ───────────────────────────────────────────────────────────────
   let notification;
   try {
     notification = await Notification.create({
@@ -78,7 +77,6 @@ exports.createNotification = async ({
     throw err;
   }
 
-  // ── Deliver via socket ─────────────
   if (!notification.hidden) {
     try {
       getIO()
@@ -89,7 +87,6 @@ exports.createNotification = async ({
     }
   }
 
-  // ── Email / digest delivery ───────────────────────────────────────────────
   if (pref.emailEnabled) {
     try {
       if (pref.emailFrequency === "immediately") {
@@ -116,4 +113,26 @@ exports.createNotification = async ({
   }
 
   return notification;
+};
+
+/**
+ * @param {ObjectId|string} entityId
+ * @param {string|string[]} types
+ * @param {Object} [opts]
+ * @param {ObjectId|string} [opts.userId]
+ */
+exports.resolveNotificationsForEntity = async (entityId, types, opts = {}) => {
+  const typeList = Array.isArray(types) ? types : [types];
+  const { userId } = opts;
+
+  const match = { entityId, type: { $in: typeList }, actionTakenAt: null };
+  if (userId) match.user = userId;
+
+  await Notification.updateMany(match, {
+    $set: { actionTakenAt: new Date(), readAt: new Date() },
+  });
+
+  await Promise.all(
+    typeList.map((type) => resolveReminders(entityId, type, userId)),
+  );
 };

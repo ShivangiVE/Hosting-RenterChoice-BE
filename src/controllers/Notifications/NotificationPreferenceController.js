@@ -1,4 +1,7 @@
 const {
+  SNOOZE_OPTIONS,
+} = require("../../constants/notifications/snoozeOptions");
+const {
   getPreferences,
   updatePreferences,
   categoriesForRole,
@@ -38,4 +41,29 @@ exports.getFrequencyOptions = async (req, res) => {
     { value: "every3days", label: "Every 3 Days" },
     { value: "weekly", label: "Weekly" },
   ]);
+};
+
+exports.getSnoozeOptions = async (req, res) => {
+  return sendSuccess(
+    res,
+    "Snooze options fetched",
+    SNOOZE_OPTIONS.map(({ value, label }) => ({ value, label })),
+  );
+};
+
+exports.getMySnoozeSettings = async (req, res) => {
+  const settings = await getSnoozeSettings(req.user._id);
+  return sendSuccess(res, "Snooze settings fetched", settings);
+};
+
+exports.updateMySnoozeSettings = async (req, res) => {
+  try {
+    const settings = await updateSnoozeSettings(req.user._id, req.body);
+    return sendSuccess(res, "Snooze settings updated", settings);
+  } catch (err) {
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 };

@@ -1,4 +1,7 @@
 const Notification = require("../../models/Notification");
+const {
+  resolveSnoozeUntil,
+} = require("../../services/notificationPreferenceService");
 const { sendSuccess } = require("../../utils/response");
 
 // GET notifications
@@ -50,30 +53,30 @@ exports.getNotifications = async (req, res) => {
 
 // SNOOZE a notification until a given time
 exports.snoozeNotification = async (req, res) => {
-  const { snoozeUntil } = req.body;
-  const max = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  try {
+    const { duration } = req.body;
+    const snoozedUntil = await resolveSnoozeUntil(req.user._id, duration);
 
-  if (!snoozeUntil || new Date(snoozeUntil) > max) {
-    return res.status(400).json({
+    const updated = await Notification.findOneAndUpdate(
+      { _id: req.params.id, user: req.user._id },
+      { $set: { snoozedUntil } },
+      { new: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found",
+      });
+    }
+
+    return sendSuccess(res, "Notification snoozed", { notification: updated });
+  } catch (err) {
+    return res.status(err.statusCode || 500).json({
       success: false,
-      message: "snoozeUntil must be a valid date within 30 days",
+      message: err.message,
     });
   }
-
-  const updated = await Notification.findOneAndUpdate(
-    { _id: req.params.id, user: req.user._id },
-    { $set: { snoozedUntil: snoozeUntil } },
-    { new: true },
-  );
-
-  if (!updated) {
-    return res.status(404).json({
-      success: false,
-      message: "Notification not found",
-    });
-  }
-
-  return sendSuccess(res, "Notification snoozed", { notification: updated });
 };
 
 // UNSNOOZE a notification
