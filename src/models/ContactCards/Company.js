@@ -38,6 +38,29 @@ const companySchema = new mongoose.Schema(
       default: false,
     },
 
+    paymentInfo: {
+      epay: {
+        bankInfoMethod: {
+          type: String,
+          enum: ["eft", "echeck"],
+          default: "eft",
+        },
+        bankId: { type: mongoose.Schema.Types.ObjectId, ref: "Bank" },
+        bankName: { type: String, trim: true },
+        institutionNumber: { type: String, trim: true },
+        transit: { type: String, trim: true },
+        accountNumberLast4: { type: String },
+        accountNumberEncrypted: { type: String, select: false },
+        // accountType: { type: String, enum: ["checking", "savings"] },
+        billingFirstName: String,
+        billingLastName: String,
+        billingAddress: String,
+        billingEmail: String,
+        updatedAt: Date,
+        updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      },
+    },
+
     //  AUTO GENERATED
     companyAccountNumber: {
       type: String,

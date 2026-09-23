@@ -11,6 +11,9 @@ const {
   getCompanyOverview,
   searchCompanies,
   getCompaniesList,
+  getCompanyPaymentInfo,
+  updateCompanyPaymentInfo,
+  revealCompanyAccountNumber,
 } = require("../../controllers/contactCards/companyController");
 
 const router = express.Router();
@@ -40,6 +43,13 @@ router.get("/search", protect, authorize(...ALLOWED_ROLES), searchCompanies);
 // Get single company details
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getCompanyDetails);
 
+router.get(
+  "/:id/payment-info",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  getCompanyPaymentInfo,
+);
+
 // Get company's vendor work orders
 router.get(
   "/:id/work-orders",
@@ -66,6 +76,20 @@ router.get(
 
 // Update the Company Details
 router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateCompany);
+
+router.put(
+  "/:id/payment-info",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  updateCompanyPaymentInfo,
+);
+
+router.get(
+  "/:id/payment-info/reveal",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  revealCompanyAccountNumber,
+);
 
 // Remove Vendor from Company
 router.delete(

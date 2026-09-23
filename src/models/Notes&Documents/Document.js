@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { NOTE_SOURCE_TYPES } = require("../../utils/noteSourceTypes");
 
 const documentSchema = new mongoose.Schema(
   {
@@ -54,18 +55,10 @@ const documentSchema = new mongoose.Schema(
 
     sourceType: {
       type: String,
-      enum: [
-        "workOrder",
-        "serviceAgreement",
-        "inspectionRequest",
-        "task",
-        "todo",
-      ],
-      index: true,
+      enum: NOTE_SOURCE_TYPES,
     },
     sourceId: {
       type: mongoose.Schema.Types.ObjectId,
-      index: true,
     },
 
     uploadedBy: {
@@ -84,7 +77,7 @@ documentSchema.index({ category: 1 });
 documentSchema.index({ building: 1 });
 documentSchema.index({ portfolio: 1 });
 documentSchema.index({ workOrder: 1 });
-documentSchema.index({ sourceType: 1, sourceId: 1 });
+documentSchema.index({ sourceType: 1, sourceId: 1, createdAt: -1 });
 documentSchema.index({ uploadedBy: 1 });
 documentSchema.index({ createdAt: -1 });
 documentSchema.index({ fileType: 1 });
