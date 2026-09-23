@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Note = require("../../models/Notes&Documents/Note");
 const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
 const Building = require("../../models/Building");
@@ -5,6 +6,10 @@ const Portfolio = require("../../models/Portfolio");
 const { sendSuccess, sendError } = require("../../utils/response");
 const WorkOrder = require("../../models/WorkOrder");
 const { getVendorEntityConfig } = require("../../utils/vendorEntityRegistry");
+const {
+  validateSourceRef,
+  NOTE_SOURCE_TYPES,
+} = require("../../utils/noteSourceTypes");
 
 // Create Note
 exports.createNote = async (req, res) => {
@@ -67,6 +72,12 @@ exports.createNote = async (req, res) => {
       if (!workOrderExists) {
         return sendError(res, "Work order not found", 404);
       }
+    }
+
+    // Validate polymorphic source (company, task, serviceAgreement, ...)
+    const sourceError = await validateSourceRef(sourceType, sourceId);
+    if (sourceError) {
+      return sendError(res, sourceError.message, sourceError.status);
     }
 
     const note = await Note.create({
@@ -533,27 +544,26 @@ exports.getNotesByWorkOrder = async (req, res) => {
   }
 };
 
-// Get Notes by Entity (Service Agreement/Inspection Request/work order)
+// Get Notes by Entity (Work Order / Service Agreement / Inspection Request / Task / Todo / Company)
 exports.getNotesByEntity = async (req, res) => {
   try {
     const { sourceType, sourceId } = req.params;
-    const VALID_TYPES = [
-      "workOrder",
-      "serviceAgreement",
-      "inspectionRequest",
-      "task",
-      "todo",
-    ];
 
-    if (!VALID_TYPES.includes(sourceType)) {
+    if (!NOTE_SOURCE_TYPES.includes(sourceType)) {
       return sendError(res, "Invalid sourceType", 400);
+    }
+    if (!mongoose.isValidObjectId(sourceId)) {
+      return sendError(res, "Invalid sourceId", 400);
+    }
+    // This route allows Vendors; company notes are internal only
+    if (sourceType === "company" && req.user.role === "Vendor") {
+      return sendError(res, "You are not allowed to view these notes", 403);
     }
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const { category, startDate, endDate } = req.query;
 
-    // Support BOTH old workOrder field and new polymorphic fields
     const filter =
       sourceType === "workOrder"
         ? { $or: [{ workOrder: sourceId }, { sourceType, sourceId }] }

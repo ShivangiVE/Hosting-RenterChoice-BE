@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Building = require("../../models/Building");
 const Document = require("../../models/Notes&Documents/Document");
 const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
@@ -16,6 +17,10 @@ const WorkOrder = require("../../models/WorkOrder");
 const { getFileType } = require("../../utils/fileType");
 const { getVendorEntityConfig } = require("../../utils/vendorEntityRegistry");
 const { assertVendorCanAccessDocument } = require("../../utils/vendorGuards");
+const {
+  validateSourceRef,
+  NOTE_SOURCE_TYPES,
+} = require("../../utils/noteSourceTypes");
 
 // Upload multiple documents
 exports.uploadDocuments = async (req, res) => {
@@ -56,6 +61,17 @@ exports.uploadDocuments = async (req, res) => {
         req.files.forEach((file) => fs.unlinkSync(file.path));
         return sendError(res, "Work order not found", 404);
       }
+    }
+
+    // Validate polymorphic source (company, task, serviceAgreement, ...)
+    const sourceError = await validateSourceRef(sourceType, sourceId);
+    if (sourceError) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch {}
+      });
+      return sendError(res, sourceError.message, sourceError.status);
     }
 
     // Parse documents metadata (sent as JSON string)
@@ -723,20 +739,20 @@ exports.getDocumentsByWorkOrder = async (req, res) => {
   }
 };
 
-// Get Documents by Entity (serviceAgreement, inspectionRequest, task, todo)
+// Get Documents by Entity (workOrder, serviceAgreement, inspectionRequest, task, todo, company)
 exports.getDocumentsByEntity = async (req, res) => {
   try {
     const { sourceType, sourceId } = req.params;
-    const VALID_TYPES = [
-      "workOrder",
-      "serviceAgreement",
-      "inspectionRequest",
-      "task",
-      "todo",
-    ];
 
-    if (!VALID_TYPES.includes(sourceType)) {
+    if (!NOTE_SOURCE_TYPES.includes(sourceType)) {
       return sendError(res, "Invalid sourceType", 400);
+    }
+    if (!mongoose.isValidObjectId(sourceId)) {
+      return sendError(res, "Invalid sourceId", 400);
+    }
+    // This route allows Vendors; company documents are internal only
+    if (sourceType === "company" && req.user.role === "Vendor") {
+      return sendError(res, "You are not allowed to view these documents", 403);
     }
 
     const page = parseInt(req.query.page) || 1;

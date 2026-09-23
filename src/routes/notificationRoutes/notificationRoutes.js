@@ -9,12 +9,16 @@ const {
   snoozeNotification,
   unsnoozeNotification,
   pinNotification,
+  getSnoozedNotifications,
 } = require("../../controllers/Notifications/NotificationsController");
 
 const router = express.Router();
 
 // Get notifications (with pagination + unread count)
 router.get("/", protect, getNotifications);
+
+// Get notifications that are currently snoozed — separate list since
+router.get("/snoozed", protect, getSnoozedNotifications);
 
 // Mark single notification as read
 router.put("/:id/read", protect, markNotificationRead);

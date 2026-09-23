@@ -11,6 +11,7 @@ const internalAuthRoutes = require("./src/routes/internalUsers/auth");
 const uploadRoutes = require("./src/routes/profileUploadRoutes");
 const errorHandler = require("./src/middleware/errorHandler");
 const accountRoutes = require("./src/routes/accountsRoutes/accountsRoutes");
+const bankRoutes = require("./src/routes/accountsRoutes/bankRoutes");
 const coaRoutes = require("./src/routes/accountsRoutes/coaRoutes");
 const formTemplateRoutes = require("./src/routes/formTemplateRoutes/formTemplateRoutes");
 const buildingPortfolioRoutes = require("./src/routes/building/buildingPortfolioRoutes");
@@ -37,6 +38,7 @@ const contactRoutes = require("./src/routes/contactCards/contactCardRoutes");
 const companyRoutes = require("./src/routes/contactCards/companyRoutes");
 const vendorTypeRoutes = require("./src/routes/contactCards/vendorTypeRoutes");
 const searchRoutes = require("./src/routes/searchRoutes/searchRoutes");
+const emailTemplateRoutes = require("./src/routes/Settings/emailTemplateRoutes");
 
 const app = express();
 app.use(cors());
@@ -59,6 +61,7 @@ app.use("/api/officeAdmin", officeAdminRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/accounts", accountRoutes);
 app.use("/api/chart-of-accounts", coaRoutes);
+app.use("/api/banks", bankRoutes);
 app.use("/api/forms/templates", formTemplateRoutes);
 app.use("/api/forms/uploads", formUploadRoutes);
 app.use("/api/submissions", buildingPortfolioRoutes);
@@ -83,6 +86,7 @@ app.use("/api/contacts", contactRoutes);
 app.use("/api/companies", companyRoutes);
 app.use("/api/vendor-types", vendorTypeRoutes);
 app.use("/api/search", searchRoutes);
+app.use("/api/email-templates", emailTemplateRoutes);
 
 app.use(errorHandler);
 
