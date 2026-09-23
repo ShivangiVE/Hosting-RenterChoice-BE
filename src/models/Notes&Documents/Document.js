@@ -52,6 +52,10 @@ const documentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "WorkOrder",
     },
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+    },
 
     sourceType: {
       type: String,
@@ -77,6 +81,7 @@ documentSchema.index({ category: 1 });
 documentSchema.index({ building: 1 });
 documentSchema.index({ portfolio: 1 });
 documentSchema.index({ workOrder: 1 });
+documentSchema.index({ company: 1, createdAt: -1 });
 documentSchema.index({ sourceType: 1, sourceId: 1, createdAt: -1 });
 documentSchema.index({ uploadedBy: 1 });
 documentSchema.index({ createdAt: -1 });

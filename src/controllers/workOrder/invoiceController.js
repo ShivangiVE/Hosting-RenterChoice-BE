@@ -29,6 +29,7 @@ const {
   verifyInvoiceFileSignature,
 } = require("../../utils/fileSignatureValidator");
 const fs = require("fs/promises");
+const { resolveCompanyId } = require("../../utils/companyScope");
 
 exports.createInvoiceDraft = async (req, res) => {
   let fileUrl;
@@ -301,11 +302,17 @@ exports.finalizeServiceAgreementInvoice = async (req, res) => {
       });
     }
 
+    const companyId = await resolveCompanyId({
+      entity: serviceAgreement,
+      vendorId: invoice.vendor,
+    });
+
     const doc = await Document.create({
       fileName: invoice.originalFileName,
       originalFileName: invoice.originalFileName,
       description: invoice.confirmedData?.comments || "",
       category: invoiceCategory._id,
+      company: companyId || undefined,
       fileType: getFileType(invoice.mimeType),
       mimeType: invoice.mimeType,
       fileSize: invoice.fileSize,
