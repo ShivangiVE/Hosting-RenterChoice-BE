@@ -4,6 +4,7 @@ require("../processors/reminderProcessor");
 require("../processors/serviceAgreementCycleProcessor");
 require("../processors/broadcastAlertProcessor");
 require("../processors/notificationDigestProcessor");
+require("../processors/paymentInfoPurgeService");
 require("../registries/rules");
 
 const { getJobs } = require("./registry");

@@ -283,7 +283,10 @@ exports.bulkDeleteContacts = async (req, res) => {
         : null,
 
       companyIds.length
-        ? Company.updateMany({ _id: { $in: companyIds } }, { isActive: false })
+        ? Company.updateMany(
+            { _id: { $in: companyIds } },
+            { $set: { isActive: false, deactivatedAt: new Date() } },
+          )
         : null,
     ]);
 
