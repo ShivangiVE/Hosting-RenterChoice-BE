@@ -476,6 +476,7 @@ exports.getCompanyPaymentInfo = async (req, res) => {
     }
 
     const company = await Company.findById(id).select("paymentInfo.epay");
+    
     if (!company) {
       return sendError(res, "Company not found", 404);
     }

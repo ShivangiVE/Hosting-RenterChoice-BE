@@ -77,6 +77,14 @@ const companySchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // Set the moment isActive goes false; cleared on reactivation.
+    // Drives the 72-hour banking-data purge.
+    deactivatedAt: { type: Date, default: null, index: true },
+
+    // Stamped once the banking details have been erased.
+    paymentInfoPurgedAt: { type: Date, default: null },
+
     lastUpdatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -96,5 +104,25 @@ companySchema.pre("save", function (next) {
   }
   next();
 });
+
+// updateMany / updateOne / findOneAndUpdate bypass pre("save"), and the bulk
+// delete uses updateMany — so keep deactivatedAt in step here too.
+function syncDeactivatedAt(next) {
+  const update = this.getUpdate() || {};
+  const $set = update.$set || update;
+
+  if ($set.isActive === false && $set.deactivatedAt === undefined) {
+    this.setUpdate({ ...update, $set: { ...$set, deactivatedAt: new Date() } });
+  }
+  if ($set.isActive === true) {
+    this.setUpdate({ ...update, $set: { ...$set, deactivatedAt: null } });
+  }
+
+  next();
+}
+
+companySchema.pre("updateMany", syncDeactivatedAt);
+companySchema.pre("updateOne", syncDeactivatedAt);
+companySchema.pre("findOneAndUpdate", syncDeactivatedAt);
 
 module.exports = mongoose.model("Company", companySchema);
