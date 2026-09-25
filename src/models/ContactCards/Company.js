@@ -105,24 +105,28 @@ companySchema.pre("save", function (next) {
   next();
 });
 
-// updateMany / updateOne / findOneAndUpdate bypass pre("save"), and the bulk
-// delete uses updateMany — so keep deactivatedAt in step here too.
 function syncDeactivatedAt(next) {
   const update = this.getUpdate() || {};
-  const $set = update.$set || update;
+  // Mongo accepts a bare update object or a $set — handle both shapes
+  const hasSet = Object.prototype.hasOwnProperty.call(update, "$set");
+  const target = hasSet ? { ...update.$set } : { ...update };
 
-  if ($set.isActive === false && $set.deactivatedAt === undefined) {
-    this.setUpdate({ ...update, $set: { ...$set, deactivatedAt: new Date() } });
+  if (target.isActive === false && target.deactivatedAt === undefined) {
+    target.deactivatedAt = new Date();
   }
-  if ($set.isActive === true) {
-    this.setUpdate({ ...update, $set: { ...$set, deactivatedAt: null } });
+  if (target.isActive === true) {
+    target.deactivatedAt = null;
   }
 
+  this.setUpdate(hasSet ? { ...update, $set: target } : target);
   next();
 }
 
 companySchema.pre("updateMany", syncDeactivatedAt);
 companySchema.pre("updateOne", syncDeactivatedAt);
 companySchema.pre("findOneAndUpdate", syncDeactivatedAt);
+
+// Serves the Active/Inactive filter plus the companyName sort in listCompanies
+companySchema.index({ isActive: 1, companyName: 1 });
 
 module.exports = mongoose.model("Company", companySchema);

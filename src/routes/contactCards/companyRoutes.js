@@ -14,6 +14,7 @@ const {
   getCompanyPaymentInfo,
   updateCompanyPaymentInfo,
   revealCompanyAccountNumber,
+  reactivateCompany,
 } = require("../../controllers/contactCards/companyController");
 
 const router = express.Router();
@@ -76,6 +77,14 @@ router.get(
 
 // Update the Company Details
 router.put("/:id", protect, authorize(...ALLOWED_ROLES), updateCompany);
+
+// Reactivate a deactivated company
+router.patch(
+  "/:id/reactivate",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  reactivateCompany,
+);
 
 router.put(
   "/:id/payment-info",
