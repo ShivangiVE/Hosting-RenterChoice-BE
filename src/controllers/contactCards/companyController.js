@@ -438,6 +438,66 @@ exports.updateCompany = async (req, res) => {
   }
 };
 
+// Reactivate a deactivated company
+exports.reactivateCompany = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
+
+    const company = await Company.findById(id).select(
+      "companyName companyAccountNumber isActive deactivatedAt paymentInfoPurgedAt",
+    );
+
+    if (!company) {
+      return sendError(res, "Company not found", 404);
+    }
+
+    if (company.isActive) {
+      return sendError(res, "This company is already active", 400);
+    }
+
+    // Banking details erased by the 72-hour retention job cannot be restored
+    const paymentInfoWasPurged = Boolean(company.paymentInfoPurgedAt);
+
+    // findByIdAndUpdate → the syncDeactivatedAt hook clears deactivatedAt
+    const updated = await Company.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          isActive: true,
+          lastUpdatedBy: req.user?._id,
+          lastUpdatedAt: new Date(),
+        },
+      },
+      { new: true },
+    )
+      .populate("vendorType", "name")
+      .populate("lastUpdatedBy", "preferredName email");
+
+    await AuditService.logActivity({
+      module: "Company",
+      action: "REACTIVATE",
+      entityId: company._id,
+      userId: req.user?._id,
+      description:
+        `Reactivated company ${company.companyName} (#${company.companyAccountNumber})` +
+        (paymentInfoWasPurged
+          ? " — banking details had already been erased under the retention policy"
+          : ""),
+    }).catch(console.error);
+
+    return sendSuccess(res, "Company reactivated successfully", {
+      company: updated,
+      paymentInfoWasPurged,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to reactivate company", 500);
+  }
+};
+
 // Remove Vendor From Company
 exports.removeVendorFromCompany = async (req, res) => {
   try {
@@ -476,7 +536,7 @@ exports.getCompanyPaymentInfo = async (req, res) => {
     }
 
     const company = await Company.findById(id).select("paymentInfo.epay");
-    
+
     if (!company) {
       return sendError(res, "Company not found", 404);
     }
