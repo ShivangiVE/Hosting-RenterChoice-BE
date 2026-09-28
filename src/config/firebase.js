@@ -8,7 +8,7 @@ const initFirebase = () => {
   const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
 
   if (!encoded) {
-\
+
     console.warn(
       "[firebase] FIREBASE_SERVICE_ACCOUNT_BASE64 not set — push notifications disabled.",
     );
