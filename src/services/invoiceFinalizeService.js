@@ -3,9 +3,14 @@ const Document = require("../models/Notes&Documents/Document");
 const NoteCategory = require("../models/Notes&Documents/NoteCategory");
 const Invoice = require("../models/Accounts/Invoice");
 const { getFileType } = require("../utils/fileType");
+const { resolveCompanyId } = require("../utils/companyScope");
 
 exports.finalizeInvoice = async (workOrder, invoiceId, userId) => {
   const session = await mongoose.startSession();
+  const companyId = await resolveCompanyId({
+    entity: workOrder,
+    vendorId: workOrder.vendor,
+  });
 
   try {
     let document;
@@ -41,6 +46,7 @@ exports.finalizeInvoice = async (workOrder, invoiceId, userId) => {
             fileSize: invoice.fileSize,
             fileUrl: invoice.fileUrl,
             workOrder: workOrder._id,
+            company: companyId || undefined,
             uploadedBy: userId,
           },
         ],

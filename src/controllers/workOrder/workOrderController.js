@@ -13,6 +13,7 @@ const WorkOrder = require("../../models/WorkOrder");
 const Counter = require("../../utils/Counter");
 const { findDynamicStatus } = require("../../utils/dynamicStatus");
 const { TYPE_MAP, normalize } = require("../../utils/inspectionType");
+const { escapeRegex, toSearchRegex } = require("../../utils/stringUtils");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const { getIO } = require("../../../socket");
@@ -65,10 +66,6 @@ const getNextSequence = async (sequenceName) => {
   );
   return counter.sequence_value;
 };
-
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 const resolveCategoryName = async (categoryValue) => {
   if (!categoryValue) return categoryValue;
@@ -280,7 +277,7 @@ exports.getWorkOrders = async (req, res) => {
     // Dynamic status filter by ID or name
     if (dynamicStatus && dynamicStatus !== "All") {
       const statusObj = await WODynamicStatus.findOne({
-        $or: [{ _id: dynamicStatus }, { name: new RegExp(dynamicStatus, "i") }],
+        $or: [{ _id: dynamicStatus }, { name: toSearchRegex(dynamicStatus) }],
       });
       if (statusObj) filter.dynamicStatus = statusObj._id;
     }
@@ -328,7 +325,7 @@ exports.getWorkOrders = async (req, res) => {
     // City filter
     if (city && city !== "All") {
       const buildingIdsByCity = await Building.find({
-        "formData.city": new RegExp(city, "i"),
+        "formData.city": toSearchRegex(city),
       }).distinct("_id");
 
       if (filter.building && filter.building.$in) {
@@ -350,7 +347,7 @@ exports.getWorkOrders = async (req, res) => {
 
     // Global search
     if (search && search.trim() !== "") {
-      const regex = new RegExp(search, "i");
+      const regex = toSearchRegex(search);
 
       const buildingIds = await Building.find({
         $or: [
@@ -591,7 +588,7 @@ exports.getVendorWorkOrders = async (req, res) => {
 
     //  SEARCH FILTER
     if (search && search.trim() !== "") {
-      const regex = new RegExp(search, "i");
+      const regex = toSearchRegex(search);
 
       const buildingIds = await Building.find({
         $or: [
@@ -872,7 +869,7 @@ exports.getWorkOrdersByBuilding = async (req, res) => {
               ? dynamicStatus
               : null,
           },
-          { name: new RegExp(dynamicStatus, "i") },
+          { name: toSearchRegex(dynamicStatus) },
         ].filter(Boolean),
       });
       if (statusObj) filter.dynamicStatus = statusObj._id;
@@ -2921,15 +2918,15 @@ exports.getInspectionRequests = async (req, res) => {
 
     if (user && user !== "All") {
       const matchedUsers = await User.find({
-        preferredName: new RegExp(user, "i"),
+        preferredName: toSearchRegex(user),
       }).distinct("_id");
       filter.assignedTo = { $in: matchedUsers };
     }
 
     if (building && building !== "All")
-      filter["building.formData.address"] = new RegExp(building, "i");
+      filter["building.formData.address"] = toSearchRegex(building);
     if (portfolio && portfolio !== "All")
-      filter["building.portfolio.formData.name"] = new RegExp(portfolio, "i");
+      filter["building.portfolio.formData.name"] = toSearchRegex(portfolio);
 
     // Due Date filter
     if (dueDate && dueDate !== "All") {
@@ -2958,7 +2955,7 @@ exports.getInspectionRequests = async (req, res) => {
 
     if (city && city !== "All") {
       const buildingIdsByCity = await Building.find({
-        "formData.city": new RegExp(city, "i"),
+        "formData.city": toSearchRegex(city),
       }).distinct("_id");
 
       if (filter["building.formData.address"]) {
@@ -3007,7 +3004,7 @@ exports.getInspectionRequests = async (req, res) => {
 
     // Global search
     if (search && search.trim() !== "") {
-      const regex = new RegExp(search, "i");
+      const regex = toSearchRegex(search);
       const buildingIds = await Building.find({
         $or: [
           { "formData.address": regex },
@@ -3644,7 +3641,7 @@ exports.getServiceAgreements = async (req, res) => {
 
     // Global Search
     if (search && search.trim() !== "") {
-      const regex = new RegExp(search, "i");
+      const regex = toSearchRegex(search);
 
       // Find buildings that match search
       const buildingIds = await Building.find({
@@ -4234,7 +4231,7 @@ exports.getVendorServiceAgreements = async (req, res) => {
     }
 
     if (search && search.trim() !== "") {
-      const regex = new RegExp(search, "i");
+      const regex = toSearchRegex(search);
       const buildingIds = await Building.find({
         $or: [
           { "formData.address": regex },

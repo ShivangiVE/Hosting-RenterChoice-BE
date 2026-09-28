@@ -3,10 +3,7 @@ const {
   searchEntityRegistry,
 } = require("../../registries/searchEntityRegistry");
 const { sendSuccess, sendError } = require("../../utils/response");
-
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+const { escapeRegex } = require("../../utils/stringUtils");
 
 const PER_ENTITY_LIMIT = 6;
 const OVERALL_LIMIT = 30;
@@ -94,17 +91,13 @@ exports.globalSearch = async (req, res) => {
       return sendSuccess(res, "Global search results fetched", emptyResult(q));
     }
 
-    // Union every branch together — same $unionWith pattern already used
-    // in getVendorEntities (workOrderController.js) to merge WorkOrder +
-    // ServiceAgreement into one paginated feed.
     const [first, ...rest] = branches;
     const pipeline = [
       ...first.pipeline,
       ...rest.map((branch) => ({
         $unionWith: { coll: branch.collection, pipeline: branch.pipeline },
       })),
-      // Cheap relevance boost: an exact/prefix title match floats to the
-      // top of its recency-sorted pool. Requires Mongo 4.2+ ($regexMatch).
+
       {
         $addFields: {
           _exactMatch: {
