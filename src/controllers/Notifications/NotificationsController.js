@@ -51,6 +51,49 @@ exports.getNotifications = async (req, res) => {
   }
 };
 
+// GET notifications that are currently snoozed (snoozedUntil in the future).
+exports.getSnoozedNotifications = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const filter = {
+      user: req.user._id,
+      deletedAt: null,
+      actionTakenAt: null,
+      hidden: { $ne: true },
+      snoozedUntil: { $gt: new Date() },
+    };
+
+    const [notifications, total] = await Promise.all([
+      // Soonest-to-reappear first — the most actionable ordering for a
+      // "currently snoozed" view, unlike the main list's createdAt sort.
+      Notification.find(filter)
+        .sort({ snoozedUntil: 1 })
+        .skip(skip)
+        .limit(limit),
+
+      Notification.countDocuments(filter),
+    ]);
+
+    return sendSuccess(res, "Snoozed notifications fetched", {
+      notifications,
+      pagination: {
+        current: page,
+        pages: Math.ceil(total / limit),
+        total,
+        limit,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
 // SNOOZE a notification until a given time
 exports.snoozeNotification = async (req, res) => {
   try {
