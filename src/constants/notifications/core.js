@@ -50,7 +50,7 @@ module.exports = {
       key: "INSPECTION_UPDATES",
       label: "Inspection Updates",
       roles: ["InspectionClerk"],
-      frequencyLocked: true,
+      // frequencyLocked: true,
       types: [
         "INSPECTION_REQUEST_ASSIGNED",
         "WORK_ORDER_ASSIGNED_CLERK",
