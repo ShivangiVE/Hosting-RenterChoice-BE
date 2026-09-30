@@ -6,6 +6,7 @@ const { getCategoryPreference } = require("./notificationPreferenceService");
 const { sendNotificationEmailNow } = require("./notificationEmailService");
 const NotificationDigestQueueItem = require("../models/NotificationDigestQueueItem");
 const { resolveReminders } = require("./notificationReminderService");
+const { sendPushToUser } = require("./pushNotificationService");
 
 const DEDUP_WINDOW_MS = 60 * 1000;
 
@@ -20,6 +21,15 @@ const REMINDER_TYPES = [
   "WORK_ORDER_ACCEPT_DECLINE_REMINDER",
   "WORK_ORDER_TENANT_CONTACT_REMINDER",
 ];
+
+// Web app route that redirects each role to its own notifications page.
+const WEB_NOTIFICATIONS_PATH = "/open-notifications";
+
+const buildWebLink = () => {
+  const base = process.env.WEB_APP_URL;
+  if (!base || !base.startsWith("https://")) return undefined;
+  return `${base.replace(/\/$/, "")}${WEB_NOTIFICATIONS_PATH}`;
+};
 
 exports.createNotification = async ({
   user,
@@ -47,7 +57,9 @@ exports.createNotification = async ({
   let pref = {
     emailEnabled: false,
     inAppEnabled: true,
-    frequency: "immediately",
+    pushEnabled: true,
+    appFrequency: "immediately",
+    emailFrequency: "immediately",
   };
   if (categoryKey) {
     pref = await getCategoryPreference(user, categoryKey);
@@ -77,6 +89,7 @@ exports.createNotification = async ({
     throw err;
   }
 
+  // ── In-app (socket) ────────────────────────────────────────────────────────
   if (!notification.hidden) {
     try {
       getIO()
@@ -87,6 +100,31 @@ exports.createNotification = async ({
     }
   }
 
+  // ── Push (web + Android + iOS) ─────────────────────────────────────────────
+  // Deliberately NOT awaited: an FCM round-trip shouldn't slow down the
+  // request that created the notification — e.g. a work order fanned out to
+  // a whole vendor pool creates one notification per vendor in a loop.
+  // sendPushToUser is a no-op if Firebase isn't configured or the user has
+  // no registered devices, and any failure is logged, never thrown.
+  // `!== false` so preference docs saved before pushEnabled existed still
+  // count as "on".
+  if (pref.pushEnabled !== false) {
+    sendPushToUser(user, {
+      title: notification.title,
+      body: notification.message,
+      data: {
+        notificationId: notification._id,
+        type: notification.type,
+        entityType: notification.entityType,
+        entityId: notification.entityId,
+      },
+      link: buildWebLink(),
+    }).catch((err) =>
+      console.warn("[NotificationService] Push delivery skipped:", err.message),
+    );
+  }
+
+  // ── Email (immediate or digest) ────────────────────────────────────────────
   if (pref.emailEnabled) {
     try {
       if (pref.emailFrequency === "immediately") {
@@ -99,7 +137,10 @@ exports.createNotification = async ({
         await NotificationDigestQueueItem.create({
           user,
           categoryKey,
-          frequency: pref.frequency,
+          // Was `pref.frequency`, a field that no longer exists on the
+          // preference (it was split into appFrequency / emailFrequency),
+          // so digest items were being queued with no frequency.
+          frequency: pref.emailFrequency,
           title: notification.title,
           message: notification.message,
         });

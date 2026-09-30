@@ -1,5 +1,6 @@
 const Company = require("../../models/ContactCards/Company");
 const Contact = require("../../models/ContactCards/Contact");
+const { buildStatusFilter, toStatusLabel } = require("../../utils/contactCardStatus");
 const { sendError, sendSuccess } = require("../../utils/response");
 
 exports.createContact = async (req, res) => {
@@ -74,11 +75,18 @@ exports.getContactsList = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
+    // Single source of truth: isActive, applied identically to both collections
+    const statusFilter = buildStatusFilter(status);
+
+    // Only query what the contactType filter can actually return
+    const wantsCompanies =
+      !contactType || contactType === "All" || contactType === "Vendor";
+    const wantsContacts = contactType !== "Vendor";
+
     /* =============================
        COMPANIES → Vendor cards
     ============================= */
-
-    const companyQuery = { isActive: true };
+    const companyQuery = { ...statusFilter };
 
     if (search) {
       companyQuery.companyNameNormalized = {
@@ -87,27 +95,11 @@ exports.getContactsList = async (req, res) => {
       };
     }
 
-    const companies = await Company.find(companyQuery)
-      .populate("vendorType", "name")
-      .lean();
-
-    const companyCards = companies.map((c) => ({
-      _id: c._id,
-      name: c.companyName,
-      email: c.companyEmail,
-      phone: c.companyPhone,
-      contactType: "Vendor",
-      status: c.isActive ? "Active" : "Inactive",
-      cardType: "company",
-      createdAt: c.createdAt,
-    }));
-
     /* =============================
-   CONTACTS → Individual cards
-============================= */
-    const contactsQuery = {};
+       CONTACTS → Individual cards
+    ============================= */
+    const contactsQuery = { ...statusFilter };
 
-    //  search support
     if (search) {
       contactsQuery.$or = [
         { preferredName: { $regex: search, $options: "i" } },
@@ -115,29 +107,35 @@ exports.getContactsList = async (req, res) => {
       ];
     }
 
-    // filter by contact type
     if (contactType && contactType !== "Vendor" && contactType !== "All") {
       contactsQuery.contactType = contactType;
     }
 
-    // STATUS FILTER (CRITICAL FIX)
-    if (status && status !== "All") {
-      contactsQuery.status = status; // uses schema status field
-    } else {
-      contactsQuery.isActive = true; // default behavior
-    }
+    const [companies, contactDocs] = await Promise.all([
+      wantsCompanies
+        ? Company.find(companyQuery).populate("vendorType", "name").lean()
+        : [],
+      wantsContacts ? Contact.find(contactsQuery).lean() : [],
+    ]);
 
-    //  fetch contacts
-    const contactDocs = await Contact.find(contactsQuery).lean();
+    const companyCards = companies.map((c) => ({
+      _id: c._id,
+      name: c.companyName,
+      email: c.companyEmail,
+      phone: c.companyPhone,
+      contactType: "Vendor",
+      status: toStatusLabel(c.isActive),
+      cardType: "company",
+      createdAt: c.createdAt,
+    }));
 
-    //  map to card format (KEEP FE CONTRACT SAME)
     const individualCards = contactDocs.map((c) => ({
       _id: c._id,
       name: c.preferredName,
       email: c.primaryEmail,
       phone: c.phones?.mobile || "",
       contactType: c.contactType,
-      status: c.status || (c.isActive ? "Active" : "Inactive"),
+      status: toStatusLabel(c.isActive),
       cardType: "individual",
       createdAt: c.createdAt,
     }));
@@ -145,11 +143,7 @@ exports.getContactsList = async (req, res) => {
     /* =============================
        MERGE
     ============================= */
-    let contacts = [...companyCards, ...individualCards];
-
-    if (contactType && contactType !== "All") {
-      contacts = contacts.filter((c) => c.contactType === contactType);
-    }
+    const contacts = [...companyCards, ...individualCards];
 
     // sort
     contacts.sort((a, b) => {
@@ -279,11 +273,17 @@ exports.bulkDeleteContacts = async (req, res) => {
     // Soft delete (BEST PRACTICE)
     const [contactsResult, companiesResult] = await Promise.all([
       contactIds.length
-        ? Contact.updateMany({ _id: { $in: contactIds } }, { isActive: false })
+        ? Contact.updateMany(
+            { _id: { $in: contactIds } },
+            { $set: { isActive: false } },
+          )
         : null,
 
       companyIds.length
-        ? Company.updateMany({ _id: { $in: companyIds } }, { isActive: false })
+        ? Company.updateMany(
+            { _id: { $in: companyIds } },
+            { $set: { isActive: false, deactivatedAt: new Date() } },
+          )
         : null,
     ]);
 

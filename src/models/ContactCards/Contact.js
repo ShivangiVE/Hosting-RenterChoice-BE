@@ -148,8 +148,34 @@ contactSchema.pre("save", function (next) {
     this.primaryEmailNormalized = this.primaryEmail.trim().toLowerCase();
   }
 
+  if (this.isModified("isActive")) {
+    this.status = this.isActive ? "Active" : "Inactive";
+  } else if (this.isModified("status")) {
+    this.isActive = this.status === "Active";
+  }
+
   next();
 });
+
+function syncContactStatus(next) {
+  const update = this.getUpdate() || {};
+  // Mongo accepts a bare update object or a $set — handle both shapes
+  const hasSet = Object.prototype.hasOwnProperty.call(update, "$set");
+  const target = hasSet ? { ...update.$set } : { ...update };
+
+  if (target.isActive !== undefined) {
+    target.status = target.isActive ? "Active" : "Inactive";
+  } else if (target.status !== undefined) {
+    target.isActive = target.status === "Active";
+  }
+
+  this.setUpdate(hasSet ? { ...update, $set: target } : target);
+  next();
+}
+
+contactSchema.pre("updateMany", syncContactStatus);
+contactSchema.pre("updateOne", syncContactStatus);
+contactSchema.pre("findOneAndUpdate", syncContactStatus);
 
 contactSchema.index(
   { preferredNameNormalized: 1, primaryEmailNormalized: 1 },

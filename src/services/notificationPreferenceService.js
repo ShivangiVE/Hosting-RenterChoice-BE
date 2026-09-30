@@ -62,10 +62,12 @@ const updatePreferences = async (userId, categoryUpdates) => {
 const getCategoryPreference = async (userId, categoryKey) => {
   const categoryDef = NOTIFICATION_CATEGORIES[categoryKey];
 
+  // Mandatory categories always go out on every channel, whatever is saved.
   if (categoryDef?.mandatory) {
     return {
       emailEnabled: true,
       inAppEnabled: true,
+      pushEnabled: true,
       appFrequency: "immediately",
       emailFrequency: "immediately",
     };
@@ -76,6 +78,7 @@ const getCategoryPreference = async (userId, categoryKey) => {
     pref.categories.get(categoryKey) || {
       emailEnabled: false,
       inAppEnabled: true,
+      pushEnabled: true,
       appFrequency: "immediately",
       emailFrequency: "immediately",
     }

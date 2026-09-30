@@ -2,7 +2,9 @@ const mongoose = require("mongoose");
 const Company = require("../../models/ContactCards/Company");
 const VendorType = require("../../models/ContactCards/VendorType");
 const User = require("../../models/User");
+const Bank = require("../../models/Accounts/Bank");
 const { generateAccountNumber } = require("../../utils/generateAccountNumber");
+const { encryptField, decryptField } = require("../../utils/fieldEncryption");
 const { sendSuccess, sendError } = require("../../utils/response");
 const resolveCompanyVendorIds = require("../../utils/resolveCompanyVendorIds");
 const {
@@ -11,6 +13,69 @@ const {
 } = require("../workOrder/workOrderQueryBuilder");
 const WorkOrder = require("../../models/WorkOrder");
 const ServiceAgreement = require("../../models/ServiceAgreement");
+const AuditService = require("../../services/auditService");
+
+// ---------- E-Pay validation ----------
+const EPAY_VALIDATION = {
+  transit: /^\d{5}$/,
+};
+
+async function validateEpayPayload(body) {
+  const errors = [];
+  const {
+    bankId,
+    transit,
+    accountNumber,
+    confirmAccountNumber,
+    // accountType,
+    billingFirstName,
+    billingLastName,
+    billingEmail,
+  } = body;
+
+  let bank = null;
+  if (!bankId) {
+    errors.push("Bank selection is required.");
+  } else {
+    bank = await Bank.findOne({ _id: bankId, isActive: true });
+    if (!bank) {
+      errors.push("Selected bank is invalid or no longer available.");
+    }
+  }
+
+  if (!transit || !EPAY_VALIDATION.transit.test(transit)) {
+    errors.push("Transit number must be exactly 5 digits.");
+  }
+
+  if (bank) {
+    if (!accountNumber || !/^\d+$/.test(accountNumber)) {
+      errors.push("Account number must contain digits only.");
+    } else if (
+      accountNumber.length < bank.accountNumberMin ||
+      accountNumber.length > bank.accountNumberMax
+    ) {
+      errors.push(
+        `Account number must be between ${bank.accountNumberMin} and ${bank.accountNumberMax} digits for ${bank.name}.`,
+      );
+    }
+  }
+
+  if (accountNumber !== confirmAccountNumber) {
+    errors.push("Account number and confirmation do not match.");
+  }
+
+  // if (!accountType || !["checking", "savings"].includes(accountType)) {
+  //   errors.push("Account type is required.");
+  // }
+
+  if (!billingFirstName?.trim()) errors.push("Billing first name is required.");
+  if (!billingLastName?.trim()) errors.push("Billing last name is required.");
+  if (billingEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(billingEmail)) {
+    errors.push("Billing email is invalid.");
+  }
+
+  return { errors, bank };
+}
 
 // Create Company
 exports.createCompany = async (req, res) => {
@@ -373,6 +438,66 @@ exports.updateCompany = async (req, res) => {
   }
 };
 
+// Reactivate a deactivated company
+exports.reactivateCompany = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
+
+    const company = await Company.findById(id).select(
+      "companyName companyAccountNumber isActive deactivatedAt paymentInfoPurgedAt",
+    );
+
+    if (!company) {
+      return sendError(res, "Company not found", 404);
+    }
+
+    if (company.isActive) {
+      return sendError(res, "This company is already active", 400);
+    }
+
+    // Banking details erased by the 72-hour retention job cannot be restored
+    const paymentInfoWasPurged = Boolean(company.paymentInfoPurgedAt);
+
+    // findByIdAndUpdate → the syncDeactivatedAt hook clears deactivatedAt
+    const updated = await Company.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          isActive: true,
+          lastUpdatedBy: req.user?._id,
+          lastUpdatedAt: new Date(),
+        },
+      },
+      { new: true },
+    )
+      .populate("vendorType", "name")
+      .populate("lastUpdatedBy", "preferredName email");
+
+    await AuditService.logActivity({
+      module: "Company",
+      action: "REACTIVATE",
+      entityId: company._id,
+      userId: req.user?._id,
+      description:
+        `Reactivated company ${company.companyName} (#${company.companyAccountNumber})` +
+        (paymentInfoWasPurged
+          ? " — banking details had already been erased under the retention policy"
+          : ""),
+    }).catch(console.error);
+
+    return sendSuccess(res, "Company reactivated successfully", {
+      company: updated,
+      paymentInfoWasPurged,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to reactivate company", 500);
+  }
+};
+
 // Remove Vendor From Company
 exports.removeVendorFromCompany = async (req, res) => {
   try {
@@ -398,5 +523,166 @@ exports.removeVendorFromCompany = async (req, res) => {
     return sendSuccess(res, "Vendor removed successfully");
   } catch (err) {
     return sendError(res, err.message, 500);
+  }
+};
+
+// Get Company Payment Info (E-Pay)
+exports.getCompanyPaymentInfo = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
+
+    const company = await Company.findById(id).select("paymentInfo.epay");
+
+    if (!company) {
+      return sendError(res, "Company not found", 404);
+    }
+
+    const epay = company.paymentInfo?.epay;
+    if (!epay || !epay.bankId) {
+      return sendSuccess(res, "Payment info fetched", { epay: null });
+    }
+
+    return sendSuccess(res, "Payment info fetched", {
+      epay: {
+        bankInfoMethod: epay.bankInfoMethod,
+        bankId: epay.bankId,
+        bankName: epay.bankName,
+        institutionNumber: epay.institutionNumber,
+        transit: epay.transit,
+        accountNumberLast4: epay.accountNumberLast4,
+        // accountType: epay.accountType,
+        billingFirstName: epay.billingFirstName,
+        billingLastName: epay.billingLastName,
+        billingAddress: epay.billingAddress,
+        billingEmail: epay.billingEmail,
+      },
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch payment info", 500);
+  }
+};
+
+// Update Company Payment Info (E-Pay)
+exports.updateCompanyPaymentInfo = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
+
+    const { errors, bank } = await validateEpayPayload(req.body);
+    if (errors.length) {
+      return sendError(res, errors.join(" "), 400);
+    }
+
+    const company = await Company.findById(id);
+    if (!company) {
+      return sendError(res, "Company not found", 404);
+    }
+
+    const {
+      transit,
+      accountNumber,
+      // accountType,
+      billingFirstName,
+      billingLastName,
+      billingAddress,
+      billingEmail,
+      bankInfoMethod,
+    } = req.body;
+
+    const last4 = accountNumber.slice(-4);
+
+    company.paymentInfo = company.paymentInfo || {};
+    company.paymentInfo.epay = {
+      bankInfoMethod: bankInfoMethod || "eft",
+      bankId: bank._id,
+      bankName: bank.name,
+      institutionNumber: bank.institutionNumber,
+      transit,
+      accountNumberLast4: last4,
+      accountNumberEncrypted: encryptField(accountNumber),
+      // accountType,
+      billingFirstName,
+      billingLastName,
+      billingAddress,
+      billingEmail,
+      updatedAt: new Date(),
+      updatedBy: req.user?._id,
+    };
+
+    await company.save();
+
+    await AuditService.logActivity({
+      module: "Company",
+      action: "UPDATE_PAYMENT_INFO",
+      entityId: company._id,
+      userId: req.user?._id,
+      description: `Updated E-Pay payment info for company ${company.companyName || company._id} (account ending in ${last4})`,
+    });
+
+    return sendSuccess(res, "Payment info updated successfully", {
+      epay: {
+        bankInfoMethod: company.paymentInfo.epay.bankInfoMethod,
+        bankId: company.paymentInfo.epay.bankId,
+        bankName: company.paymentInfo.epay.bankName,
+        institutionNumber: company.paymentInfo.epay.institutionNumber,
+        transit: company.paymentInfo.epay.transit,
+        accountNumberLast4: last4,
+        // accountType: company.paymentInfo.epay.accountType,
+        billingFirstName: company.paymentInfo.epay.billingFirstName,
+        billingLastName: company.paymentInfo.epay.billingLastName,
+        billingAddress: company.paymentInfo.epay.billingAddress,
+        billingEmail: company.paymentInfo.epay.billingEmail,
+      },
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to update payment info", 500);
+  }
+};
+
+// Reveal full account number (only called when user clicks Edit)
+exports.revealCompanyAccountNumber = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
+
+    const company = await Company.findById(id).select(
+      "companyName +paymentInfo.epay.accountNumberEncrypted paymentInfo.epay.bankId",
+    );
+    if (!company) {
+      return sendError(res, "Company not found", 404);
+    }
+
+    const epay = company.paymentInfo?.epay;
+    if (!epay || !epay.accountNumberEncrypted) {
+      return sendError(res, "No saved account number found", 404);
+    }
+
+    const accountNumber = decryptField(epay.accountNumberEncrypted);
+
+    await AuditService.logActivity({
+      module: "Company",
+      action: "REVEAL_PAYMENT_INFO",
+      entityId: company._id,
+      userId: req.user?._id,
+      description: `Viewed full bank account number for company ${company.companyName || company._id}`,
+    });
+
+    return sendSuccess(res, "Account number revealed", { accountNumber });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to reveal account number",
+      500,
+    );
   }
 };

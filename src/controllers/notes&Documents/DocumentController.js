@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Building = require("../../models/Building");
 const Document = require("../../models/Notes&Documents/Document");
 const NoteCategory = require("../../models/Notes&Documents/NoteCategory");
@@ -16,6 +17,11 @@ const WorkOrder = require("../../models/WorkOrder");
 const { getFileType } = require("../../utils/fileType");
 const { getVendorEntityConfig } = require("../../utils/vendorEntityRegistry");
 const { assertVendorCanAccessDocument } = require("../../utils/vendorGuards");
+const {
+  validateSourceRef,
+  NOTE_SOURCE_TYPES,
+} = require("../../utils/noteSourceTypes");
+const { resolveCompanyId } = require("../../utils/companyScope");
 
 // Upload multiple documents
 exports.uploadDocuments = async (req, res) => {
@@ -57,6 +63,22 @@ exports.uploadDocuments = async (req, res) => {
         return sendError(res, "Work order not found", 404);
       }
     }
+
+    // Validate polymorphic source (company, task, serviceAgreement, ...)
+    const sourceError = await validateSourceRef(sourceType, sourceId);
+    if (sourceError) {
+      req.files.forEach((file) => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch {}
+      });
+      return sendError(res, sourceError.message, sourceError.status);
+    }
+
+    const companyId = await resolveCompanyId({
+      sourceType: sourceType || (workOrder ? "workOrder" : null),
+      sourceId: sourceId || workOrder,
+    });
 
     // Parse documents metadata (sent as JSON string)
     let documentsMetadata = [];
@@ -115,6 +137,7 @@ exports.uploadDocuments = async (req, res) => {
         building: building || null,
         portfolio: portfolio || null,
         workOrder: workOrder || null,
+        company: companyId || undefined,
         sourceType: sourceType || undefined,
         sourceId: sourceId || undefined,
         uploadedBy: req.user._id,
@@ -212,6 +235,12 @@ exports.vendorUploadDocuments = async (req, res) => {
       );
     }
 
+    // Stamp the owning company so this document also shows on the company page
+    const companyId = await resolveCompanyId({
+      entity: workOrder,
+      vendorId,
+    });
+
     // ✔ Auto-detect / auto-create Vendor category (same as vendor notes)
     let vendorCategory = await NoteCategory.findOne({
       name: { $regex: /^vendor$/i },
@@ -259,6 +288,7 @@ exports.vendorUploadDocuments = async (req, res) => {
         fileSize: file.size,
         fileUrl,
         workOrder: workOrder._id,
+        company: companyId || undefined,
         building: null,
         portfolio: null,
         uploadedBy: vendorId,
@@ -368,6 +398,12 @@ exports.vendorUploadDocumentsForEntity = async (req, res) => {
       );
     }
 
+    const companyId = await resolveCompanyId({
+      sourceType: entityType,
+      entity,
+      vendorId,
+    });
+
     let vendorCategory = await NoteCategory.findOne({
       name: { $regex: /^vendor$/i },
     });
@@ -409,6 +445,7 @@ exports.vendorUploadDocumentsForEntity = async (req, res) => {
         ...(config.linkField ? { [config.linkField]: entity._id } : {}),
         sourceType: entityType,
         sourceId: entity._id,
+        company: companyId || undefined,
         building: null,
         portfolio: null,
         uploadedBy: vendorId,
@@ -723,30 +760,40 @@ exports.getDocumentsByWorkOrder = async (req, res) => {
   }
 };
 
-// Get Documents by Entity (serviceAgreement, inspectionRequest, task, todo)
+// Get Documents by Entity (workOrder, serviceAgreement, inspectionRequest, task, todo, company)
 exports.getDocumentsByEntity = async (req, res) => {
   try {
     const { sourceType, sourceId } = req.params;
-    const VALID_TYPES = [
-      "workOrder",
-      "serviceAgreement",
-      "inspectionRequest",
-      "task",
-      "todo",
-    ];
 
-    if (!VALID_TYPES.includes(sourceType)) {
+    if (!NOTE_SOURCE_TYPES.includes(sourceType)) {
       return sendError(res, "Invalid sourceType", 400);
+    }
+    if (!mongoose.isValidObjectId(sourceId)) {
+      return sendError(res, "Invalid sourceId", 400);
+    }
+    // This route allows Vendors; company documents are internal only
+    if (sourceType === "company" && req.user.role === "Vendor") {
+      return sendError(res, "You are not allowed to view these documents", 403);
     }
 
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-    const { category, startDate, endDate } = req.query;
+    const { category, startDate, endDate, origin } = req.query;
 
-    const filter =
-      sourceType === "workOrder"
-        ? { $or: [{ workOrder: sourceId }, { sourceType, sourceId }] }
-        : { sourceType, sourceId };
+    // ── Scope ──────────────────────────────────────────────────────────
+    // company: documents attached directly to the company, PLUS documents
+    let filter;
+    if (sourceType === "workOrder") {
+      filter = { $or: [{ workOrder: sourceId }, { sourceType, sourceId }] };
+    } else if (sourceType === "company") {
+      const own = { sourceType, sourceId };
+      const linked = { company: sourceId };
+      if (origin === "own") filter = own;
+      else if (origin === "linked") filter = linked;
+      else filter = { $or: [own, linked] };
+    } else {
+      filter = { sourceType, sourceId };
+    }
 
     if (category && category !== "All") filter.category = category;
     if (startDate || endDate) {
@@ -770,7 +817,7 @@ exports.getDocumentsByEntity = async (req, res) => {
         .skip((page - 1) * limit)
         .limit(limit)
         .select(
-          "fileName description fileType mimeType fileUrl category uploadedBy createdAt sourceType sourceId",
+          "fileName description fileType mimeType fileUrl category uploadedBy createdAt sourceType sourceId company workOrder",
         ),
       Document.countDocuments(filter),
     ]);
