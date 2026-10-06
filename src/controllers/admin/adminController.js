@@ -2,16 +2,9 @@ const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
+const { TEAM_ROLES } = require("../../constants/roles");
 
-const INTERNAL_ROLES = [
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const INTERNAL_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
 
 exports.createBrokerageAdmin = async (req, res) => {
   try {

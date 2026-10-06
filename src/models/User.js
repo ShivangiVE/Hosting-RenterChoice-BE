@@ -64,6 +64,8 @@ const userSchema = new mongoose.Schema(
         "MarketingTeam",
         "LandlordsTeam",
         "InspectionClerk",
+        "InternalTeam",
+
         // "InspectionTeam",
         "Vendor",
 

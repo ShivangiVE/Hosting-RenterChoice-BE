@@ -17,17 +17,9 @@ const {
 } = require("../../controllers/taskController/taskController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { taskUpload } = require("../../middleware/repairUpload");
+const { TEAM_ROLES } = require("../../constants/roles");
 
-const ALLOWED_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const ALLOWED_ROLES = ["Admin", "OfficeAdmin", ...TEAM_ROLES];
 
 // Create Task
 router.post(
