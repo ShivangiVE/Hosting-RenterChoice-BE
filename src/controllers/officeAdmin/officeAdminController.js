@@ -1,15 +1,9 @@
+const { TEAM_ROLES } = require("../../constants/roles");
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 
-const INTERNAL_ROLES = [
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const INTERNAL_ROLES = TEAM_ROLES;
 
 // OfficeAdmin creates internal team users
 exports.createInternalUser = async (req, res) => {
