@@ -1,3 +1,5 @@
+const INTERNAL_TEAM = "InternalTeam";
+
 const TEAM_ROLES = [
   "AccountsTeam",
   "RepairsTeam",
@@ -5,6 +7,7 @@ const TEAM_ROLES = [
   "MarketingTeam",
   "LandlordsTeam",
   "InspectionClerk",
+  INTERNAL_TEAM,
 ];
 
 const BROKERAGE_ROLES = [
@@ -33,6 +36,7 @@ const ACCOUNTS_ROLES = [
   "AccountsTeam",
   "LeaseTeam",
   "LandlordsTeam",
+  INTERNAL_TEAM,
 ];
 
 const ALLOWED_INTERNAL_ROLES = [...INTERNAL_ROLES];
@@ -45,7 +49,11 @@ const WORK_ORDER_AND_VENDOR_ROLES = [...WORK_ORDER_ROLES, "Vendor"];
 
 const ALL_ROLES = [...INTERNAL_ROLES, "Vendor", "Owner", "Tenant"];
 
+const INTERNAL_TEAM_ROLES = [INTERNAL_TEAM];
+
 module.exports = {
+  INTERNAL_TEAM,
+  INTERNAL_TEAM_ROLES,
   TEAM_ROLES,
   BROKERAGE_ROLES,
   BROKERAGE_STAFF_ROLES,

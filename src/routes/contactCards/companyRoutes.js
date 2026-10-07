@@ -16,19 +16,11 @@ const {
   revealCompanyAccountNumber,
   reactivateCompany,
 } = require("../../controllers/contactCards/companyController");
+const { TEAM_ROLES } = require("../../constants/roles");
 
 const router = express.Router();
 
-const ALLOWED_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const ALLOWED_ROLES = ["Admin", "OfficeAdmin", ...TEAM_ROLES];
 
 // Create Company
 router.post("/create", protect, authorize(...ALLOWED_ROLES), createCompany);
