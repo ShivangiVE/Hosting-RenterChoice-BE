@@ -13,25 +13,17 @@ const {
   updateMarketing,
   deleteMarketing,
 } = require("../../controllers/inspectionMarketing/inspectionMarketingController");
+const { TEAM_ROLES } = require("../../constants/roles");
 
 // Internal roles allowed
-const INTERNAL_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const INTERNAL_ROLES = ["Admin", "OfficeAdmin", ...TEAM_ROLES];
 
 // ========================= Inspections =========================
 router.post(
   "/inspection",
   protect,
   authorize(...INTERNAL_ROLES),
-  createInspectionForm
+  createInspectionForm,
 );
 
 router.get("/inspections", protect, getAllInspections);
@@ -41,14 +33,14 @@ router.put(
   "/inspection/:id",
   protect,
   authorize(...INTERNAL_ROLES),
-  updateInspection
+  updateInspection,
 );
 
 router.delete(
   "/inspection/:id",
   protect,
   authorize(...INTERNAL_ROLES),
-  deleteInspection
+  deleteInspection,
 );
 
 // ========================= Marketing =========================
@@ -56,7 +48,7 @@ router.post(
   "/marketing",
   protect,
   authorize(...INTERNAL_ROLES),
-  createMarketingForm
+  createMarketingForm,
 );
 
 router.get("/marketings", protect, getAllMarketing);
@@ -66,15 +58,14 @@ router.put(
   "/marketing/:id",
   protect,
   authorize(...INTERNAL_ROLES),
-  updateMarketing
+  updateMarketing,
 );
 
 router.delete(
   "/marketing/:id",
   protect,
   authorize(...INTERNAL_ROLES),
-  deleteMarketing
+  deleteMarketing,
 );
-
 
 module.exports = router;

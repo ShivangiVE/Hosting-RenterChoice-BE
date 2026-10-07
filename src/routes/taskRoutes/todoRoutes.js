@@ -14,17 +14,9 @@ const {
 } = require("../../controllers/taskController/todoController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { todoUpload } = require("../../middleware/repairUpload");
+const { TEAM_ROLES } = require("../../constants/roles");
 
-const ALLOWED_ROLES = [
-  "Admin",
-  "OfficeAdmin",
-  "AccountsTeam",
-  "RepairsTeam",
-  "LeaseTeam",
-  "MarketingTeam",
-  "LandlordsTeam",
-  "InspectionClerk",
-];
+const ALLOWED_ROLES = ["Admin", "OfficeAdmin", ...TEAM_ROLES];
 
 // Create Todo
 router.post(
