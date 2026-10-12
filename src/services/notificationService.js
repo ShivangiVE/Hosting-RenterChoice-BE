@@ -40,7 +40,13 @@ exports.createNotification = async ({
   entityType,
   entityId,
   metadata = {},
+  actorId,
 }) => {
+  
+  if (actorId && user && String(actorId) === String(user)) {
+    return null;
+  }
+
   if (REMINDER_TYPES.includes(type)) {
     const recentCutoff = new Date(Date.now() - DEDUP_WINDOW_MS);
     const duplicate = await Notification.findOne({

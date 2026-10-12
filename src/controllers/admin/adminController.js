@@ -3,6 +3,7 @@ const { sendSuccess, sendError } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 const { TEAM_ROLES } = require("../../constants/roles");
+const UserStatusLog = require("../../models/UserStatusLog");
 
 const INTERNAL_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
 

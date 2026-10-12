@@ -9,6 +9,7 @@ const {
   updateProfile,
   changePassword,
   impersonateVendor,
+  getProfile,
 } = require("../../controllers/internalUsers/authController");
 const validate = require("../../middleware/validate");
 const { loginValidator } = require("../../validators/authValidator");
@@ -28,6 +29,7 @@ router.post("/forgot", validate, forgotPassword);
 router.post("/reset", validate, resetPassword);
 
 // Protected
+router.get("/profile", protect, authorize(...INTERNAL_ROLES), getProfile);
 router.put("/profile", protect, updateProfile);
 router.put("/change-password", protect, validate, changePassword);
 

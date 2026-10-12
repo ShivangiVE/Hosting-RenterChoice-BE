@@ -102,6 +102,7 @@ exports.createTask = async (req, res) => {
         if (clerk?.role === "InspectionClerk") {
           await createNotification({
             user: assignedTo,
+            actorId: req.user._id,
             role: "InspectionClerk",
             type: "TASK_ASSIGNED_CLERK",
             title: "New Task Assigned",
@@ -397,7 +398,36 @@ exports.updateTask = async (req, res) => {
       .populate("assignedTo", "preferredName email")
       .populate("createdBy", "preferredName email");
 
-    return sendSuccess(res, "Task updated successfully", { task });
+    sendSuccess(res, "Task updated successfully", { task });
+
+    const newAssignee = updateData.assignedTo;
+    if (
+      newAssignee &&
+      String(newAssignee) !== String(existingTask.assignedTo)
+    ) {
+      try {
+        const clerk = await User.findById(newAssignee).select("role");
+
+        if (clerk?.role === "InspectionClerk") {
+          await createNotification({
+            user: newAssignee,
+            actorId: req.user._id,
+            role: "InspectionClerk",
+            type: "TASK_ASSIGNED_CLERK",
+            title: "Task Assigned to You",
+            message: `Task ${task.taskNumber} has been assigned to you.`,
+            entityType: "Task",
+            entityId: task._id,
+          });
+
+          getIO().to(`user:${newAssignee}`).emit("clerk:new-task", {
+            taskId: task._id,
+          });
+        }
+      } catch (err) {
+        console.error("Task reassignment notification failed:", err);
+      }
+    }
   } catch (err) {
     console.error("Update task error:", err);
     return sendError(res, err.message || "Failed to update task", 500);
