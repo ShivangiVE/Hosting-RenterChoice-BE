@@ -48,6 +48,7 @@ exports.loginInternal = async (req, res, next) => {
       email: user.email,
       role: user.role,
       defaultRepairTab: user.defaultRepairTab,
+      itemsPerPagePreference: user.itemsPerPagePreference,
       token,
     };
 
@@ -120,38 +121,50 @@ exports.changePassword = async (req, res, next) => {
   }
 };
 
+const PROFILE_FIELDS = [
+  "legalName",
+  "preferredName",
+  "replyToEmail",
+  "alertEmail",
+  "timeZone",
+  "contactInfo",
+  "emailSignature",
+];
+const PROFILE_SELECT = `email role profileImage ${PROFILE_FIELDS.join(" ")}`;
+
+// GET /profile → load Settings → My Profile
+exports.getProfile = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id).select(PROFILE_SELECT).lean();
+    if (!user) return sendError(res, "User not found", 404);
+    return sendSuccess(res, "Profile fetched", user);
+  } catch (err) {
+    next(err);
+  }
+};
+
 // Update Profile
 exports.updateProfile = async (req, res, next) => {
   try {
-    const { preferredName, email } = req.body;
-    const user = await User.findById(req.user.id);
+    const updates = {};
+    PROFILE_FIELDS.forEach((f) => {
+      if (req.body[f] !== undefined) updates[f] = String(req.body[f]).trim();
+    });
 
-    if (!user) {
-      return sendError(res, "User not found", 404);
+    if (updates.preferredName === "") {
+      return sendError(res, "Preferred name is required", 400);
+    }
+    if (Object.keys(updates).length === 0) {
+      return sendError(res, "No valid fields provided to update", 400);
     }
 
-    if (email && email !== user.email) {
-      const emailTaken = await User.findOne({ email });
-      if (emailTaken) {
-        return sendError(res, "Email already in use", 400);
-      }
-      user.email = email;
-    }
+    const user = await User.findByIdAndUpdate(req.user.id, updates, {
+      new: true,
+      runValidators: true,
+    }).select(PROFILE_SELECT);
 
-    if (preferredName) {
-      user.preferredName = preferredName;
-    }
-
-    await user.save();
-
-    const updatedData = {
-      _id: user._id,
-      preferredName: user.preferredName,
-      email: user.email,
-      role: user.role,
-    };
-
-    return sendSuccess(res, "Profile updated", updatedData);
+    if (!user) return sendError(res, "User not found", 404);
+    return sendSuccess(res, "Profile updated successfully", user);
   } catch (err) {
     next(err);
   }

@@ -8,8 +8,12 @@ const {
   deleteInternalUser,
   updateInternalUserRole,
   toggleUserStatus,
+  getInternalUserDetail,
+  updateInternalUser,
 } = require("../controllers/officeAdmin/officeAdminController");
 const { INTERNAL_ROLES } = require("../constants/roles");
+
+const TEAM_MANAGER_ROLES = ["Admin", "BrokerageAdmin", "OfficeAdmin"];
 
 // Allow both Admin and OfficeAdmin
 router.use(protect, authorize(...INTERNAL_ROLES));
@@ -20,7 +24,24 @@ router.post("/internal-users", createInternalUser);
 // Get all internal users
 router.get("/team-users", getInternalUsers);
 
-router.patch("/users/:userId/toggle-status", toggleUserStatus);
+// Single team member (Settings → My Team → details panel)
+router.get(
+  "/internal-users/:id",
+  authorize(...TEAM_MANAGER_ROLES),
+  getInternalUserDetail,
+);
+
+router.patch(
+  "/internal-users/:id",
+  authorize(...TEAM_MANAGER_ROLES),
+  updateInternalUser,
+);
+
+router.patch(
+  "/users/:userId/toggle-status",
+  authorize(...TEAM_MANAGER_ROLES),
+  toggleUserStatus,
+);
 
 // Delete internal user
 router.delete("/internal-users/:id", deleteInternalUser);
