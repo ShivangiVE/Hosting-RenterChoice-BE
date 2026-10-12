@@ -21,6 +21,18 @@ const userSchema = new mongoose.Schema(
       },
     },
 
+    legalName: { type: String, trim: true },
+    replyToEmail: { type: String, trim: true, lowercase: true },
+    alertEmail: { type: String, trim: true, lowercase: true },
+    timeZone: { type: String, trim: true, default: "America/New_York" },
+    contactInfo: { type: String, trim: true },
+    emailSignature: { type: String, trim: true, maxlength: 500 },
+
+    printfection: {
+      monthlyBudget: { type: Number, default: 0, min: 0 },
+      canIssueSwag: { type: Boolean, default: false },
+    },
+
     email: {
       type: String,
       required: true,
@@ -130,5 +142,7 @@ userSchema.pre("save", async function (next) {
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
+
+userSchema.index({ createdBy: 1, role: 1, createdAt: -1 });
 
 module.exports = mongoose.model("User", userSchema);

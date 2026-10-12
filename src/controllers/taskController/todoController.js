@@ -99,6 +99,7 @@ exports.createTodo = async (req, res) => {
         if (clerk?.role === "InspectionClerk") {
           await createNotification({
             user: assignedTo,
+            actorId: req.user._id,
             role: "InspectionClerk",
             type: "TODO_ASSIGNED_CLERK",
             title: "New Todo Assigned",
@@ -374,7 +375,36 @@ exports.updateTodo = async (req, res) => {
       .populate("assignedTo", "preferredName email")
       .populate("createdBy", "preferredName email");
 
-    return sendSuccess(res, "Todo updated successfully", { todo });
+    sendSuccess(res, "Todo updated successfully", { todo });
+
+    const newAssignee = updateData.assignedTo;
+    if (
+      newAssignee &&
+      String(newAssignee) !== String(existingTodo.assignedTo)
+    ) {
+      try {
+        const clerk = await User.findById(newAssignee).select("role");
+
+        if (clerk?.role === "InspectionClerk") {
+          await createNotification({
+            user: newAssignee,
+            actorId: req.user._id,
+            role: "InspectionClerk",
+            type: "TODO_ASSIGNED_CLERK",
+            title: "Todo Assigned to You",
+            message: `Todo ${todo.todoNumber} has been assigned to you.`,
+            entityType: "Todo",
+            entityId: todo._id,
+          });
+
+          getIO().to(`user:${newAssignee}`).emit("clerk:new-todo", {
+            todoId: todo._id,
+          });
+        }
+      } catch (err) {
+        console.error("Todo reassignment notification failed:", err);
+      }
+    }
   } catch (err) {
     console.error("Update todo error:", err);
     return sendError(res, err.message || "Failed to update todo", 500);
