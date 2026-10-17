@@ -14,6 +14,7 @@ const {
   getTasksByTags,
   getMyTasks,
   reopenTask,
+  getAssignedToMe,
 } = require("../../controllers/taskController/taskController");
 const { protect, authorize } = require("../../middleware/authMiddleware");
 const { taskUpload } = require("../../middleware/repairUpload");
@@ -38,6 +39,9 @@ router.get("/by-tags", protect, authorize(...ALLOWED_ROLES), getTasksByTags);
 
 // Task and Todos Combine
 router.get("/my-tasks", protect, authorize(...ALLOWED_ROLES), getMyTasks);
+
+// Settings → My Tasks: tasks + to-dos assigned to the logged-in user
+router.get("/assigned-to-me", protect, getAssignedToMe);
 
 // Get Task Details by ID
 router.get("/:id", protect, authorize(...ALLOWED_ROLES), getTaskDetails);
