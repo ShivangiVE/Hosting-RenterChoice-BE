@@ -3,37 +3,30 @@ const { sendError, sendSuccess } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 const { TEAM_ROLES, BROKERAGE_STAFF_ROLES } = require("../../constants/roles");
+const {
+  createUserAccount,
+  toCreatedUser,
+} = require("../../utils/createUserAccount");
 
 const CREATABLE_BROKERAGE_STAFF_ROLES = BROKERAGE_STAFF_ROLES;
 
 // BrokerageAdmin creates OfficeAdmins
 exports.createOfficeAdmin = async (req, res) => {
   try {
-    const { preferredName, email, password } = req.body;
-
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) return sendError(res, "User already exists", 409);
-
-    const user = await User.create({
-      preferredName,
-      email,
-      password,
+    const { user, error, status } = await createUserAccount(req.body, {
       role: "OfficeAdmin",
-      createdBy: req.user._id, // links OfficeAdmin to this BrokerageAdmin
+      createdBy: req.user._id,
     });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       "Office admin created successfully",
-      {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createOfficeAdmin error:", err);
     return sendError(res, "Failed to create office admin", 500);
   }
 };
@@ -41,8 +34,7 @@ exports.createOfficeAdmin = async (req, res) => {
 // BrokerageAdmin creates BrokerageAccounts or BrokerageUser
 exports.createBrokerageStaff = async (req, res) => {
   try {
-    const { preferredName, email, password, role } = req.body;
-
+    const { role } = req.body;
     if (!CREATABLE_BROKERAGE_STAFF_ROLES.includes(role)) {
       return sendError(
         res,
@@ -51,29 +43,20 @@ exports.createBrokerageStaff = async (req, res) => {
       );
     }
 
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) return sendError(res, "User already exists", 409);
-
-    const user = await User.create({
-      preferredName,
-      email,
-      password,
+    const { user, error, status } = await createUserAccount(req.body, {
       role,
-      createdBy: req.user._id, // links this staff member to the Brokerage Admin/Franchise
+      createdBy: req.user._id, 
     });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       `${role} created successfully`,
-      {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createBrokerageStaff error:", err);
     return sendError(res, "Failed to create brokerage staff", 500);
   }
 };

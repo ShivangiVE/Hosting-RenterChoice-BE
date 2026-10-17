@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Task = require("../../models/tasks/Task");
 const User = require("../../models/User");
 const Category = require("../../models/repairCategories");
@@ -47,6 +48,14 @@ exports.createTask = async (req, res) => {
     const { category, description, tags, assignedTo, dueDate, taskColor } =
       req.body;
 
+    // Empty or malformed IDs → clear 400 instead of a Mongoose CastError (500)
+    if (!mongoose.isValidObjectId(category)) {
+      return sendError(res, "Please select a category.", 400);
+    }
+    if (!mongoose.isValidObjectId(assignedTo)) {
+      return sendError(res, "Please select who this task is assigned to.", 400);
+    }
+
     // Validate category
     const categoryDoc = await Category.findOne({ _id: category, type: "task" });
     if (!categoryDoc) {
@@ -59,8 +68,32 @@ exports.createTask = async (req, res) => {
       return sendError(res, "Invalid assigned user. User not found.", 400);
     }
 
-    // File attachments
-    let attachments = [];
+    const task = new Task({
+      taskNumber: "PENDING",
+      category,
+      description,
+      tags,
+      assignedTo,
+      dueDate: dueDate || undefined,
+      taskColor: taskColor || undefined,
+      status: "In Progress",
+      createdBy: req.user._id,
+    });
+
+    try {
+      await task.validate();
+    } catch (validationErr) {
+      // e.g. missing due date → 400, and the counter is NOT incremented
+      const firstError = Object.values(validationErr.errors || {})[0];
+      return sendError(
+        res,
+        firstError?.message || "Please fill in all required fields.",
+        400,
+      );
+    }
+
+    // Valid → now safe to upload files
+    const attachments = [];
     if (req.files?.length) {
       for (const file of req.files) {
         const fileUrl = await uploadFile(file, "uploads/Repair/tasks");
@@ -75,22 +108,13 @@ exports.createTask = async (req, res) => {
         });
       }
     }
+    task.attachments = attachments;
 
+  
     const sequence = await getNextSequence("task");
-    const taskNumber = `TASK #${sequence.toString().padStart(4, "0")}`;
+    task.taskNumber = formatSequence("TASK", sequence);
 
-    const task = await Task.create({
-      taskNumber,
-      category,
-      description,
-      tags,
-      assignedTo,
-      dueDate,
-      taskColor: taskColor || undefined,
-      attachments,
-      status: "In Progress",
-      createdBy: req.user._id,
-    });
+    await task.save();
 
     sendSuccess(res, "Task created successfully", { task }, 201);
 
@@ -320,6 +344,19 @@ exports.updateTask = async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
+
+    // Empty select → "" → keep the current value instead of crashing.
+    if (updateData.assignedTo === "") delete updateData.assignedTo;
+    if (updateData.category === "") delete updateData.category;
+    if (
+      updateData.assignedTo &&
+      !mongoose.isValidObjectId(updateData.assignedTo)
+    ) {
+      return sendError(res, "Invalid assigned user.", 400);
+    }
+    if (updateData.category && !mongoose.isValidObjectId(updateData.category)) {
+      return sendError(res, "Invalid category.", 400);
+    }
 
     // Handle category validation
     if (updateData.category) {
@@ -693,5 +730,134 @@ exports.getMyTasks = async (req, res) => {
   } catch (error) {
     console.error("getMyWork error:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
+const MY_TASK_VIEWS = ["all", "task", "todo"];
+const MY_TASK_STATUSES = ["all", "open"]; 
+const MY_TASK_SORTS = {
+  
+  dueDate: { _isDone: 1, _dueSort: 1, createdAt: -1, _id: 1 },
+
+  newest: { createdAt: -1, _id: 1 },
+};
+const MAX_LIMIT = 100;
+const FAR_FUTURE = new Date(8640000000000000); 
+
+
+const toRow = (kind, numberField, hasDueDate) => ({
+  _id: 1,
+  kind: { $literal: kind },
+  number: `$${numberField}`,
+  category: 1,
+  description: 1,
+  dueDate: hasDueDate ? "$dueDate" : { $literal: null },
+  status: 1,
+  createdAt: 1,
+});
+
+exports.getAssignedToMe = async (req, res) => {
+  try {
+    const view = MY_TASK_VIEWS.includes(req.query.view)
+      ? req.query.view
+      : "all";
+
+    const status = MY_TASK_STATUSES.includes(req.query.status)
+      ? req.query.status
+      : "all";
+    const sort = MY_TASK_SORTS[req.query.sort] || MY_TASK_SORTS.dueDate;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(
+      MAX_LIMIT,
+      Math.max(1, parseInt(req.query.limit, 10) || 10),
+    );
+
+    // Always scoped to the caller — never taken from the query string.
+    const userId = new mongoose.Types.ObjectId(String(req.user._id));
+    const match = { assignedTo: userId };
+    if (status === "open") match.status = { $ne: "Completed" };
+
+    const [result] = await Task.aggregate([
+      { $match: match },
+      { $project: toRow("task", "taskNumber", true) },
+      {
+        $unionWith: {
+          coll: Todo.collection.name,
+          pipeline: [
+            { $match: match },
+            { $project: toRow("todo", "todoNumber", false) },
+          ],
+        },
+      },
+      {
+        $facet: {
+          // Tab counts (always for all kinds, so every tab shows its number)
+          counts: [{ $group: { _id: "$kind", n: { $sum: 1 } } }],
+
+          // Current page of the selected tab
+          items: [
+            ...(view === "all" ? [] : [{ $match: { kind: view } }]),
+            {
+              $addFields: {
+                _isDone: { $eq: ["$status", "Completed"] },
+                _dueSort: { $ifNull: ["$dueDate", FAR_FUTURE] },
+              },
+            },
+            // Open items first → soonest due date → newest
+            { $sort: sort },
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            {
+              $lookup: {
+                from: Category.collection.name,
+                localField: "category",
+                foreignField: "_id",
+                as: "_category",
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                kind: 1,
+                number: 1,
+                description: 1,
+                dueDate: 1,
+                status: 1,
+                createdAt: 1,
+                category: {
+                  $ifNull: [{ $arrayElemAt: ["$_category.name", 0] }, ""],
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const byKind = Object.fromEntries(
+      (result?.counts || []).map((c) => [c._id, c.n]),
+    );
+    const counts = {
+      task: byKind.task || 0,
+      todo: byKind.todo || 0,
+    };
+    counts.all = counts.task + counts.todo;
+
+    const total = counts[view];
+
+    return sendSuccess(res, "Assigned tasks fetched successfully", {
+      items: result?.items || [],
+      pagination: {
+        current: page,
+        pages: Math.max(1, Math.ceil(total / limit)),
+        total,
+        limit,
+      },
+      counts,
+    });
+  } catch (err) {
+    console.error("getAssignedToMe error:", err);
+    return sendError(res, "Failed to fetch your tasks", 500);
   }
 };

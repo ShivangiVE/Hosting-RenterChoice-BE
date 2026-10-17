@@ -3,6 +3,10 @@ const { TEAM_ROLES } = require("../../constants/roles");
 const User = require("../../models/User");
 const { sendSuccess, sendError } = require("../../utils/response");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
+const {
+  createUserAccount,
+  toCreatedUser,
+} = require("../../utils/createUserAccount");
 
 const INTERNAL_ROLES = TEAM_ROLES;
 
@@ -14,7 +18,7 @@ const DEFAULT_LIMIT = 10;
 
 // Only what the team table needs — never send password/OTP/session fields.
 const TEAM_MEMBER_FIELDS =
-  "preferredName legalName firstName lastName email role isActive profileImage createdAt";
+  "preferredName legalName fullName firstName lastName email role isActive profileImage createdAt";
 
 const STATUS_FILTERS = {
   active: { isActive: { $ne: false } },
@@ -23,7 +27,6 @@ const STATUS_FILTERS = {
 
 // Escape user input before building a RegExp (prevents ReDoS / regex injection).
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 
 const getTeamScope = async (user) => {
   if (user.role === "Admin") return {};
@@ -51,37 +54,25 @@ const getTeamScope = async (user) => {
 // OfficeAdmin creates internal team users
 exports.createInternalUser = async (req, res) => {
   try {
-    const { preferredName, email, password, role } = req.body;
-
+    const { role } = req.body;
     if (!INTERNAL_ROLES.includes(role)) {
       return sendError(res, "Invalid role for internal creation", 400);
     }
 
-    const existing = await User.findOne({ email: email.toLowerCase().trim() });
-    if (existing) {
-      return sendError(res, "User already exists", 409);
-    }
-
-    const newUser = await User.create({
-      preferredName,
-      email,
-      password,
+    const { user, error, status } = await createUserAccount(req.body, {
       role,
       createdBy: req.user._id,
     });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       "Internal user created successfully",
-      {
-        _id: newUser._id,
-        preferredName: newUser.preferredName,
-        email: newUser.email,
-        role: newUser.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createInternalUser error:", err);
     return sendError(res, "Failed to create internal user", 500);
   }
 };
@@ -134,6 +125,7 @@ exports.getInternalUsers = async (req, res) => {
       filter.$or = [
         { preferredName: rx },
         { legalName: rx },
+        { fullName: rx },
         { firstName: rx },
         { lastName: rx },
         { email: rx },
@@ -143,7 +135,7 @@ exports.getInternalUsers = async (req, res) => {
     const statusFilter =
       STATUS_FILTERS[String(req.query.status || "").toLowerCase()];
     if (statusFilter) Object.assign(filter, statusFilter);
-    
+
     // ── Legacy (no `page`): unchanged response for existing screens ──
     if (req.query.page === undefined) {
       const users = await User.find(filter)
@@ -189,7 +181,7 @@ exports.getInternalUsers = async (req, res) => {
 
 // ─── Single team member (Settings → My Team → details panel) ────────────────
 const MEMBER_DETAIL_FIELDS =
-  "preferredName legalName firstName lastName email role isActive profileImage contactInfo emailSignature printfection createdAt";
+  "preferredName legalName fullName firstName lastName email role isActive profileImage contactInfo emailSignature printfection createdAt";
 
 // Shape sent to the FE. Printfection spend comes from orders, which don't
 // exist in this system yet → 0 until that integration is built.
@@ -197,6 +189,7 @@ const toMemberDetail = (u) => ({
   _id: u._id,
   preferredName: u.preferredName,
   legalName: u.legalName,
+  fullName: u.fullName || "",
   firstName: u.firstName,
   lastName: u.lastName,
   email: u.email,
@@ -212,7 +205,6 @@ const toMemberDetail = (u) => ({
     canIssueSwag: Boolean(u.printfection?.canIssueSwag),
   },
 });
-
 
 const findScopedMember = async (
   performer,
@@ -240,7 +232,6 @@ exports.getInternalUserDetail = async (req, res) => {
     return sendError(res, "Failed to retrieve team member", 500);
   }
 };
-
 
 exports.updateInternalUser = async (req, res) => {
   try {

@@ -4,36 +4,29 @@ const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 const { TEAM_ROLES } = require("../../constants/roles");
 const UserStatusLog = require("../../models/UserStatusLog");
+const {
+  createUserAccount,
+  toCreatedUser,
+} = require("../../utils/createUserAccount");
 
 const INTERNAL_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
 
 exports.createBrokerageAdmin = async (req, res) => {
   try {
-    const { preferredName, email, password } = req.body;
-
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) return sendError(res, "User already exists", 409);
-
-    const user = await User.create({
-      preferredName,
-      email,
-      password,
+    const { user, error, status } = await createUserAccount(req.body, {
       role: "BrokerageAdmin",
       createdBy: req.user.id,
     });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       "Brokerage admin created successfully",
-      {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createBrokerageAdmin error:", err);
     return sendError(res, "Failed to create brokerage admin", 500);
   }
 };
@@ -53,37 +46,24 @@ exports.getBrokerageAdmins = async (req, res) => {
 // Admin creates OfficeAdmin
 exports.createOfficeAdmin = async (req, res) => {
   try {
-    const { preferredName, email, password, role } = req.body;
-
-    if (role !== "OfficeAdmin") {
+    if (req.body.role !== "OfficeAdmin") {
       return sendError(res, "Role must be OfficeAdmin only", 400);
     }
 
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) {
-      return sendError(res, "User already exists", 409);
-    }
-
-    const user = await User.create({
-      preferredName,
-      email,
-      password,
-      role,
+    const { user, error, status } = await createUserAccount(req.body, {
+      role: "OfficeAdmin",
       createdBy: req.user.id,
     });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       "Office admin created successfully",
-      {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createOfficeAdmin error:", err);
     return sendError(res, "Failed to create office admin", 500);
   }
 };
@@ -91,36 +71,22 @@ exports.createOfficeAdmin = async (req, res) => {
 // Admin creates Internal Users too
 exports.createInternalUser = async (req, res) => {
   try {
-    const { preferredName, email, password, role } = req.body;
-
+    const { role } = req.body;
     if (!INTERNAL_ROLES.includes(role)) {
       return sendError(res, "Invalid internal role", 400);
     }
 
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) {
-      return sendError(res, "User already exists", 409);
-    }
-
-    const user = await User.create({
-      preferredName,
-      email,
-      password,
-      role,
-    });
+    const { user, error, status } = await createUserAccount(req.body, { role });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       "Internal user created successfully",
-      {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createInternalUser error:", err);
     return sendError(res, "Failed to create internal user", 500);
   }
 };
