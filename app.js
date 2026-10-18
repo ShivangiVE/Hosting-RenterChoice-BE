@@ -40,17 +40,37 @@ const companyRoutes = require("./src/routes/contactCards/companyRoutes");
 const vendorTypeRoutes = require("./src/routes/contactCards/vendorTypeRoutes");
 const searchRoutes = require("./src/routes/searchRoutes/searchRoutes");
 const emailTemplateRoutes = require("./src/routes/Settings/emailTemplateRoutes");
+const allowedOrigins = require("./src/config/corsOrigins");
 
+// const app = express();
+// app.use(cors());
+// app.use(express.json());
+
+// Prod: Testing
 const app = express();
-app.use(cors());
+// Render/Vercel sit behind a proxy — needed so rate limiting sees real user IPs
+app.set("trust proxy", 1);
+// Only our frontend(s) may call the API
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
+// Prod: Testing Ends
 
 // Serve /uploads folder statically
-app.use("/uploads", express.static("uploads"));
+// app.use("/uploads", express.static("uploads"));
+
+// Production
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.get("/", (req, res) => {
   res.send("API is working");
 });
+
+// Prod Testing:
+// Health check for the hosting platform / quick "is it up?" test
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, env: process.env.NODE_ENV });
+});
+
 
 app.use("/api/auth", authRoutes);
 app.use("/api/externalUsers", externalUsers);
