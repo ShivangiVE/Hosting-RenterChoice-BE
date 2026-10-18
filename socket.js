@@ -4,6 +4,7 @@ const Message = require("./src/models/Communication/Message");
 const Conversation = require("./src/models/Communication/Conversation");
 const WorkOrder = require("./src/models/WorkOrder");
 const { canSendMessage } = require("./src/domain/chatPolicy");
+const allowedOrigins = require("./src/config/corsOrigins");
 
 let io;
 
@@ -11,9 +12,18 @@ const onlineUsers = new Map();
 
 module.exports = {
   init: (server) => {
+    // Development
+    // io = require("socket.io")(server, {
+    //   cors: {
+    //     origin: "*",
+    //     methods: ["GET", "POST"],
+    //   },
+    // });
+
+    // Production
     io = require("socket.io")(server, {
       cors: {
-        origin: "*",
+        origin: allowedOrigins,
         methods: ["GET", "POST"],
       },
     });
