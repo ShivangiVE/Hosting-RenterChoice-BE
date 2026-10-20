@@ -755,6 +755,7 @@ const toRow = (kind, numberField, hasDueDate) => ({
   dueDate: hasDueDate ? "$dueDate" : { $literal: null },
   status: 1,
   createdAt: 1,
+  createdBy: 1,
 });
 
 exports.getAssignedToMe = async (req, res) => {
@@ -825,6 +826,7 @@ exports.getAssignedToMe = async (req, res) => {
                 dueDate: 1,
                 status: 1,
                 createdAt: 1,
+                createdBy: 1,
                 category: {
                   $ifNull: [{ $arrayElemAt: ["$_category.name", 0] }, ""],
                 },
