@@ -45,7 +45,7 @@ exports.createBrokerageStaff = async (req, res) => {
 
     const { user, error, status } = await createUserAccount(req.body, {
       role,
-      createdBy: req.user._id, 
+      createdBy: req.user._id,
     });
     if (error) return sendError(res, error, status);
 
@@ -114,31 +114,6 @@ exports.getOfficeAdminTeam = async (req, res) => {
   }
 };
 
-// Get team members under a specific OfficeAdmin (scoped to this BrokerageAdmin)
-exports.getOfficeAdminTeam = async (req, res) => {
-  try {
-    const { officeAdminId } = req.params;
-
-    // Verify this OfficeAdmin belongs to this BrokerageAdmin
-    const officeAdmin = await User.findOne({
-      _id: officeAdminId,
-      role: "OfficeAdmin",
-      createdBy: req.user._id,
-    });
-
-    if (!officeAdmin) return sendError(res, "Office admin not found", 404);
-
-    const teamMembers = await User.find({
-      createdBy: officeAdminId,
-      role: { $in: TEAM_ROLES },
-    }).select("preferredName email role isActive createdAt");
-
-    return sendSuccess(res, "Team members retrieved", { teamMembers });
-  } catch (err) {
-    return sendError(res, "Failed to fetch team members", 500);
-  }
-};
-
 // BrokerageAdmin gets teams grouped under their OfficeAdmins
 exports.getMyTeamsGrouped = async (req, res) => {
   try {
@@ -177,7 +152,7 @@ exports.impersonateOfficeAdmin = async (req, res) => {
     const target = await User.findOne({
       _id: req.params.officeAdminId,
       role: "OfficeAdmin",
-      createdBy: req.user._id, // scoped — can only impersonate own OAs
+      createdBy: req.user._id,
     });
 
     if (!target) return sendError(res, "Office admin not found", 404);
@@ -186,6 +161,7 @@ exports.impersonateOfficeAdmin = async (req, res) => {
       user: target,
       platform: "impersonate",
       portal: "internal",
+      impersonator: req.user,
     });
 
     return sendSuccess(res, "Impersonation successful", {

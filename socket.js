@@ -51,9 +51,26 @@ module.exports = {
           return next(err);
         }
 
-        // Skip session validation for impersonation tokens
-        // ── Impersonation tokens skip ALL session validation ──────────────────
+        // ── Impersonation (Login As) ───────────────────────────────────────────
+        // Valid only while the Admin / BrokerageAdmin who started it is still
+        // active and on the same session (same rule as the HTTP middleware).
         if (decoded.platform === "impersonate") {
+          if (decoded.impersonatedBy) {
+            const impersonator = await User.findById(decoded.impersonatedBy)
+              .select("isActive internalWebSessionVersion")
+              .lean();
+
+            if (
+              !impersonator?.isActive ||
+              impersonator.internalWebSessionVersion !==
+                decoded.impersonatorSessionVersion
+            ) {
+              const err = new Error("Session expired");
+              err.code = "SESSION_REPLACED";
+              return next(err);
+            }
+          }
+
           socket.user = user;
           socket.isImpersonated = true;
           return next();

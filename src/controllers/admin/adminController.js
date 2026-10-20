@@ -160,6 +160,7 @@ exports.impersonateOfficeAdmin = async (req, res) => {
       user: targetUser,
       platform: "impersonate",
       portal: "internal",
+      impersonator: req.user,
     });
 
     return sendSuccess(res, "Impersonation successful", {
