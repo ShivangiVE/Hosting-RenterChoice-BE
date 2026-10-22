@@ -111,6 +111,16 @@ const resolveCategoryName = async (categoryValue) => {
   return categoryValue;
 };
 
+const toNullableEnum = (value) =>
+  value === undefined
+    ? undefined
+    : value === null ||
+        value === "" ||
+        value === "null" ||
+        value === "undefined"
+      ? null
+      : value;
+
 // Peek next sequence number without incrementing
 exports.getNextCounterValue = async (req, res) => {
   try {
@@ -291,7 +301,6 @@ exports.getWorkOrders = async (req, res) => {
 
     let filter = {};
 
-    
     if (allowedUserIds !== null) {
       filter.$or = [
         { createdBy: { $in: allowedUserIds } }, // created by team
@@ -3477,10 +3486,11 @@ exports.createServiceAgreement = async (req, res) => {
       description,
       startDate,
       endDate,
-      recurringSchedule,
+
       vendor,
       company,
     } = req.body;
+    const recurringSchedule = toNullableEnum(req.body.recurringSchedule);
 
     if (!startDate || !endDate) {
       return sendError(res, "Start date and end date are required", 400);
@@ -4385,6 +4395,13 @@ exports.updateServiceAgreement = async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
+
+    // Empty recurring schedule from the edit form means "no schedule"
+    if ("recurringSchedule" in updateData) {
+      updateData.recurringSchedule = toNullableEnum(
+        updateData.recurringSchedule,
+      );
+    }
 
     if (req.body.removeExistingFile === "true") {
       updateData.fileUrl = null;
