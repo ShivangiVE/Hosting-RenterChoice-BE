@@ -34,7 +34,6 @@ const contactSchema = new mongoose.Schema(
 
     primaryEmailNormalized: {
       type: String,
-      index: true,
     },
 
     alternateEmail: String,
@@ -50,6 +49,14 @@ const contactSchema = new mongoose.Schema(
       type: String,
       enum: ["Active", "Inactive"],
       default: "Active",
+      index: true,
+    },
+
+    // Login account behind this contact (set for Owner contacts)
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
       index: true,
     },
 
@@ -177,9 +184,16 @@ contactSchema.pre("updateMany", syncContactStatus);
 contactSchema.pre("updateOne", syncContactStatus);
 contactSchema.pre("findOneAndUpdate", syncContactStatus);
 
+// One ACTIVE contact per email. Soft-deleted contacts don't block re-creating.
 contactSchema.index(
-  { preferredNameNormalized: 1, primaryEmailNormalized: 1 },
-  { unique: true, sparse: true },
+  { contactType: 1, primaryEmailNormalized: 1 },
+  {
+    name: "uniq_active_type_primaryEmail",
+    unique: true,
+    partialFilterExpression: {
+      isActive: true,
+      primaryEmailNormalized: { $exists: true },
+    },
+  },
 );
-
 module.exports = mongoose.model("Contact", contactSchema);

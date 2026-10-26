@@ -1,61 +1,120 @@
+const mongoose = require("mongoose");
+
 const Company = require("../../models/ContactCards/Company");
 const Contact = require("../../models/ContactCards/Contact");
-const { buildStatusFilter, toStatusLabel } = require("../../utils/contactCardStatus");
+const {
+  buildStatusFilter,
+  toStatusLabel,
+} = require("../../utils/contactCardStatus");
 const { sendError, sendSuccess } = require("../../utils/response");
+const User = require("../../models/User");
+const { createOwnerUser } = require("../../utils/createOwnerUser");
+
+const normalizeEmail = (e) =>
+  String(e || "")
+    .trim()
+    .toLowerCase();
+
+const CONTACT_FIELDS = [
+  "contactType",
+  "preferredName",
+  "legalName",
+  "primaryEmail",
+  "alternateEmail",
+  "phones",
+  "tenantInfo",
+  "ownerInfo",
+  "teamInfo",
+  "subscriberInfo",
+  "prospectInfo",
+];
+const pick = (obj = {}, keys) =>
+  Object.fromEntries(
+    keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]),
+  );
 
 exports.createContact = async (req, res) => {
   try {
-    const payload = req.body;
+    const payload = pick(req.body, CONTACT_FIELDS);
 
     if (!payload.preferredName?.trim()) {
       return sendError(res, "Preferred name is required", 400);
     }
-
     if (!payload.legalName?.trim()) {
       return sendError(res, "Legal name is required", 400);
     }
-
     if (!payload.primaryEmail?.trim()) {
       return sendError(res, "Primary email is required", 400);
     }
-
     if (!payload.contactType) {
       return sendError(res, "Contact type is required", 400);
     }
 
-    const nameNorm = payload.preferredName.trim().toLowerCase();
-    const emailNorm = payload.primaryEmail?.trim().toLowerCase();
+    const emailNorm = normalizeEmail(payload.primaryEmail);
+    payload.primaryEmail = emailNorm;
+    const isOwner = payload.contactType === "Owner";
 
-    // pre-check
-    const existing = await Contact.findOne({
-      preferredNameNormalized: nameNorm,
-      primaryEmailNormalized: emailNorm,
-      isActive: true,
-    });
+    const [existingContact, existingUser] = await Promise.all([
+      Contact.findOne({ primaryEmailNormalized: emailNorm, isActive: true })
+        .select("preferredName contactType")
+        .lean(),
 
-    if (existing) {
+      isOwner
+        ? User.findOne({ email: emailNorm }).select("preferredName role").lean()
+        : null,
+    ]);
+
+    if (existingContact) {
       return sendError(
         res,
-        "Contact with same name and email already exists",
+        `A ${existingContact.contactType} contact with this email already exists (${existingContact.preferredName}).`,
+        409,
+      );
+    }
+    if (existingUser) {
+      return sendError(
+        res,
+        existingUser.role === "Owner"
+          ? `An owner with this email already exists (${existingUser.preferredName || emailNorm}). Search for them in Add Owner to attach them.`
+          : `This email is already used by an existing ${existingUser.role} account.`,
         409,
       );
     }
 
-    const contact = await Contact.create({
-      ...payload,
-      createdBy: req.user?._id,
-    });
+    const session = await mongoose.startSession();
+    let contact;
+    try {
+      await session.withTransaction(async () => {
+        const ownerUser = isOwner
+          ? await createOwnerUser(payload, req.user, session)
+          : null;
 
-    return sendSuccess(res, "Contact created successfully", {
-      contact,
-    });
+        [contact] = await Contact.create(
+          [
+            {
+              ...payload,
+              user: ownerUser?._id || null,
+              createdBy: req.user?._id,
+            },
+          ],
+          { session },
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return sendSuccess(res, "Contact created successfully", { contact }, 201);
   } catch (err) {
     if (err.code === 11000) {
       return sendError(
         res,
-        "Contact with same name and email already exists",
+        "A contact or user with this email already exists.",
         409,
       );
+    }
+    if (err.name === "ValidationError") {
+      return sendError(res, err.message, 400);
     }
     return sendError(res, err.message, 500);
   }

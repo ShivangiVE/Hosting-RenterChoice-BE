@@ -13,6 +13,7 @@ const {
   verifyOtp,
   uploadProfileImage,
   verifyCompanyAccount,
+  verifyPortfolioAccount,
   notifyTeamAdminOfDeactivatedPortfolio,
 } = require("../../controllers/externlusers/authController");
 const {
@@ -22,9 +23,46 @@ const {
 const validate = require("../../middleware/validate");
 const profileUpload = require("../../middleware/profileUpload");
 
+const accountVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 verify attempts per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: false,
+    message: "Too many attempts. Please try again in a few minutes.",
+  },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // 10 signups per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: false,
+    message: "Too many signup attempts. Please try again later.",
+  },
+});
+
 // Public
-router.post("/register", registerValidator, validate, register);
-router.get("/verify-account/:accountNumber", verifyCompanyAccount);
+router.post(
+  "/register",
+  registerLimiter,
+  registerValidator,
+  validate,
+  register,
+);
+router.get(
+  "/verify-account/:accountNumber",
+  accountVerifyLimiter,
+  verifyCompanyAccount,
+);
+router.get(
+  "/verify-portfolio-account/:accountNumber",
+  accountVerifyLimiter,
+  verifyPortfolioAccount,
+);
 router.post("/login", loginValidator, validate, login);
 
 // Mobile-specific login alias ──
