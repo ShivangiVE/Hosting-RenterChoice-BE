@@ -24,6 +24,7 @@ const {
   getPortfoliosList,
   getBuildingsList,
   updatePortfolioStatus,
+  updatePortfolioSummary,
 } = require("../../controllers/building/buildingPortfolioController");
 const { ALLOWED_INTERNAL_ROLES } = require("../../constants/roles");
 const {
@@ -136,6 +137,14 @@ router.put(
   protect,
   authorize(...ALLOWED_INTERNAL_ROLES),
   updatePortfolio,
+);
+
+// Portfolio Summary edit mode (portfolio fields + changed buildings)
+router.patch(
+  "/portfolio/:id/summary",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  updatePortfolioSummary,
 );
 
 // Bulk Update Portfolio
