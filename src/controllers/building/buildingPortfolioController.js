@@ -144,6 +144,23 @@ async function saveSubmission(formType, formData, userId) {
   throw new Error("Unsupported form type");
 }
 
+const DECIMAL_2 = /^(\d+\.?\d{0,2}|\.\d{1,2})$/;
+
+const BUILDING_NUMERIC_RULES = {
+  totalFloors: { pattern: /^\d+$/, label: "Total Floors" },
+  monthlyRent: { pattern: DECIMAL_2, label: "Monthly Rent" },
+  securityDeposit: { pattern: DECIMAL_2, label: "Security Deposit" },
+};
+
+const validateBuildingNumbers = (data) =>
+  Object.entries(BUILDING_NUMERIC_RULES)
+    .filter(
+      ([key]) =>
+        data[key] !== undefined && data[key] !== null && data[key] !== "",
+    )
+    .filter(([key, rule]) => !rule.pattern.test(String(data[key]).trim()))
+    .map(([, rule]) => `"${rule.label}" must be a valid number`);
+
 // ========================= Buildings =========================
 // create buildings
 exports.createBuilding = async (req, res) => {
@@ -185,6 +202,10 @@ exports.createBuilding = async (req, res) => {
         400,
       );
     }
+
+    const numberErrors = validateBuildingNumbers(formData);
+    if (numberErrors.length)
+      return sendError(res, numberErrors.join(", "), 400);
 
     const errors = validateAgainstTemplate(template, formData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
@@ -371,6 +392,7 @@ exports.getAllBuildings = async (req, res) => {
     // Server-side sorting
     if (sortBy) {
       const sortableFieldMap = {
+        address: "formData.address",
         fullAddress: "formData.fullAddress",
         unitType: "formData.unitType",
         monthlyRent: "formData.monthlyRent",

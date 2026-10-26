@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -16,6 +17,50 @@ const { sendError, sendSuccess } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const Company = require("../../models/ContactCards/Company");
 
+const normalizeEmail = (e) =>
+  String(e || "")
+    .trim()
+    .toLowerCase();
+const cleanAccountNumber = (n) => String(n || "").trim();
+
+const findSignupPortfolio = (accountNumber) =>
+  Portfolio.findOne({
+    portfolioAccountNumber: cleanAccountNumber(accountNumber),
+    status: "Active",
+  })
+    .select("_id portfolioName")
+    .lean();
+
+async function linkOrCreateOwnerContact(user, session) {
+  const existing = await Contact.findOne({
+    contactType: "Owner",
+    primaryEmailNormalized: user.email,
+    isActive: true,
+  }).session(session);
+
+  if (existing) {
+    if (!existing.user) {
+      existing.user = user._id;
+      await existing.save({ session });
+    }
+    return;
+  }
+
+  await Contact.create(
+    [
+      {
+        contactType: "Owner",
+        preferredName: user.preferredName,
+        legalName: user.preferredName,
+        primaryEmail: user.email,
+        user: user._id,
+        createdBy: user._id,
+      },
+    ],
+    { session },
+  );
+}
+
 // Allowed roles
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
 
@@ -25,6 +70,7 @@ const {
   getNotifyStatus,
   MAX_SENDS,
 } = require("../../utils/portfolioAccess/notifyThrottle");
+const Contact = require("../../models/ContactCards/Contact");
 
 // Generate 4-digit OTP
 const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
@@ -39,10 +85,10 @@ exports.register = async (req, res, next) => {
       preferredName,
       companyName,
       technicianName,
-      email,
       password,
       role,
     } = req.body;
+    const email = normalizeEmail(req.body.email);
 
     // Role validation
     if (!EXTERNAL_ROLES.includes(role)) {
@@ -53,43 +99,72 @@ exports.register = async (req, res, next) => {
       );
     }
 
-    // ===== Vendor Flow (ACCOUNT NUMBER VERIFICATION) =====
+    // ===== Vendor Flow (COMPANY ACCOUNT NUMBER)
     let companyDoc = null;
-
     if (role === "Vendor") {
       if (!accountNumber) {
         return sendError(res, "Company account number is required", 400);
       }
-
-      //  Verify company exists
       companyDoc = await Company.findOne({
         companyAccountNumber: accountNumber,
         isActive: true,
       }).lean();
-
       if (!companyDoc) {
         return sendError(res, "Invalid company account number", 400);
       }
     }
 
-    const userExists = await User.findOne({ email });
-    if (userExists) {
+    // ===== Owner Flow (PORTFOLIO ACCOUNT NUMBER) — re-checked server-side =====
+    let portfolioDoc = null;
+    if (role === "Owner") {
+      if (!cleanAccountNumber(accountNumber)) {
+        return sendError(res, "Portfolio account number is required", 400);
+      }
+      portfolioDoc = await findSignupPortfolio(accountNumber);
+      if (!portfolioDoc) {
+        return sendError(res, "Invalid portfolio account number", 400);
+      }
+    }
+
+    if (await User.exists({ email })) {
       return sendError(res, "Email already registered", 409);
     }
 
-    const user = await User.create({
-      accountNumber,
-      preferredName,
-      company: role === "Vendor" ? companyDoc._id : undefined,
-      technicianName: role === "Vendor" ? technicianName : undefined,
-      email,
-      password,
-      role,
-    });
+    // User (+ portfolio link + contact for owners): all or nothing
+    const session = await mongoose.startSession();
+    let user;
+    try {
+      await session.withTransaction(async () => {
+        [user] = await User.create(
+          [
+            {
+              accountNumber: cleanAccountNumber(accountNumber) || undefined,
+              preferredName,
+              company: role === "Vendor" ? companyDoc._id : undefined,
+              technicianName: role === "Vendor" ? technicianName : undefined,
+              email,
+              password,
+              role,
+            },
+          ],
+          { session },
+        );
 
-    // Registration creates a new web session
-    user.externalWebSessionVersion += 1;
-    await user.save();
+        user.externalWebSessionVersion += 1;
+        await user.save({ session });
+
+        if (portfolioDoc) {
+          await Portfolio.updateOne(
+            { _id: portfolioDoc._id, status: "Active" },
+            { $addToSet: { owners: user._id } },
+            { session },
+          );
+          await linkOrCreateOwnerContact(user, session);
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
 
     const token = generateToken({
       user,
@@ -106,11 +181,20 @@ exports.register = async (req, res, next) => {
         preferredName: user.preferredName,
         email: user.email,
         role: user.role,
+        ...(portfolioDoc && {
+          portfolio: { portfolioName: portfolioDoc.portfolioName },
+        }),
         token,
       },
       201,
     );
   } catch (err) {
+    if (err?.code === 11000) {
+      return sendError(res, "Email already registered", 409);
+    }
+    if (err?.name === "ValidationError") {
+      return sendError(res, err.message, 400);
+    }
     next(err);
   }
 };
@@ -134,6 +218,27 @@ exports.verifyCompanyAccount = async (req, res) => {
     return sendSuccess(res, "Valid account", { company });
   } catch (err) {
     return sendError(res, err.message, 500);
+  }
+};
+
+// Verify Portfolio Account Number (Owner signup) — public, rate-limited
+exports.verifyPortfolioAccount = async (req, res) => {
+  try {
+    const accountNumber = cleanAccountNumber(req.params.accountNumber);
+    if (!/^\d{5,6}$/.test(accountNumber)) {
+      return sendError(res, "Invalid account number", 404);
+    }
+
+    const portfolio = await findSignupPortfolio(accountNumber);
+    // Same message for "not found" and "deactivated"
+    if (!portfolio) return sendError(res, "Invalid account number", 404);
+
+    // Only what the signup screen needs — no ids, no owner details
+    return sendSuccess(res, "Valid account", {
+      portfolio: { portfolioName: portfolio.portfolioName },
+    });
+  } catch (err) {
+    return sendError(res, "Verification failed", 500);
   }
 };
 
