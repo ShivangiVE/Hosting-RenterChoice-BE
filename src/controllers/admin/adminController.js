@@ -104,12 +104,29 @@ exports.getAllUsers = async (req, res) => {
 // Get all Office Admin
 exports.getOfficeAdmins = async (req, res) => {
   try {
-    const officeAdmins = await User.find({ role: "OfficeAdmin" }).select(
-      "preferredName email",
-    );
+    const admins = await User.find({ role: "OfficeAdmin" })
+      .select("preferredName email team")
+      .populate("team", "businessLegalName")
+      .lean();
+
+
+    const officeAdmins = admins
+      .map((a) => ({
+        _id: a._id,
+        preferredName: a.preferredName,
+        email: a.email,
+        teamName: a.team?.businessLegalName || "",
+      }))
+      .sort((a, b) =>
+        (a.teamName || a.preferredName).localeCompare(
+          b.teamName || b.preferredName,
+        ),
+      );
+
     return sendSuccess(res, "Office admins retrieved successfully", {
       officeAdmins,
     });
+    
   } catch (err) {
     return sendError(res, "Failed to fetch office admins", 500);
   }

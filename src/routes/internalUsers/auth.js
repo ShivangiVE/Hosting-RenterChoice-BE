@@ -14,6 +14,10 @@ const {
 const validate = require("../../middleware/validate");
 const { loginValidator } = require("../../validators/authValidator");
 const { INTERNAL_ROLES } = require("../../constants/roles");
+const {
+  validateInvite,
+  acceptInvite,
+} = require("../../controllers/internalUsers/inviteController");
 
 router.post("/login", loginValidator, validate, loginInternal);
 
@@ -27,6 +31,10 @@ router.post(
 
 router.post("/forgot", validate, forgotPassword);
 router.post("/reset", validate, resetPassword);
+
+// invite (public: the admin is not logged in yet)
+router.get("/invite/:token", validateInvite);
+router.post("/accept-invite", acceptInvite);
 
 // Protected
 router.get("/profile", protect, authorize(...INTERNAL_ROLES), getProfile);
