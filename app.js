@@ -5,6 +5,7 @@ const path = require("path");
 const adminRoutes = require("./src/routes/admin");
 const brokerageAdminRoutes = require("./src/routes/brokerageAdminRoutes/brokerageAdminRoutes");
 const officeAdminRoutes = require("./src/routes/officeAdminRoutes");
+const teamRoutes = require("./src/routes/team/teamRoutes");
 const authRoutes = require("./src/routes/externalUsers/auth");
 const externalUsers = require("./src/routes/externalUsers/externalUsersRoutes");
 const internalAuthRoutes = require("./src/routes/internalUsers/auth");
@@ -71,7 +72,6 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true, env: process.env.NODE_ENV });
 });
 
-
 app.use("/api/auth", authRoutes);
 app.use("/api/externalUsers", externalUsers);
 app.use("/api/internalauth", internalAuthRoutes);
@@ -79,6 +79,7 @@ app.use("/api/internalUsers", internalUsers);
 app.use("/api/admin", adminRoutes);
 app.use("/api/brokerageAdmin", brokerageAdminRoutes);
 app.use("/api/officeAdmin", officeAdminRoutes);
+app.use("/api/teams", teamRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/accounts", accountRoutes);
 app.use("/api/chart-of-accounts", coaRoutes);
