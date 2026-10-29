@@ -3,6 +3,8 @@ const Building = require("../../models/Building");
 const FormTemplate = require("../../models/FormTemplate");
 const Portfolio = require("../../models/Portfolio");
 const User = require("../../models/User");
+const WorkOrder = require("../../models/WorkOrder");
+const WODynamicStatus = require("../../models/WODynamicStatus");
 const AuditService = require("../../services/auditService");
 const { generateAccountNumber } = require("../../utils/generateAccountNumber");
 const {
@@ -11,11 +13,6 @@ const {
 const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
 const { sendSuccess, sendError } = require("../../utils/response");
 
-/**
- * validateAgainstTemplate(template, formData)
- * - template.fields is array of field definitions
- * - formData is incoming request body (object)
- */
 const validateAgainstTemplate = (template, formData) => {
   const errors = [];
 
@@ -1568,6 +1565,61 @@ exports.getBuildingsByPortfolio = async (req, res) => {
     });
   } catch (err) {
     return sendError(res, err);
+  }
+};
+
+// ── Portfolio landing cards ─────────────────────────────────────────────────
+// Open = primary status "open" AND not marked Completed by the vendor.
+const NOT_OPEN_DYNAMIC_STATUSES = ["Completed"];
+
+exports.getPortfolioStats = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return sendError(res, "Invalid portfolio id", 400);
+    }
+
+    const exists = await Portfolio.exists({ _id: id });
+    if (!exists) return sendError(res, "Portfolio not found", 404);
+
+    // This portfolio's buildings + the units inside them
+    const parentIds = await Building.find({ portfolio: id }).distinct("_id");
+    const buildingIds = parentIds.length
+      ? await Building.find({
+          $or: [
+            { _id: { $in: parentIds } },
+            { parentBuilding: { $in: parentIds } },
+          ],
+        }).distinct("_id")
+      : [];
+
+    let openWorkOrders = 0;
+    if (buildingIds.length) {
+      const notOpenStatusIds = await WODynamicStatus.find({
+        name: { $in: NOT_OPEN_DYNAMIC_STATUSES },
+      }).distinct("_id");
+
+      openWorkOrders = await WorkOrder.countDocuments({
+        building: { $in: buildingIds },
+        status: "open",
+        dynamicStatus: { $nin: notOpenStatusIds },
+      });
+    }
+
+    return sendSuccess(res, "Portfolio stats fetched", {
+      openWorkOrders,
+      // Not built yet: static 0 until those modules exist
+      tenantsOnEviction: 0,
+      vacancyProspects: 0,
+      tenancies: 0,
+      upcomingRentIncreases: 0,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch portfolio stats",
+      500,
+    );
   }
 };
 
