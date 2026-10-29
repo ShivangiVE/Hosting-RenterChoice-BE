@@ -7,6 +7,9 @@ const {
   createUnusablePassword,
 } = require("../../utils/inviteToken");
 const { sendTeamAdminInviteEmail } = require("../../services/emailService");
+const { TEAM_ROLES } = require("../../constants/roles");
+const { generateTeamUniqueId } = require("../../utils/generateTeamUniqueId");
+const { validateBankDetails } = require("../../utils/bankDetails");
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 // Franchise = Brokerage, Expansion = Team/Office (client, Oct 26 call).
@@ -33,6 +36,22 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const str = (v, max = 200) =>
   typeof v === "string" ? v.trim().slice(0, max) : "";
 const isValidIsoDate = (v) => ISO_DATE.test(v) && !Number.isNaN(Date.parse(v));
+
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+function parseYearEndAudit(input) {
+  if (input == null || input === "") return { value: null };
+  const month = Number(input.month);
+  const day = Number(input.day);
+  if (!input.month && !input.day) return { value: null };
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return { error: "Year-End Audit month is invalid" };
+  }
+  if (!Number.isInteger(day) || day < 1 || day > DAYS_IN_MONTH[month - 1]) {
+    return { error: "Year-End Audit day is invalid for the selected month" };
+  }
+  return { value: { month, day } };
+}
 
 const frontendUrl = () =>
   (process.env.FRONTEND_URL || process.env.CLIENT_URL || "").replace(
@@ -116,10 +135,14 @@ function validateCreatePayload(body) {
     timeZone: str(body.timeZone, 5).toUpperCase() || "MST",
     packageType: str(body.packageType, 50),
     anniversaryDate: str(body.anniversaryDate, 10),
-    bankingInfo: str(body.bankingInfo, 500),
-    yearEndAuditDate:
-      teamType === "franchise" ? str(body.yearEndAuditDate, 10) : "",
   };
+
+  // Franchise only — ignored for expansions
+  const yearEndAudit =
+    teamType === "franchise"
+      ? parseYearEndAudit(body.yearEndAudit)
+      : { value: null };
+  data.yearEndAudit = yearEndAudit.value;
 
   const admin = {
     name: str(body.admin?.name, 120),
@@ -144,8 +167,7 @@ function validateCreatePayload(body) {
   if (!TIME_ZONE_TO_IANA[data.timeZone]) errors.push("Time Zone is invalid");
   if (data.anniversaryDate && !isValidIsoDate(data.anniversaryDate))
     errors.push("Anniversary Date is invalid");
-  if (data.yearEndAuditDate && !isValidIsoDate(data.yearEndAuditDate))
-    errors.push("Year-End Audit Deadline is invalid");
+  if (yearEndAudit.error) errors.push(yearEndAudit.error);
 
   if (!admin.name) errors.push("Admin User Name is required");
   if (!EMAIL.test(admin.email)) errors.push("Admin email address is invalid");
@@ -162,6 +184,12 @@ exports.createTeam = async (req, res) => {
   if (scope.error) return sendError(res, scope.error, scope.status);
 
   const { errors, data, admin } = validateCreatePayload(scope.body);
+
+  // Banking is optional, but all-or-nothing once any bank field is filled
+  const banking = await validateBankDetails(scope.body.banking, {
+    optional: true,
+  });
+  errors.push(...banking.errors);
   if (errors.length) return sendError(res, errors.join(", "), 400);
 
   if (await User.exists({ email: admin.email })) {
@@ -184,8 +212,11 @@ exports.createTeam = async (req, res) => {
       team = new Team({
         ...data,
         uniqueIdNumber,
+        banking: banking.value
+          ? { ...banking.value, updatedAt: new Date(), updatedBy: req.user._id }
+          : null,
         anniversaryDate: data.anniversaryDate || null,
-        yearEndAuditDate: data.yearEndAuditDate || null,
+       
         createdBy: req.user._id,
       });
       user = new User({
@@ -266,7 +297,6 @@ exports.createTeam = async (req, res) => {
   );
 };
 
-// GET /api/teams/brokerages  — dropdown for "Parent Brokerage"
 exports.getBrokerages = async (req, res) => {
   try {
     const brokerages = await Team.find({
@@ -282,7 +312,6 @@ exports.getBrokerages = async (req, res) => {
   }
 };
 
-// POST /api/teams/:id/resend-invite  — new link, old one stops working
 exports.resendTeamAdminInvite = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.isValidObjectId(id))
@@ -323,8 +352,6 @@ exports.resendTeamAdminInvite = async (req, res) => {
   }
 };
 
-// GET /api/teams/my-brokerage  (BrokerageAdmin)
-// The brokerage new teams will be added to — shown read-only on the form.
 exports.getMyBrokerage = async (req, res) => {
   try {
     const brokerage = await findActiveBrokerageOf(req.user);
@@ -342,17 +369,10 @@ exports.getMyBrokerage = async (req, res) => {
 };
 
 // ── Office Locations (Master Admin) ───────────────────────────────────────
-// Roles shown as an expansion's members
-const { TEAM_ROLES } = require("../../constants/roles");
-const { generateTeamUniqueId } = require("../../utils/generateTeamUniqueId");
-// Local to this page only — TEAM_ROLES itself is left unchanged
 const OFFICE_MEMBER_ROLES = [
   ...new Set([...TEAM_ROLES, "InternalTeam", "InspectionClerk"]),
 ];
 
-// One brokerage → its expansion teams → each team's admin + members.
-// Two queries total (no per-team loop), grouped in memory.
-// Returns null when the id is not a brokerage.
 async function loadBrokerageStructure(brokerageId) {
   const brokerage = await Team.findOne({
     _id: brokerageId,
@@ -375,8 +395,6 @@ async function loadBrokerageStructure(brokerageId) {
   const teamIds = expansions.map((t) => t._id);
   const adminIds = expansions.map((t) => t.admin?._id).filter(Boolean);
 
-  // Members linked to the team, plus legacy members not yet linked
-  // (created by the team's admin before the Team model existed)
   const members = await User.find({
     role: { $in: OFFICE_MEMBER_ROLES },
     $or: [
@@ -413,7 +431,6 @@ async function loadBrokerageStructure(brokerageId) {
   };
 }
 
-// GET /api/teams/brokerages/:id/structure  (Master Admin — any brokerage)
 exports.getBrokerageStructure = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.isValidObjectId(id)) {
@@ -430,7 +447,6 @@ exports.getBrokerageStructure = async (req, res) => {
   }
 };
 
-// GET /api/teams/my-brokerage/structure  (BrokerageAdmin — own brokerage only)
 exports.getMyBrokerageStructure = async (req, res) => {
   try {
     const brokerage = await findActiveBrokerageOf(req.user);

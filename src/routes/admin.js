@@ -15,6 +15,7 @@ const {
   getBrokerageAdmins,
   toggleUserStatus,
   getUserStatusLogs,
+  getLoginAsTargets,
 } = require("../controllers/admin/adminController");
 
 // All routes protected AND only for Admin
@@ -38,6 +39,9 @@ router.get("/users", getAllUsers);
 
 //Get Office Admins
 router.get("/office-admins", authorize("Admin"), getOfficeAdmins);
+
+// Login As list: brokerages → brokerage admin + teams → team admins
+router.get("/login-as-targets", getLoginAsTargets);
 
 //Get Users as per office admin team
 router.get("/teams-by-office-admin", getTeamsGroupedByOfficeAdmin);
