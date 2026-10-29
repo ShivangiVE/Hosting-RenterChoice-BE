@@ -12,6 +12,23 @@ const mongoose = require("mongoose");
  * A brokerage can have many teams; every team belongs to exactly one brokerage.
  */
 const TEAM_TYPES = ["franchise", "expansion"];
+const bankingSchema = new mongoose.Schema(
+  {
+    bankId: { type: mongoose.Schema.Types.ObjectId, ref: "Bank" },
+    bankName: { type: String, trim: true },
+    institutionNumber: { type: String, trim: true },
+    transit: { type: String, trim: true },
+    accountNumberLast4: { type: String, trim: true },
+    accountNumberEncrypted: { type: String, select: false },
+    billingFirstName: { type: String, trim: true },
+    billingLastName: { type: String, trim: true },
+    billingAddress: { type: String, trim: true },
+    billingEmail: { type: String, trim: true, lowercase: true },
+    updatedAt: { type: Date },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  },
+  { _id: false },
+);
 const TIME_ZONES = ["PDT", "MST", "CST", "EDT"];
 
 const teamSchema = new mongoose.Schema(
@@ -50,10 +67,21 @@ const teamSchema = new mongoose.Schema(
     anniversaryDate: { type: Date, default: null },
 
     // ── Banking ──
-    // TODO(security): free text for now; move to encrypted structured fields
-    // once the client finalises what banking data is captured here.
+    banking: { type: bankingSchema, default: null },
+
     bankingInfo: { type: String, trim: true },
-    yearEndAuditDate: { type: Date, default: null }, // franchise only
+    yearEndAudit: {
+      type: new mongoose.Schema(
+        {
+          month: { type: Number, min: 1, max: 12, required: true },
+          day: { type: Number, min: 1, max: 31, required: true },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
+
+    yearEndAuditDate: { type: Date, default: null },
 
     // The Brokerage Admin / Office Admin created together with this record
     admin: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },

@@ -1,4 +1,7 @@
+const mongoose = require("mongoose");
 const User = require("../../models/User");
+const Team = require("../../models/Team");
+const AuditService = require("../../services/auditService");
 const { sendSuccess, sendError } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
@@ -10,6 +13,7 @@ const {
 } = require("../../utils/createUserAccount");
 
 const INTERNAL_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
+const IMPERSONATABLE_ROLES = ["OfficeAdmin", "BrokerageAdmin"];
 
 exports.createBrokerageAdmin = async (req, res) => {
   try {
@@ -109,7 +113,6 @@ exports.getOfficeAdmins = async (req, res) => {
       .populate("team", "businessLegalName")
       .lean();
 
-
     const officeAdmins = admins
       .map((a) => ({
         _id: a._id,
@@ -126,7 +129,6 @@ exports.getOfficeAdmins = async (req, res) => {
     return sendSuccess(res, "Office admins retrieved successfully", {
       officeAdmins,
     });
-    
   } catch (err) {
     return sendError(res, "Failed to fetch office admins", 500);
   }
@@ -163,14 +165,107 @@ exports.getTeamsGroupedByOfficeAdmin = async (req, res) => {
   }
 };
 
-// Impersonate an OfficeAdmin
+// "Login As" list grouped the way the business is organised:
+//   Brokerage (franchise) → its Brokerage Admin
+//                         → each Team (expansion) → its Team Admin
+//   others → admins not linked to an active team (legacy accounts)
+// 3 queries in total, grouped in memory.
+const toTarget = (u) =>
+  u?._id
+    ? {
+        _id: u._id,
+        preferredName: u.preferredName,
+        email: u.email,
+        role: u.role,
+        isActive: u.isActive !== false,
+      }
+    : null;
+
+exports.getLoginAsTargets = async (req, res) => {
+  try {
+    const adminFields = "preferredName email role isActive";
+    const [franchises, expansions] = await Promise.all([
+      Team.find({ teamType: "franchise", status: "Active" })
+        .select("businessLegalName uniqueIdNumber companyCity admin")
+        .populate("admin", adminFields)
+        .sort({ businessLegalName: 1 })
+        .lean(),
+      Team.find({ teamType: "expansion", status: "Active" })
+        .select(
+          "businessLegalName uniqueIdNumber companyCity admin parentBrokerage",
+        )
+        .populate("admin", adminFields)
+        .sort({ businessLegalName: 1 })
+        .lean(),
+    ]);
+
+    const teamsByBrokerage = new Map(
+      franchises.map((f) => [String(f._id), []]),
+    );
+    const orphanTeamAdmins = []; // team whose brokerage is not active
+    expansions.forEach((t) => {
+      const team = {
+        _id: t._id,
+        name: t.businessLegalName,
+        uniqueIdNumber: t.uniqueIdNumber || "",
+        city: t.companyCity || "",
+        admin: toTarget(t.admin),
+      };
+      const list = teamsByBrokerage.get(String(t.parentBrokerage));
+      if (list) list.push(team);
+      else if (team.admin)
+        orphanTeamAdmins.push({ ...team.admin, teamName: team.name });
+    });
+
+    const brokerages = franchises.map((f) => ({
+      _id: f._id,
+      name: f.businessLegalName,
+      uniqueIdNumber: f.uniqueIdNumber || "",
+      city: f.companyCity || "",
+      admin: toTarget(f.admin),
+      teams: teamsByBrokerage.get(String(f._id)) || [],
+    }));
+
+    // Admins that are not the admin of any active team
+    const linkedIds = [...franchises, ...expansions]
+      .map((t) => t.admin?._id)
+      .filter(Boolean);
+    const unlinked = await User.find({
+      role: { $in: IMPERSONATABLE_ROLES },
+      _id: { $nin: linkedIds },
+    })
+      .select(adminFields)
+      .sort({ preferredName: 1 })
+      .lean();
+
+    return sendSuccess(res, "Login-as targets fetched", {
+      brokerages,
+      others: [...orphanTeamAdmins, ...unlinked.map(toTarget)],
+    });
+  } catch (err) {
+    console.error("getLoginAsTargets failed:", err);
+    return sendError(res, "Failed to load Login As list", 500);
+  }
+};
+
+// POST /api/admin/impersonate/:officeAdminId  (Master Admin)
 exports.impersonateOfficeAdmin = async (req, res) => {
   try {
     const { officeAdminId } = req.params;
+    if (!mongoose.isValidObjectId(officeAdminId)) {
+      return sendError(res, "User not found", 404);
+    }
 
     const targetUser = await User.findById(officeAdminId);
-    if (!targetUser || targetUser.role !== "OfficeAdmin") {
-      return sendError(res, "Office admin not found", 404);
+    if (!targetUser || !IMPERSONATABLE_ROLES.includes(targetUser.role)) {
+      return sendError(res, "User not found", 404);
+    }
+    if (targetUser.isActive === false) {
+      return sendError(
+        res,
+        "This account is deactivated. Activate it before using Login As.",
+        403,
+      );
     }
 
     const token = generateToken({
@@ -179,6 +274,15 @@ exports.impersonateOfficeAdmin = async (req, res) => {
       portal: "internal",
       impersonator: req.user,
     });
+
+    // Audit trail — never block the login if logging fails
+    AuditService.logActivity({
+      module: "User",
+      action: "IMPERSONATE",
+      entityId: targetUser._id,
+      userId: req.user?._id,
+      description: `Master Admin logged in as ${targetUser.role} ${targetUser.email}`,
+    }).catch((e) => console.error("Impersonation audit log failed:", e));
 
     return sendSuccess(res, "Impersonation successful", {
       token,
