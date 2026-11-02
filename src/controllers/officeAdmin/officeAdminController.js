@@ -7,6 +7,7 @@ const {
   createUserAccount,
   toCreatedUser,
 } = require("../../utils/createUserAccount");
+const { LPM_MANAGER_ROLES, resolveLpmFlag, setLpmStatus } = require("../../utils/lpm");
 
 const INTERNAL_ROLES = TEAM_ROLES;
 
@@ -18,7 +19,7 @@ const DEFAULT_LIMIT = 10;
 
 // Only what the team table needs — never send password/OTP/session fields.
 const TEAM_MEMBER_FIELDS =
-  "preferredName legalName fullName firstName lastName email role isActive profileImage createdAt";
+  "preferredName legalName fullName firstName lastName email role isActive isLPM profileImage createdAt";
 
 const STATUS_FILTERS = {
   active: { isActive: { $ne: false } },
@@ -59,16 +60,23 @@ exports.createInternalUser = async (req, res) => {
       return sendError(res, "Invalid role for internal creation", 400);
     }
 
+    const lpm = resolveLpmFlag(req.body.isLPM, role);
+    if (lpm.error) return sendError(res, lpm.error, 400);
+
     const { user, error, status } = await createUserAccount(req.body, {
       role,
       createdBy: req.user._id,
     });
     if (error) return sendError(res, error, status);
 
+    if (lpm.value === true) {
+      await setLpmStatus({ user, isLPM: true, performer: req.user, req });
+    }
+
     return sendSuccess(
       res,
       "Internal user created successfully",
-      toCreatedUser(user),
+      { ...toCreatedUser(user), isLPM: lpm.value === true },
       201,
     );
   } catch (err) {
@@ -181,8 +189,7 @@ exports.getInternalUsers = async (req, res) => {
 
 // ─── Single team member (Settings → My Team → details panel) ────────────────
 const MEMBER_DETAIL_FIELDS =
-  "preferredName legalName fullName firstName lastName email role isActive profileImage contactInfo emailSignature printfection createdAt";
-
+  "preferredName legalName fullName firstName lastName email role isActive isLPM lpmUpdatedAt profileImage contactInfo emailSignature printfection createdAt";
 // Shape sent to the FE. Printfection spend comes from orders, which don't
 // exist in this system yet → 0 until that integration is built.
 const toMemberDetail = (u) => ({
@@ -195,6 +202,8 @@ const toMemberDetail = (u) => ({
   email: u.email,
   role: u.role,
   isActive: u.isActive,
+  isLPM: Boolean(u.isLPM),
+  lpmUpdatedAt: u.lpmUpdatedAt || null,
   profileImage: u.profileImage,
   contactInfo: u.contactInfo || "",
   emailSignature: u.emailSignature || "",
@@ -238,7 +247,8 @@ exports.updateInternalUser = async (req, res) => {
     const member = await findScopedMember(req.user, req.params.id);
     if (!member) return sendError(res, "Team member not found", 404);
 
-    const { email, contactInfo, emailSignature, role, printfection } = req.body;
+    const { email, contactInfo, emailSignature, role, printfection, isLPM } =
+      req.body;
 
     if (email !== undefined) {
       const nextEmail = String(email).toLowerCase().trim();
@@ -274,7 +284,36 @@ exports.updateInternalUser = async (req, res) => {
       );
     }
 
+    // Validate LPM before saving anything (Team Admin / Master Admin only)
+    let lpmValue;
+    if (isLPM !== undefined) {
+      if (!LPM_MANAGER_ROLES.includes(req.user.role)) {
+        return sendError(
+          res,
+          "Only the Team Admin can change Licensed Property Manager status",
+          403,
+        );
+      }
+      const lpm = resolveLpmFlag(isLPM, member.role);
+      if (lpm.error) return sendError(res, lpm.error, 400);
+      lpmValue = lpm.value;
+    }
+
     await member.save();
+
+    if (lpmValue !== undefined) {
+      const changed = await setLpmStatus({
+        user: member,
+        isLPM: lpmValue,
+        performer: req.user,
+        req,
+      });
+      if (changed) {
+        member.isLPM = lpmValue;
+        member.lpmUpdatedAt = new Date();
+      }
+    }
+
     return sendSuccess(
       res,
       "Team member updated successfully",
