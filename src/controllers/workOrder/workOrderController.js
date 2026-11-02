@@ -76,6 +76,15 @@ const resolveCategoryName = async (categoryValue) => {
   return categoryValue;
 };
 
+const resolveCategoryName = async (categoryValue) => {
+  if (!categoryValue) return categoryValue;
+  if (mongoose.Types.ObjectId.isValid(categoryValue)) {
+    const categoryDoc = await Category.findById(categoryValue).select("name");
+    return categoryDoc ? categoryDoc.name : categoryValue;
+  }
+  return categoryValue;
+};
+
 // Peek next sequence number without incrementing
 exports.getNextCounterValue = async (req, res) => {
   try {
@@ -3497,11 +3506,14 @@ exports.createServiceAgreement = async (req, res) => {
     const serviceAgreement = await ServiceAgreement.create({
       _id,
       serviceAgreementNumber,
+<<<<<<< HEAD
       baseAgreementNumber,
       recurringGroupId: isRecurring ? _id : undefined,
       cycleNumber,
       cycleLetter,
       nextCycleStartDate,
+=======
+>>>>>>> 0e3b6d1 (SA schedule appoinment logic modified as per client feedback and Unit creation feature added)
       category: resolvedCategory,
       building,
       description,

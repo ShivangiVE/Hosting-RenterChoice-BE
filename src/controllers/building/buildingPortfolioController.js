@@ -75,23 +75,6 @@ const validateAgainstTemplate = (template, formData) => {
   return errors;
 };
 
-exports.validateAgainstTemplate = validateAgainstTemplate;
-
-const ALLOWED_PORTFOLIO_STATUSES = ["Active", "Deactivated"];
-
-async function findActivePortfolioOrError(portfolioId) {
-  const portfolio = await Portfolio.findById(portfolioId).select("status");
-  if (!portfolio) return { error: "Selected portfolio not found", status: 404 };
-  if (portfolio.status === "Deactivated") {
-    return {
-      error:
-        "Cannot attach a building to a deactivated portfolio. Reactivate the portfolio first.",
-      status: 400,
-    };
-  }
-  return { error: null };
-}
-
 const normalizeBoolean = (val) => {
   if (typeof val === "boolean") return val;
   if (typeof val === "string")

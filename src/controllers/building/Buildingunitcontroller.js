@@ -1,7 +1,6 @@
 const Building = require("../../models/Building");
 const AuditService = require("../../services/auditService");
 const { sendError, sendSuccess } = require("../../utils/response");
-const { validateAgainstTemplate } = require("./buildingPortfolioController");
 
 /**
  * Auto-generates the next sequential unit number for a parent building
@@ -57,17 +56,11 @@ exports.createUnit = async (req, res) => {
 
     const { unitNumber, buildingAbbreviation, ...restFormData } = req.body;
 
-    if (!restFormData.unitType || !restFormData.unitType.toString().trim()) {
-      return sendError(res, "Unit Type is required", 400);
-    }
-    if (
-      restFormData.floorNumber === undefined ||
-      restFormData.floorNumber === null ||
-      restFormData.floorNumber.toString().trim() === ""
-    ) {
-      return sendError(res, "Floor Number is required", 400);
-    }
-
+    // unitNumber is OPTIONAL on the request — if omitted, auto-generate the
+    // next sequential one. The schema still requires a non-empty value on
+    // every Unit document; this is where that value always comes from, so
+    // the API contract stays friction-free without ever allowing a blank
+    // identifier into the data.
     let trimmedUnitNumber =
       unitNumber && unitNumber.toString().trim()
         ? unitNumber.toString().trim()
