@@ -11,6 +11,8 @@ const {
   createUserAccount,
   toCreatedUser,
 } = require("../../utils/createUserAccount");
+const SupportContact = require("../../models/SupportContact");
+const supportContactService = require("../../services/supportContactService");
 
 const INTERNAL_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
 const IMPERSONATABLE_ROLES = ["OfficeAdmin", "BrokerageAdmin"];
@@ -347,5 +349,49 @@ exports.updateUserRole = async (req, res) => {
     return sendSuccess(res, "User role updated successfully", { user });
   } catch (err) {
     return sendError(res, "Failed to update user role", 500);
+  }
+};
+
+// Master Admin: update Renter's Choice support details
+exports.updateSupportContact = async (req, res) => {
+  try {
+    const { value, errors } = supportContactService.validateSupportContact(
+      req.body,
+    );
+    if (errors.length) return sendError(res, errors.join(", "), 400);
+    if (!Object.keys(value).length)
+      return sendError(res, "Nothing to update", 400);
+
+    const before = await supportContactService.getSupportContact();
+
+    await SupportContact.findOneAndUpdate(
+      { key: "default" },
+      { $set: { ...value, updatedBy: req.user._id } },
+      { upsert: true, new: true, runValidators: true },
+    );
+
+    const after = await supportContactService.getSupportContact();
+
+    // Audit — never fail the save because of logging
+    AuditService.logActivity({
+      entityType: "settings",
+      entityId: req.user._id,
+      action: "updated",
+      actionDetails: "Renter's Choice support contact updated",
+      changes: Object.keys(value)
+        .filter((f) => before[f] !== after[f])
+        .map((f) => ({ field: f, oldValue: before[f], newValue: after[f] })),
+      performedBy: req.user._id,
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+    }).catch((e) => console.error("Support contact audit failed:", e));
+
+    return sendSuccess(res, "Support contact updated", after);
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to update support contact",
+      500,
+    );
   }
 };

@@ -23,6 +23,7 @@ const userSchema = new mongoose.Schema(
 
     legalName: { type: String, trim: true },
     fullName: { type: String, trim: true },
+    alternateEmail: { type: String, trim: true, lowercase: true, default: "" },
     replyToEmail: { type: String, trim: true, lowercase: true },
     alertEmail: { type: String, trim: true, lowercase: true },
     timeZone: { type: String, trim: true, default: "America/New_York" },

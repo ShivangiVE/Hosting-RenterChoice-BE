@@ -1,4 +1,8 @@
-const modules = [require("./core"), require("./workOrder")];
+const modules = [
+  require("./core"),
+  require("./workOrder"),
+  require("./portfolio"),
+];
 
 const NOTIFICATION_TYPES = {};
 const NOTIFICATION_EVENTS = {};

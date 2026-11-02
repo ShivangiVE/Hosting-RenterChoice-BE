@@ -16,6 +16,7 @@ const {
   toggleUserStatus,
   getUserStatusLogs,
   getLoginAsTargets,
+  updateSupportContact,
 } = require("../controllers/admin/adminController");
 
 // All routes protected AND only for Admin
@@ -55,5 +56,6 @@ router.get("/users/:userId/status-logs", getUserStatusLogs);
 
 router.delete("/users/:id", deleteUser);
 router.put("/users/:id/role", updateUserRole);
+router.put("/support-contact", updateSupportContact);
 
 module.exports = router;
