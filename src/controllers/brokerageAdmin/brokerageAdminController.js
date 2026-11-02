@@ -129,7 +129,7 @@ exports.getOfficeAdminTeam = async (req, res) => {
     const teamMembers = await User.find({
       createdBy: officeAdminId,
       role: { $in: TEAM_ROLES },
-    }).select("preferredName email role isActive createdAt");
+    }).select("preferredName email role isActive isLPM createdAt");
 
     return sendSuccess(res, "Team members retrieved", { teamMembers });
   } catch (err) {
@@ -150,7 +150,7 @@ exports.getMyTeamsGrouped = async (req, res) => {
         const team = await User.find({
           createdBy: admin._id,
           role: { $in: TEAM_ROLES },
-        }).select("preferredName email role isActive");
+        }).select("preferredName email role isActive isLPM");
 
         return {
           officeAdmin: {

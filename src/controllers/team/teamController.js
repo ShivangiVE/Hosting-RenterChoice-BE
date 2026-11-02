@@ -405,7 +405,7 @@ async function loadBrokerageStructure(brokerageId) {
       },
     ],
   })
-    .select("preferredName email role isActive team createdBy")
+  .select("preferredName email role isActive isLPM createdBy")
     .sort({ preferredName: 1 })
     .lean();
 
