@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Todo = require("../../models/tasks/Todo");
 const User = require("../../models/User");
 const Category = require("../../models/repairCategories");
@@ -43,7 +44,16 @@ exports.getNextTodoNumber = async (req, res) => {
 // CREATE Todo
 exports.createTodo = async (req, res) => {
   try {
-    const { category, description, tags, assignedTo, todoColor } = req.body;
+    const { category, description, tags, todoColor } = req.body;
+   
+    const assignedTo = req.body.assignedTo || undefined;
+
+    if (!mongoose.isValidObjectId(category)) {
+      return sendError(res, "Please select a category.", 400);
+    }
+    if (assignedTo && !mongoose.isValidObjectId(assignedTo)) {
+      return sendError(res, "Invalid assigned user.", 400);
+    }
 
     const categoryDoc = await Category.findOne({ _id: category, type: "todo" });
     if (!categoryDoc) {
@@ -57,7 +67,30 @@ exports.createTodo = async (req, res) => {
       }
     }
 
-    let attachments = [];
+    // Validate BEFORE using up a number or uploading files
+    const todo = new Todo({
+      todoNumber: "PENDING",
+      category,
+      description,
+      tags,
+      assignedTo,
+      todoColor: todoColor || undefined,
+      status: "In Progress",
+      createdBy: req.user._id,
+    });
+
+    try {
+      await todo.validate();
+    } catch (validationErr) {
+      const firstError = Object.values(validationErr.errors || {})[0];
+      return sendError(
+        res,
+        firstError?.message || "Please fill in all required fields.",
+        400,
+      );
+    }
+
+    const attachments = [];
     if (req.files?.length) {
       for (const file of req.files) {
         const fileUrl = await uploadFile(file, "uploads/Repair/todos");
@@ -72,22 +105,12 @@ exports.createTodo = async (req, res) => {
         });
       }
     }
+    todo.attachments = attachments;
 
-    // Get next todo number
     const nextNumber = await getNextSequence("todo");
-    const todoNumber = `TODO #${nextNumber.toString().padStart(4, "0")}`;
+    todo.todoNumber = formatSequence("TODO", nextNumber);
 
-    const todo = await Todo.create({
-      todoNumber,
-      category,
-      description,
-      tags,
-      assignedTo,
-      todoColor: todoColor || undefined,
-      attachments,
-      status: "In Progress",
-      createdBy: req.user._id,
-    });
+    await todo.save();
 
     sendSuccess(res, "Todo created successfully", { todo }, 201);
 
@@ -99,6 +122,7 @@ exports.createTodo = async (req, res) => {
         if (clerk?.role === "InspectionClerk") {
           await createNotification({
             user: assignedTo,
+            actorId: req.user._id,
             role: "InspectionClerk",
             type: "TODO_ASSIGNED_CLERK",
             title: "New Todo Assigned",
@@ -305,6 +329,19 @@ exports.updateTodo = async (req, res) => {
     const { id } = req.params;
     const updateData = { ...req.body };
 
+    
+    if (updateData.assignedTo === "") delete updateData.assignedTo;
+    if (updateData.category === "") delete updateData.category;
+    if (
+      updateData.assignedTo &&
+      !mongoose.isValidObjectId(updateData.assignedTo)
+    ) {
+      return sendError(res, "Invalid assigned user.", 400);
+    }
+    if (updateData.category && !mongoose.isValidObjectId(updateData.category)) {
+      return sendError(res, "Invalid category.", 400);
+    }
+
     if (updateData.category) {
       const categoryDoc = await Category.findOne({
         _id: updateData.category,
@@ -374,7 +411,36 @@ exports.updateTodo = async (req, res) => {
       .populate("assignedTo", "preferredName email")
       .populate("createdBy", "preferredName email");
 
-    return sendSuccess(res, "Todo updated successfully", { todo });
+    sendSuccess(res, "Todo updated successfully", { todo });
+
+    const newAssignee = updateData.assignedTo;
+    if (
+      newAssignee &&
+      String(newAssignee) !== String(existingTodo.assignedTo)
+    ) {
+      try {
+        const clerk = await User.findById(newAssignee).select("role");
+
+        if (clerk?.role === "InspectionClerk") {
+          await createNotification({
+            user: newAssignee,
+            actorId: req.user._id,
+            role: "InspectionClerk",
+            type: "TODO_ASSIGNED_CLERK",
+            title: "Todo Assigned to You",
+            message: `Todo ${todo.todoNumber} has been assigned to you.`,
+            entityType: "Todo",
+            entityId: todo._id,
+          });
+
+          getIO().to(`user:${newAssignee}`).emit("clerk:new-todo", {
+            todoId: todo._id,
+          });
+        }
+      } catch (err) {
+        console.error("Todo reassignment notification failed:", err);
+      }
+    }
   } catch (err) {
     console.error("Update todo error:", err);
     return sendError(res, err.message || "Failed to update todo", 500);

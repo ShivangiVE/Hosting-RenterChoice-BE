@@ -76,6 +76,16 @@ const resolveCategoryName = async (categoryValue) => {
   return categoryValue;
 };
 
+const toNullableEnum = (value) =>
+  value === undefined
+    ? undefined
+    : value === null ||
+        value === "" ||
+        value === "null" ||
+        value === "undefined"
+      ? null
+      : value;
+
 // Peek next sequence number without incrementing
 exports.getNextCounterValue = async (req, res) => {
   try {
@@ -134,8 +144,6 @@ exports.createWorkOrder = async (req, res) => {
     const fileUrl = req.file
       ? `/uploads/Repair/workOrders/${req.file.filename}`
       : null;
-    const sequence = await getNextSequence("workOrder");
-    const workOrderNumber = `WO #${sequence.toString().padStart(4, "0")}`;
 
     const normalizeStatus = (status) => {
       if (!status) return "open";
@@ -169,23 +177,33 @@ exports.createWorkOrder = async (req, res) => {
       }));
     }
 
-    const workOrder = await WorkOrder.create({
-      workOrderNumber,
-      workOrderType,
-      category,
-      building,
-      description,
-      assignmentType,
-      assignedCompany: assignmentType === "company" ? company : undefined,
-      vendor: resolvedVendor,
-      vendorResponses,
-      keyIssued: keyIssued || false,
-      dueDate,
-      fileUrl,
-      status: normalizeStatus(req.body.status),
-      dynamicStatus: defaultStatus._id,
-      createdBy: req.user._id,
-    });
+    // Number is taken only after everything above passed and the WO is valid
+    const workOrder = await createWithSequence(
+      WorkOrder,
+      {
+        workOrderNumber: PENDING_NUMBER,
+        workOrderType,
+        category,
+        building,
+        description,
+        assignmentType,
+        assignedCompany: assignmentType === "company" ? company : undefined,
+        vendor: resolvedVendor,
+        vendorResponses,
+        keyIssued: keyIssued || false,
+        dueDate,
+        fileUrl,
+        status: normalizeStatus(req.body.status),
+        dynamicStatus: defaultStatus._id,
+        createdBy: req.user._id,
+      },
+      {
+        sequenceName: "workOrder",
+        assignNumber: (doc, seq) => {
+          doc.workOrderNumber = `WO #${seq.toString().padStart(4, "0")}`;
+        },
+      },
+    );
 
     sendSuccess(res, "Work order created successfully", { workOrder }, 201);
 
@@ -198,6 +216,9 @@ exports.createWorkOrder = async (req, res) => {
     }
     // assignmentType === "unassigned" → no notification, nothing to do
   } catch (err) {
+    if (err.name === "ValidationError") {
+      return sendError(res, firstValidationMessage(err), 400);
+    }
     return sendError(res, err.message || "Failed to create work order", 500);
   }
 };
@@ -245,7 +266,6 @@ exports.getWorkOrders = async (req, res) => {
 
     let filter = {};
 
-    // ── Apply team scope — null means Admin (no restriction) ──
     if (allowedUserIds !== null) {
       filter.$or = [
         { createdBy: { $in: allowedUserIds } }, // created by team
@@ -2792,26 +2812,32 @@ exports.createInspectionRequest = async (req, res) => {
       validateFutureOrTodayDate(dueDate, "Due date");
     }
 
-    // Generate inspection number
-    const sequence = await getNextSequence("inspection");
-    const inspectionNumber = `I #${sequence.toString().padStart(4, "0")}`;
-
     let keyReturn = {
       status: keyIssued ? "pending" : "not_issued",
     };
 
-    const inspectionRequest = await InspectionRequest.create({
-      inspectionNumber,
-      inspectionType,
-      building,
-      notes,
-      assignedTo,
-      keyIssued: keyIssued || false,
-      keyReturn,
-      dueDate,
-      inspectionColour,
-      createdBy: req.user._id,
-    });
+    // Number is taken only after the request is valid
+    const inspectionRequest = await createWithSequence(
+      InspectionRequest,
+      {
+        inspectionNumber: PENDING_NUMBER,
+        inspectionType,
+        building,
+        notes,
+        assignedTo: assignedTo || undefined,
+        keyIssued: keyIssued || false,
+        keyReturn,
+        dueDate,
+        inspectionColour,
+        createdBy: req.user._id,
+      },
+      {
+        sequenceName: "inspection",
+        assignNumber: (doc, seq) => {
+          doc.inspectionNumber = `I #${seq.toString().padStart(4, "0")}`;
+        },
+      },
+    );
 
     //  Send response FIRST — never let notification delay it
     sendSuccess(
@@ -2842,6 +2868,9 @@ exports.createInspectionRequest = async (req, res) => {
       }
     }
   } catch (err) {
+    if (err.name === "ValidationError") {
+      return sendError(res, firstValidationMessage(err), 400);
+    }
     return sendError(
       res,
       err.message || "Failed to create inspection request",
@@ -3422,10 +3451,11 @@ exports.createServiceAgreement = async (req, res) => {
       description,
       startDate,
       endDate,
-      recurringSchedule,
+
       vendor,
       company,
     } = req.body;
+    const recurringSchedule = toNullableEnum(req.body.recurringSchedule);
 
     if (!startDate || !endDate) {
       return sendError(res, "Start date and end date are required", 400);
@@ -3438,22 +3468,9 @@ exports.createServiceAgreement = async (req, res) => {
 
     const resolvedCategory = await resolveCategoryName(category);
 
-    let fileUrl = null;
-
-    if (req.file) {
-      fileUrl = await uploadFile(req.file, "uploads/Repair/serviceAgreements");
-    }
-
-    const sequence = await getNextSequence("serviceAgreement");
-    const baseAgreementNumber = `SA #${sequence.toString().padStart(4, "0")}`;
-
     const isRecurring = !!recurringSchedule;
     const cycleNumber = isRecurring ? 1 : null;
     const cycleLetter = isRecurring ? cycleNumberToLetters(1) : null; // "a"
-    const serviceAgreementNumber = buildCycleAgreementNumber(
-      baseAgreementNumber,
-      cycleLetter,
-    );
 
     // Pre-generate the _id so a recurring agreement's first cycle can point
     // recurringGroupId at itself in a single create() call.
@@ -3532,6 +3549,9 @@ exports.createServiceAgreement = async (req, res) => {
     }
     // assignmentType === "unassigned" → no notification, nothing to do
   } catch (err) {
+    if (err.name === "ValidationError") {
+      return sendError(res, firstValidationMessage(err), 400);
+    }
     return sendError(
       res,
       err.message || "Failed to create service agreement",
@@ -4316,6 +4336,13 @@ exports.updateServiceAgreement = async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
+
+    // Empty recurring schedule from the edit form means "no schedule"
+    if ("recurringSchedule" in updateData) {
+      updateData.recurringSchedule = toNullableEnum(
+        updateData.recurringSchedule,
+      );
+    }
 
     if (req.body.removeExistingFile === "true") {
       updateData.fileUrl = null;

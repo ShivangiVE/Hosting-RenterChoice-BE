@@ -96,8 +96,51 @@ If access should be restored, reactivate ${isPlural ? "them" : "it"} from the Po
   await sendEmail(adminEmails.join(","), subject, text, html);
 };
 
+// Invitation for a newly created Brokerage Admin / Team Admin
+// (link is single-use and expires in 72 hours)
+const sendTeamAdminInviteEmail = async ({
+  to,
+  name,
+  teamName,
+  roleLabel,
+  link,
+}) => {
+  const subject = `You're invited to Renters Choice as ${roleLabel}`;
+
+  const text = `
+Hi ${name},
+
+You have been added as ${roleLabel} for ${teamName} on Renters Choice.
+
+Set your password using the link below (valid for 72 hours, can be used once):
+${link}
+
+If you weren't expecting this email, you can ignore it.
+  `;
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:15px;color:#282932;line-height:1.5">
+      <p>Hi ${escapeHtml(name)},</p>
+      <p>You have been added as <strong>${escapeHtml(roleLabel)}</strong> for
+        <strong>${escapeHtml(teamName)}</strong> on Renters Choice.</p>
+      <p>Click the button below to set your password. This link is valid for 72 hours and can be used once.</p>
+      <p style="margin:24px 0">
+        <a href="${escapeHtml(link)}"
+           style="background:#018898;color:#ffffff;padding:12px 24px;border-radius:24px;text-decoration:none;font-weight:600">
+          Set my password
+        </a>
+      </p>
+      <p style="font-size:13px;color:#6B7280">If the button doesn't work, copy this link into your browser:<br/>${escapeHtml(link)}</p>
+      <p style="font-size:13px;color:#6B7280">If you weren't expecting this email, you can ignore it.</p>
+    </div>
+  `;
+
+  await sendEmail(to, subject, text, html);
+};
+
 module.exports = {
   sendEmail,
   sendForgotPasswordOTPEmail,
   sendPortfolioDeactivatedNotice,
+  sendTeamAdminInviteEmail,
 };

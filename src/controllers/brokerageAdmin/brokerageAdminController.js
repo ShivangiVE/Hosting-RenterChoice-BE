@@ -3,37 +3,45 @@ const { sendError, sendSuccess } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
 const { TEAM_ROLES, BROKERAGE_STAFF_ROLES } = require("../../constants/roles");
+const {
+  createUserAccount,
+  toCreatedUser,
+} = require("../../utils/createUserAccount");
 
 const CREATABLE_BROKERAGE_STAFF_ROLES = BROKERAGE_STAFF_ROLES;
+
+const myOfficeAdminsFilter = (brokerageAdminId) => ({
+  role: "OfficeAdmin",
+  $or: [{ createdBy: brokerageAdminId }, { managedBy: brokerageAdminId }],
+});
+
+
+const withTeamName = (admin) => ({
+  _id: admin._id,
+  preferredName: admin.preferredName,
+  email: admin.email,
+  isActive: admin.isActive,
+  createdAt: admin.createdAt,
+  teamName: admin.team?.businessLegalName || "",
+});
 
 // BrokerageAdmin creates OfficeAdmins
 exports.createOfficeAdmin = async (req, res) => {
   try {
-    const { preferredName, email, password } = req.body;
-
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) return sendError(res, "User already exists", 409);
-
-    const user = await User.create({
-      preferredName,
-      email,
-      password,
+    const { user, error, status } = await createUserAccount(req.body, {
       role: "OfficeAdmin",
-      createdBy: req.user._id, // links OfficeAdmin to this BrokerageAdmin
+      createdBy: req.user._id,
     });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       "Office admin created successfully",
-      {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createOfficeAdmin error:", err);
     return sendError(res, "Failed to create office admin", 500);
   }
 };
@@ -41,8 +49,7 @@ exports.createOfficeAdmin = async (req, res) => {
 // BrokerageAdmin creates BrokerageAccounts or BrokerageUser
 exports.createBrokerageStaff = async (req, res) => {
   try {
-    const { preferredName, email, password, role } = req.body;
-
+    const { role } = req.body;
     if (!CREATABLE_BROKERAGE_STAFF_ROLES.includes(role)) {
       return sendError(
         res,
@@ -51,29 +58,20 @@ exports.createBrokerageStaff = async (req, res) => {
       );
     }
 
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) return sendError(res, "User already exists", 409);
-
-    const user = await User.create({
-      preferredName,
-      email,
-      password,
+    const { user, error, status } = await createUserAccount(req.body, {
       role,
-      createdBy: req.user._id, // links this staff member to the Brokerage Admin/Franchise
+      createdBy: req.user._id,
     });
+    if (error) return sendError(res, error, status);
 
     return sendSuccess(
       res,
       `${role} created successfully`,
-      {
-        _id: user._id,
-        preferredName: user.preferredName,
-        email: user.email,
-        role: user.role,
-      },
+      toCreatedUser(user),
       201,
     );
   } catch (err) {
+    console.error("createBrokerageStaff error:", err);
     return sendError(res, "Failed to create brokerage staff", 500);
   }
 };
@@ -81,10 +79,18 @@ exports.createBrokerageStaff = async (req, res) => {
 // BrokerageAdmin gets their own OfficeAdmins
 exports.getMyOfficeAdmins = async (req, res) => {
   try {
-    const officeAdmins = await User.find({
-      role: "OfficeAdmin",
-      createdBy: req.user._id,
-    }).select("preferredName email isActive createdAt");
+    const admins = await User.find(myOfficeAdminsFilter(req.user._id))
+      .select("preferredName email isActive createdAt team")
+      .populate("team", "businessLegalName")
+      .lean();
+
+    const officeAdmins = admins
+      .map(withTeamName)
+      .sort((a, b) =>
+        (a.teamName || a.preferredName).localeCompare(
+          b.teamName || b.preferredName,
+        ),
+      );
 
     return sendSuccess(res, "Office admins retrieved", { officeAdmins });
   } catch (err) {
@@ -103,31 +109,6 @@ exports.getMyBrokerageStaff = async (req, res) => {
     return sendSuccess(res, "Brokerage staff retrieved", { staff });
   } catch (err) {
     return sendError(res, "Failed to fetch brokerage staff", 500);
-  }
-};
-
-// Get team members under a specific OfficeAdmin (scoped to this BrokerageAdmin)
-exports.getOfficeAdminTeam = async (req, res) => {
-  try {
-    const { officeAdminId } = req.params;
-
-    // Verify this OfficeAdmin belongs to this BrokerageAdmin
-    const officeAdmin = await User.findOne({
-      _id: officeAdminId,
-      role: "OfficeAdmin",
-      createdBy: req.user._id,
-    });
-
-    if (!officeAdmin) return sendError(res, "Office admin not found", 404);
-
-    const teamMembers = await User.find({
-      createdBy: officeAdminId,
-      role: { $in: TEAM_ROLES },
-    }).select("preferredName email role isActive createdAt");
-
-    return sendSuccess(res, "Team members retrieved", { teamMembers });
-  } catch (err) {
-    return sendError(res, "Failed to fetch team members", 500);
   }
 };
 
@@ -193,8 +174,7 @@ exports.impersonateOfficeAdmin = async (req, res) => {
   try {
     const target = await User.findOne({
       _id: req.params.officeAdminId,
-      role: "OfficeAdmin",
-      createdBy: req.user._id, // scoped — can only impersonate own OAs
+      ...myOfficeAdminsFilter(req.user._id),
     });
 
     if (!target) return sendError(res, "Office admin not found", 404);
@@ -203,6 +183,7 @@ exports.impersonateOfficeAdmin = async (req, res) => {
       user: target,
       platform: "impersonate",
       portal: "internal",
+      impersonator: req.user,
     });
 
     return sendSuccess(res, "Impersonation successful", {
@@ -224,18 +205,20 @@ exports.toggleUserStatus = (req, res) =>
   toggleUserStatus(req, res, {
     scopeCheck: async (targetUser, performer) => {
       // Can toggle OfficeAdmins they created
-      if (
-        targetUser.role === "OfficeAdmin" &&
-        targetUser.createdBy?.toString() === performer._id.toString()
-      )
-        return true;
+      const me = performer._id.toString();
+
+      // Can toggle their OfficeAdmins (created by them or managed by them)
+      if (targetUser.role === "OfficeAdmin")
+        return (
+          targetUser.createdBy?.toString() === me ||
+          targetUser.managedBy?.toString() === me
+        );
 
       // Can toggle team members under their OfficeAdmins
       if (TEAM_ROLES.includes(targetUser.role)) {
         const officeAdmin = await User.findOne({
           _id: targetUser.createdBy,
-          role: "OfficeAdmin",
-          createdBy: performer._id,
+          ...myOfficeAdminsFilter(performer._id),
         });
         return !!officeAdmin;
       }

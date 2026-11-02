@@ -4,6 +4,7 @@ const Message = require("./src/models/Communication/Message");
 const Conversation = require("./src/models/Communication/Conversation");
 const WorkOrder = require("./src/models/WorkOrder");
 const { canSendMessage } = require("./src/domain/chatPolicy");
+const allowedOrigins = require("./src/config/corsOrigins");
 
 let io;
 
@@ -11,9 +12,18 @@ const onlineUsers = new Map();
 
 module.exports = {
   init: (server) => {
+    // Development
+    // io = require("socket.io")(server, {
+    //   cors: {
+    //     origin: "*",
+    //     methods: ["GET", "POST"],
+    //   },
+    // });
+
+    // Production
     io = require("socket.io")(server, {
       cors: {
-        origin: "*",
+        origin: allowedOrigins,
         methods: ["GET", "POST"],
       },
        transports: ["websocket", "polling"], // added for staging
@@ -42,9 +52,26 @@ module.exports = {
           return next(err);
         }
 
-        // Skip session validation for impersonation tokens
-        // ── Impersonation tokens skip ALL session validation ──────────────────
+        // ── Impersonation (Login As) ───────────────────────────────────────────
+        // Valid only while the Admin / BrokerageAdmin who started it is still
+        // active and on the same session (same rule as the HTTP middleware).
         if (decoded.platform === "impersonate") {
+          if (decoded.impersonatedBy) {
+            const impersonator = await User.findById(decoded.impersonatedBy)
+              .select("isActive internalWebSessionVersion")
+              .lean();
+
+            if (
+              !impersonator?.isActive ||
+              impersonator.internalWebSessionVersion !==
+                decoded.impersonatorSessionVersion
+            ) {
+              const err = new Error("Session expired");
+              err.code = "SESSION_REPLACED";
+              return next(err);
+            }
+          }
+
           socket.user = user;
           socket.isImpersonated = true;
           return next();

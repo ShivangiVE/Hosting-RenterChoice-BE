@@ -29,7 +29,6 @@ const {
   verifyInvoiceFileSignature,
 } = require("../../utils/fileSignatureValidator");
 const fs = require("fs/promises");
-const { resolveCompanyId } = require("../../utils/companyScope");
 
 exports.createInvoiceDraft = async (req, res) => {
   let fileUrl;

@@ -1,18 +1,37 @@
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const UserStatusLog = require("../models/UserStatusLog");
 const { sendSuccess, sendError } = require("./response");
 
 /**
+ * Activate / deactivate a user (shared by Master Admin + My Team).
+ *
+ * Body:
+ *   password  (required) performer's own password — re-auth for a sensitive action
+ *   reason    (optional) stored in the audit log
+ *   isActive  (optional) the DESIRED status. When sent, the call is idempotent:
+ *             a double-click or a stale screen can't flip the user back.
+ *             When omitted it toggles (old behaviour → existing screens keep working).
+ *
  * @param {Object} options
- * @param {Function} options.scopeCheck - async fn(targetUser, performingUser) => boolean
- *   Return true if the performer is allowed to toggle this target.
+ * @param {Function} options.scopeCheck - async fn(targetUser, performer) => boolean
+ *   Return true if the performer is allowed to change this target.
  */
 exports.toggleUserStatus = async (req, res, options = {}) => {
   const { scopeCheck } = options;
 
   try {
     const { userId } = req.params;
-    const { password, reason } = req.body;
+    const { password, reason, isActive } = req.body;
+
+    // 0. Bad id → 404 instead of a CastError 500
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return sendError(res, "User not found", 404);
+    }
+
+    if (isActive !== undefined && typeof isActive !== "boolean") {
+      return sendError(res, "isActive must be true or false", 400);
+    }
 
     // 1. Require password
     if (!password) {
@@ -33,7 +52,7 @@ exports.toggleUserStatus = async (req, res, options = {}) => {
     if (!targetUser) return sendError(res, "User not found", 404);
 
     // 4. Prevent self-toggle
-    if (targetUser._id.toString() === performer._id.toString()) {
+    if (targetUser._id.equals(performer._id)) {
       return sendError(res, "You cannot change your own status", 400);
     }
 
@@ -45,13 +64,27 @@ exports.toggleUserStatus = async (req, res, options = {}) => {
       }
     }
 
-    const previousStatus = targetUser.isActive;
-    const newStatus = !previousStatus;
+    const previousStatus = targetUser.isActive !== false;
+    const newStatus =
+      typeof isActive === "boolean" ? isActive : !previousStatus;
 
-    // 6. Toggle status
+    // 6. Already in the requested state → nothing to do (no log, no session kill)
+    if (newStatus === previousStatus) {
+      return sendSuccess(
+        res,
+        `User is already ${newStatus ? "active" : "inactive"}`,
+        {
+          userId: targetUser._id,
+          isActive: newStatus,
+          action: "unchanged",
+        },
+      );
+    }
+
+    // 7. Change status
     targetUser.isActive = newStatus;
 
-    // 7. Invalidate sessions if deactivating
+    // 8. Invalidate sessions if deactivating
     if (!newStatus) {
       targetUser.internalWebSessionVersion += 1;
       targetUser.externalWebSessionVersion += 1;
@@ -59,28 +92,25 @@ exports.toggleUserStatus = async (req, res, options = {}) => {
 
     await targetUser.save();
 
-    // 8. Write audit log
+    // 9. Write audit log
+    const action = newStatus ? "activated" : "deactivated";
     await UserStatusLog.create({
       targetUser: targetUser._id,
       performedBy: performer._id,
       performedByRole: performer.role,
-      action: newStatus ? "activated" : "deactivated",
+      action,
       previousStatus,
       newStatus,
-      reason: reason || null,
+      reason: reason ? String(reason).trim().slice(0, 500) : null,
       ipAddress: req.ip,
       userAgent: req.headers["user-agent"],
     });
 
-    return sendSuccess(
-      res,
-      `User ${newStatus ? "activated" : "deactivated"} successfully`,
-      {
-        userId: targetUser._id,
-        isActive: targetUser.isActive,
-        action: newStatus ? "activated" : "deactivated",
-      },
-    );
+    return sendSuccess(res, `User ${action} successfully`, {
+      userId: targetUser._id,
+      isActive: targetUser.isActive,
+      action,
+    });
   } catch (err) {
     console.error("toggleUserStatus error:", err);
     return sendError(res, "Failed to update user status", 500);
