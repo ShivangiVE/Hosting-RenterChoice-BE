@@ -1,6 +1,13 @@
 const jwt = require("jsonwebtoken");
 
-const generateToken = ({ user, platform, portal }) => {
+
+const EXPIRES_IN = {
+  web: "7d",
+  mobile: "90d",
+  impersonate: "7d",
+};
+
+const generateToken = ({ user, platform, portal, impersonator }) => {
   const payload = {
     id: user._id,
     role: user.role,
@@ -16,11 +23,13 @@ const generateToken = ({ user, platform, portal }) => {
         : user.externalWebSessionVersion;
   }
 
-  // Impersonation tokens do NOT carry sessionVersion —
-  // they bypass session checks in middleware entirely
-  // and expire in 1 hour for security
-  const expiresIn =
-    platform === "mobile" ? "90d" : platform === "impersonate" ? "1h" : "7d";
+  // Impersonation: tie the token to the impersonator's current session
+  if (platform === "impersonate" && impersonator) {
+    payload.impersonatedBy = impersonator._id;
+    payload.impersonatorSessionVersion = impersonator.internalWebSessionVersion;
+  }
+
+  const expiresIn = EXPIRES_IN[platform] || "7d";
 
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 };

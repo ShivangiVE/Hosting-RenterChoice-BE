@@ -23,13 +23,35 @@ const protect = async (req, res, next) => {
         });
       }
 
-      // ── Impersonation tokens skip ALL session validation ─────────────────
-      // They are short-lived (1h) and issued by a trusted internal user.
-      // Session version checks don't apply because the impersonated user
-      // never "logged in" themselves — they were accessed by an Admin/BrokerageAdmin.
+      // ── Impersonation (Login As) ─────────────────────────────────────────
+      // The impersonated user never logged in themselves, so their own session
+      // version is not checked. Instead the token is valid only while the
+      // Admin / BrokerageAdmin who started it is still active and on the same
+      // session (logging in elsewhere or changing password ends it).
       if (decoded.platform === "impersonate") {
+        // Older tokens (issued before this change) have no impersonatedBy —
+        // they keep working until they expire.
+        if (decoded.impersonatedBy) {
+          const impersonator = await User.findById(decoded.impersonatedBy)
+            .select("isActive internalWebSessionVersion")
+            .lean();
+
+          if (
+            !impersonator ||
+            !impersonator.isActive ||
+            impersonator.internalWebSessionVersion !==
+              decoded.impersonatorSessionVersion
+          ) {
+            return res.status(401).json({
+              code: "SESSION_REPLACED",
+              message: "Your Login As session has ended. Please login again.",
+            });
+          }
+        }
+
         req.user = user;
         req.isImpersonated = true; // useful for audit logging later
+        req.impersonatedBy = decoded.impersonatedBy || null;
         return next();
       }
 

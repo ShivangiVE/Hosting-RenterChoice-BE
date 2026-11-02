@@ -77,6 +77,7 @@ exports.impersonateVendor = async (req, res) => {
       user: vendor,
       platform: "impersonate",
       portal: "external",
+      impersonator: req.user,
     });
 
     return sendSuccess(res, "Vendor impersonation successful", {
@@ -191,7 +192,10 @@ exports.forgotPassword = async (req, res, next) => {
 
     await user.save();
 
-    const resetUrl = `${process.env.CORS_ORIGIN}/reset?token=${resetToken}`;
+    const appUrl = (process.env.CLIENT_APP_URL || process.env.CORS_ORIGIN || "")
+      .split(",")[0]
+      .trim();
+    const resetUrl = `${appUrl}/reset?token=${resetToken}`;
 
     return sendSuccess(res, "Reset link generated", { resetUrl });
   } catch (err) {

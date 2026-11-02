@@ -22,6 +22,8 @@ const userSchema = new mongoose.Schema(
     },
 
     legalName: { type: String, trim: true },
+    fullName: { type: String, trim: true },
+    alternateEmail: { type: String, trim: true, lowercase: true, default: "" },
     replyToEmail: { type: String, trim: true, lowercase: true },
     alertEmail: { type: String, trim: true, lowercase: true },
     timeZone: { type: String, trim: true, default: "America/New_York" },
@@ -116,6 +118,20 @@ const userSchema = new mongoose.Schema(
       enum: [10, 25, 50, 100],
       default: 10,
     },
+    // Brokerage / Team (office) this user belongs to — set for the admins
+    // created from the Master Admin "Create Team" page.
+    team: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Team",
+      default: null,
+      index: true,
+    },
+
+    // One-time "set your password" invite (only a SHA-256 hash is stored)
+    inviteTokenHash: { type: String, index: true, select: false },
+    inviteExpires: { type: Date, select: false },
+    inviteAcceptedAt: { type: Date, default: null },
+
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // who created this user
     managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     // resetPasswordToken: { type: String },

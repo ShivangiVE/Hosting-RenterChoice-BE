@@ -1,7 +1,10 @@
+const mongoose = require("mongoose");
 const Building = require("../../models/Building");
 const FormTemplate = require("../../models/FormTemplate");
 const Portfolio = require("../../models/Portfolio");
 const User = require("../../models/User");
+const WorkOrder = require("../../models/WorkOrder");
+const WODynamicStatus = require("../../models/WODynamicStatus");
 const AuditService = require("../../services/auditService");
 const { generateAccountNumber } = require("../../utils/generateAccountNumber");
 const {
@@ -10,11 +13,6 @@ const {
 const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
 const { sendSuccess, sendError } = require("../../utils/response");
 
-/**
- * validateAgainstTemplate(template, formData)
- * - template.fields is array of field definitions
- * - formData is incoming request body (object)
- */
 const validateAgainstTemplate = (template, formData) => {
   const errors = [];
 
@@ -127,6 +125,23 @@ async function saveSubmission(formType, formData, userId) {
   throw new Error("Unsupported form type");
 }
 
+const DECIMAL_2 = /^(\d+\.?\d{0,2}|\.\d{1,2})$/;
+
+const BUILDING_NUMERIC_RULES = {
+  totalFloors: { pattern: /^\d+$/, label: "Total Floors" },
+  monthlyRent: { pattern: DECIMAL_2, label: "Monthly Rent" },
+  securityDeposit: { pattern: DECIMAL_2, label: "Security Deposit" },
+};
+
+const validateBuildingNumbers = (data) =>
+  Object.entries(BUILDING_NUMERIC_RULES)
+    .filter(
+      ([key]) =>
+        data[key] !== undefined && data[key] !== null && data[key] !== "",
+    )
+    .filter(([key, rule]) => !rule.pattern.test(String(data[key]).trim()))
+    .map(([, rule]) => `"${rule.label}" must be a valid number`);
+
 // ========================= Buildings =========================
 // create buildings
 exports.createBuilding = async (req, res) => {
@@ -168,6 +183,10 @@ exports.createBuilding = async (req, res) => {
         400,
       );
     }
+
+    const numberErrors = validateBuildingNumbers(formData);
+    if (numberErrors.length)
+      return sendError(res, numberErrors.join(", "), 400);
 
     const errors = validateAgainstTemplate(template, formData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
@@ -354,6 +373,7 @@ exports.getAllBuildings = async (req, res) => {
     // Server-side sorting
     if (sortBy) {
       const sortableFieldMap = {
+        address: "formData.address",
         fullAddress: "formData.fullAddress",
         unitType: "formData.unitType",
         monthlyRent: "formData.monthlyRent",
@@ -1522,10 +1542,331 @@ exports.getBuildingsByPortfolio = async (req, res) => {
         monthlyRent: b.formData?.monthlyRent || 0,
         buildingType: b.formData?.buildingType || "",
         isMultiUnit: b.isMultiUnit || false,
+        managementFee: b.formData?.managementFee ?? "",
+        assignedPropertyManager: b.formData?.assignedPropertyManager || null,
       })),
     });
   } catch (err) {
     return sendError(res, err);
+  }
+};
+
+// ── Portfolio landing cards ─────────────────────────────────────────────────
+// Open = primary status "open" AND not marked Completed by the vendor.
+const NOT_OPEN_DYNAMIC_STATUSES = ["Completed"];
+
+exports.getPortfolioStats = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return sendError(res, "Invalid portfolio id", 400);
+    }
+
+    const exists = await Portfolio.exists({ _id: id });
+    if (!exists) return sendError(res, "Portfolio not found", 404);
+
+    // This portfolio's buildings + the units inside them
+    const parentIds = await Building.find({ portfolio: id }).distinct("_id");
+    const buildingIds = parentIds.length
+      ? await Building.find({
+          $or: [
+            { _id: { $in: parentIds } },
+            { parentBuilding: { $in: parentIds } },
+          ],
+        }).distinct("_id")
+      : [];
+
+    let openWorkOrders = 0;
+    if (buildingIds.length) {
+      const notOpenStatusIds = await WODynamicStatus.find({
+        name: { $in: NOT_OPEN_DYNAMIC_STATUSES },
+      }).distinct("_id");
+
+      openWorkOrders = await WorkOrder.countDocuments({
+        building: { $in: buildingIds },
+        status: "open",
+        dynamicStatus: { $nin: notOpenStatusIds },
+      });
+    }
+
+    return sendSuccess(res, "Portfolio stats fetched", {
+      openWorkOrders,
+      // Not built yet: static 0 until those modules exist
+      tenantsOnEviction: 0,
+      vacancyProspects: 0,
+      tenancies: 0,
+      upcomingRentIncreases: 0,
+    });
+  } catch (err) {
+    return sendError(
+      res,
+      err.message || "Failed to fetch portfolio stats",
+      500,
+    );
+  }
+};
+
+// ── Portfolio Summary edit — rules ──────────────────────────────────────────
+const REPAIR_OPTIONS = [
+  "diy_landlord",
+  "preferred_vendor_list",
+  "renters_choice_vendors",
+];
+const PREFERRED_VENDOR_KEYS = [
+  "electricianName",
+  "plumberName",
+  "hvacName",
+  "applianceName",
+  "landscaperName",
+];
+const BUILDING_EDIT_STATUSES = ["vacant", "occupied", "deactivated"]; // = Building schema enum
+const MANAGEMENT_FEE_TYPE_VALUES = ["flat", "percent", "greater"];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_BUILDING_UPDATES = 500;
+
+const isBlank = (v) => v === undefined || v === null || v === "";
+const cleanStr = (v, max = 200) =>
+  typeof v === "string" ? v.trim().slice(0, max) : "";
+const cleanAmount = (v) => (isBlank(v) ? "" : String(v).trim());
+const isValidAmount = (v) => isBlank(v) || DECIMAL_2.test(String(v).trim());
+const isValidPercent = (v) =>
+  isBlank(v) || (DECIMAL_2.test(String(v).trim()) && Number(v) <= 100);
+
+function normalizeRepairs(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const errors = [];
+  const option = isBlank(src.option) ? null : src.option;
+
+  if (option !== null && !REPAIR_OPTIONS.includes(option)) {
+    errors.push("Invalid Repairs & Maintenance option");
+  }
+  if (!isValidAmount(src.spendingLimit)) {
+    errors.push('"Spending Limit" must be a valid amount');
+  }
+
+  // Vendor names only make sense for "Use Preferred Vendor List"
+  const isPreferred = option === "preferred_vendor_list";
+  const value = {
+    option,
+    spendingLimit: cleanAmount(src.spendingLimit),
+    spendingConsideration: cleanStr(src.spendingConsideration, 2000),
+  };
+  PREFERRED_VENDOR_KEYS.forEach((key) => {
+    value[key] = isPreferred ? cleanStr(src[key], 120) : "";
+  });
+
+  return { value, errors };
+}
+
+// Builds a $set for ONE building from whitelisted fields only
+function normalizeBuildingEdit(input) {
+  const errors = [];
+  const set = {};
+
+  if (input.status !== undefined) {
+    if (BUILDING_EDIT_STATUSES.includes(input.status))
+      set.status = input.status;
+    else errors.push("Invalid building occupancy status");
+  }
+
+  if (input.monthlyRent !== undefined) {
+    if (isValidAmount(input.monthlyRent))
+      set["formData.monthlyRent"] = cleanAmount(input.monthlyRent);
+    else errors.push('"Rent" must be a valid amount');
+  }
+
+  if (input.managementFee !== undefined) {
+    const fee =
+      input.managementFee && typeof input.managementFee === "object"
+        ? input.managementFee
+        : {};
+    const type = fee.type || "flat";
+    if (!MANAGEMENT_FEE_TYPE_VALUES.includes(type))
+      errors.push("Invalid management fee type");
+    if (!isValidAmount(fee.flatAmount))
+      errors.push('"Management Fee" amount must be a valid amount');
+    if (!isValidPercent(fee.percent))
+      errors.push('"Management Fee" % must be between 0 and 100');
+    set["formData.managementFee"] = {
+      type,
+      flatAmount: cleanAmount(fee.flatAmount),
+      percent: cleanAmount(fee.percent),
+    };
+  }
+
+  if (input.assignedPropertyManager !== undefined) {
+    set["formData.assignedPropertyManager"] = {
+      name: cleanStr(input.assignedPropertyManager?.name, 120),
+    };
+  }
+
+  return { set, errors };
+}
+
+exports.updatePortfolioSummary = async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) {
+    return sendError(res, "Invalid portfolio id", 400);
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    const body = req.body || {};
+
+    const portfolio = await Portfolio.findById(id);
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+    if (portfolio.status === "Deactivated") {
+      return sendError(res, "Reactivate the portfolio before editing it.", 400);
+    }
+
+    const errors = [];
+
+    // ── Portfolio fields (account number is never accepted) ──
+    const portfolioName = cleanStr(body.portfolioName, 150);
+    const portfolioAbbreviation = cleanStr(body.portfolioAbbreviation, 50);
+    if (!portfolioName) errors.push("Portfolio Name is required");
+    if (!portfolioAbbreviation)
+      errors.push("Portfolio Abbreviation is required");
+
+    const managementStartDate = cleanStr(body.managementStartDate, 10);
+    if (
+      managementStartDate &&
+      (!ISO_DATE.test(managementStartDate) ||
+        Number.isNaN(Date.parse(managementStartDate)))
+    ) {
+      errors.push("Management Start Date is invalid");
+    }
+
+    // Repairs & Maintenance is optional — only touched when the client sends it
+    const repairs =
+      body.repairsMaintenance !== undefined
+        ? normalizeRepairs(body.repairsMaintenance)
+        : null;
+    if (repairs) errors.push(...repairs.errors);
+
+    // ── Buildings (only the rows the user changed) ──
+    const buildingInputs = Array.isArray(body.buildings) ? body.buildings : [];
+    if (buildingInputs.length > MAX_BUILDING_UPDATES) {
+      errors.push("Too many building updates in one request");
+    }
+
+    const buildingOps = [];
+    buildingInputs.forEach((b) => {
+      if (!b || !mongoose.isValidObjectId(b.id)) {
+        errors.push("Invalid building id");
+        return;
+      }
+      const { set, errors: rowErrors } = normalizeBuildingEdit(b);
+      errors.push(...rowErrors);
+      if (Object.keys(set).length > 0) {
+        buildingOps.push({
+          updateOne: {
+            // Scoped to THIS portfolio's top-level buildings only
+            filter: {
+              _id: b.id,
+              portfolio: portfolio._id,
+              parentBuilding: null,
+            },
+            update: { $set: set },
+          },
+        });
+      }
+    });
+
+    if (errors.length) {
+      return sendError(res, [...new Set(errors)].join(", "), 400);
+    }
+
+    // Every building must belong to this portfolio
+    if (buildingOps.length) {
+      const ids = [
+        ...new Set(buildingOps.map((op) => String(op.updateOne.filter._id))),
+      ];
+      const owned = await Building.countDocuments({
+        _id: { $in: ids },
+        portfolio: portfolio._id,
+        parentBuilding: null,
+      });
+      if (owned !== ids.length) {
+        return sendError(
+          res,
+          "One or more buildings do not belong to this portfolio",
+          400,
+        );
+      }
+    }
+
+    // ── Audit trail ──
+    const prevForm = portfolio.formData || {};
+    const changes = [];
+    const track = (field, oldValue, newValue) => {
+      if (JSON.stringify(oldValue ?? "") !== JSON.stringify(newValue ?? "")) {
+        changes.push({ field, oldValue, newValue });
+      }
+    };
+    track("portfolioName", portfolio.portfolioName, portfolioName);
+    track(
+      "portfolioAbbreviation",
+      portfolio.portfolioAbbreviation,
+      portfolioAbbreviation,
+    );
+    track(
+      "managementStartDate",
+      prevForm.managementStartDate,
+      managementStartDate,
+    );
+    if (repairs) {
+      track("repairsMaintenance", prevForm.repairsMaintenance, repairs.value);
+    }
+
+    // ── Apply ──
+    portfolio.portfolioName = portfolioName;
+    portfolio.portfolioAbbreviation = portfolioAbbreviation;
+    portfolio.formData = {
+      ...prevForm,
+      // createPortfolio stores these inside formData too — keep them in sync
+      portfolioName,
+      portfolioAbbreviation,
+      managementStartDate,
+      ...(repairs && { repairsMaintenance: repairs.value }),
+    };
+    portfolio.markModified("formData");
+
+    await session.withTransaction(async () => {
+      await portfolio.save({ session });
+      if (buildingOps.length) {
+        await Building.bulkWrite(buildingOps, { session, ordered: true });
+      }
+    });
+
+    // Audit must never turn a committed save into an error response
+    if (changes.length || buildingOps.length) {
+      try {
+        await AuditService.logActivity({
+          entityType: "portfolio",
+          entityId: portfolio._id,
+          action: "updated",
+          actionDetails: `Portfolio ${portfolioAbbreviation} updated${
+            buildingOps.length ? ` (${buildingOps.length} building(s))` : ""
+          }`,
+          changes,
+          performedBy: req.user._id,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+        });
+      } catch (auditErr) {
+        console.error("Portfolio summary audit log failed:", auditErr);
+      }
+    }
+
+    return sendSuccess(res, "Portfolio updated successfully", {
+      portfolioId: portfolio._id,
+      updatedBuildings: buildingOps.length,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to update portfolio", 500);
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -1534,15 +1875,39 @@ exports.getBuildingsByPortfolio = async (req, res) => {
 exports.addOwnersToPortfolio = async (req, res) => {
   try {
     const { portfolioId } = req.params;
-    const { ownerIds } = req.body; // array of userIds
-
-    if (!Array.isArray(ownerIds) || ownerIds.length === 0) {
-      return sendError(res, "Owner IDs are required", 400);
+    if (!mongoose.isValidObjectId(portfolioId)) {
+      return sendError(res, "Invalid portfolio id", 400);
     }
 
-    // Ensure all users exist & have role = Owner
-    const owners = await User.find({ _id: { $in: ownerIds }, role: "Owner" });
-    if (owners.length !== ownerIds.length) {
+    const rawIds = Array.isArray(req.body?.ownerIds) ? req.body.ownerIds : [];
+    const ownerIds = [...new Set(rawIds.map(String))];
+    if (ownerIds.length === 0) {
+      return sendError(res, "Owner IDs are required", 400);
+    }
+    if (ownerIds.length > 50) {
+      return sendError(res, "Too many owners in one request", 400);
+    }
+    if (ownerIds.some((oid) => !mongoose.isValidObjectId(oid))) {
+      return sendError(res, "One or more owner ids are invalid", 400);
+    }
+
+    const portfolio = await Portfolio.findById(portfolioId).select(
+      "status portfolioAbbreviation owners",
+    );
+    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+    if (portfolio.status === "Deactivated") {
+      return sendError(
+        res,
+        "Reactivate the portfolio before adding owners.",
+        400,
+      );
+    }
+
+    const validCount = await User.countDocuments({
+      _id: { $in: ownerIds },
+      role: "Owner",
+    });
+    if (validCount !== ownerIds.length) {
       return sendError(
         res,
         "One or more owners not found or invalid role",
@@ -1550,15 +1915,39 @@ exports.addOwnersToPortfolio = async (req, res) => {
       );
     }
 
-    const portfolio = await Portfolio.findByIdAndUpdate(
+    const alreadyAttached = new Set(portfolio.owners.map(String));
+    const newIds = ownerIds.filter((oid) => !alreadyAttached.has(oid));
+
+    const updated = await Portfolio.findByIdAndUpdate(
       portfolioId,
-      { $addToSet: { owners: { $each: ownerIds } } },
+      { $addToSet: { owners: { $each: newIds } } },
       { new: true },
-    ).populate("owners", "preferredName email");
+    ).populate("owners", "preferredName firstName lastName email phoneNumber");
 
-    if (!portfolio) return sendError(res, "Portfolio not found", 404);
+    if (newIds.length) {
+      try {
+        await AuditService.logActivity({
+          entityType: "portfolio",
+          entityId: portfolio._id,
+          action: "updated",
+          actionDetails: `${newIds.length} owner(s) attached to portfolio ${portfolio.portfolioAbbreviation}`,
+          changes: [{ field: "owners", oldValue: null, newValue: newIds }],
+          performedBy: req.user._id,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+        });
+      } catch (auditErr) {
+        console.error("Add owners audit log failed:", auditErr);
+      }
+    }
 
-    return sendSuccess(res, "Owners added to portfolio", { portfolio });
+    return sendSuccess(
+      res,
+      newIds.length
+        ? "Owners added to portfolio"
+        : "Selected owners are already attached",
+      { portfolio: updated, addedCount: newIds.length },
+    );
   } catch (err) {
     return sendError(res, err.message || "Failed to add owners", 500);
   }
