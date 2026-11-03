@@ -7,7 +7,7 @@ const {
   createUnusablePassword,
 } = require("../../utils/inviteToken");
 const { sendTeamAdminInviteEmail } = require("../../services/emailService");
-const { TEAM_ROLES } = require("../../constants/roles");
+const { TEAM_ROLES, BROKERAGE_STAFF_ROLES } = require("../../constants/roles");
 const { generateTeamUniqueId } = require("../../utils/generateTeamUniqueId");
 const { validateBankDetails } = require("../../utils/bankDetails");
 
@@ -108,24 +108,13 @@ async function resolveCreateScope(user, body) {
   return { error: "Not allowed to create teams", status: 403 };
 }
 
-function validateCreatePayload(body) {
+// ── Business + subscription fields (shared by create and edit) ────────────
+// Only these fields are read from the client. Anything else in the body
+// (uniqueIdNumber, status, admin, createdBy, …) is ignored.
+function parseBusinessInfo(body, teamType) {
   const errors = [];
-  const teamType = str(body.teamType, 20).toLowerCase();
-
-  if (NOT_READY_TEAM_TYPES.includes(teamType)) {
-    errors.push("Subscribe teams are not available yet");
-    return { errors };
-  }
-  if (!TEAM_TYPE_CONFIG[teamType]) {
-    errors.push("Team Type must be Franchise or Expansion");
-    return { errors };
-  }
-
   const data = {
-    teamType,
-    parentBrokerage: teamType === "expansion" ? body.parentBrokerage : null,
     businessLegalName: str(body.businessLegalName, 150),
-
     companyPhone: str(body.companyPhone, 20),
     alternatePhone: str(body.alternatePhone, 20),
     companyAddress: str(body.companyAddress, 250),
@@ -144,18 +133,7 @@ function validateCreatePayload(body) {
       : { value: null };
   data.yearEndAudit = yearEndAudit.value;
 
-  const admin = {
-    name: str(body.admin?.name, 120),
-    email: str(body.admin?.email, 254).toLowerCase(),
-    signatureLine: str(body.admin?.signatureLine, 500),
-  };
-
   if (!data.businessLegalName) errors.push("Business Legal Name is required");
-  if (
-    teamType === "expansion" &&
-    !mongoose.isValidObjectId(data.parentBrokerage)
-  )
-    errors.push("Please select the brokerage this team belongs to");
   if (!data.companyPhone) errors.push("Company Phone Number is required");
   else if (!PHONE.test(data.companyPhone))
     errors.push("Company Phone Number is invalid");
@@ -168,6 +146,38 @@ function validateCreatePayload(body) {
   if (data.anniversaryDate && !isValidIsoDate(data.anniversaryDate))
     errors.push("Anniversary Date is invalid");
   if (yearEndAudit.error) errors.push(yearEndAudit.error);
+
+  return { errors, data };
+}
+
+function validateCreatePayload(body) {
+  const teamType = str(body.teamType, 20).toLowerCase();
+
+  if (NOT_READY_TEAM_TYPES.includes(teamType)) {
+    return { errors: ["Subscribe teams are not available yet"] };
+  }
+  if (!TEAM_TYPE_CONFIG[teamType]) {
+    return { errors: ["Team Type must be Franchise or Expansion"] };
+  }
+
+  const { errors, data: info } = parseBusinessInfo(body, teamType);
+  const data = {
+    teamType,
+    parentBrokerage: teamType === "expansion" ? body.parentBrokerage : null,
+    ...info,
+  };
+
+  const admin = {
+    name: str(body.admin?.name, 120),
+    email: str(body.admin?.email, 254).toLowerCase(),
+    signatureLine: str(body.admin?.signatureLine, 500),
+  };
+
+  if (
+    teamType === "expansion" &&
+    !mongoose.isValidObjectId(data.parentBrokerage)
+  )
+    errors.push("Please select the brokerage this team belongs to");
 
   if (!admin.name) errors.push("Admin User Name is required");
   if (!EMAIL.test(admin.email)) errors.push("Admin email address is invalid");
@@ -373,6 +383,23 @@ const OFFICE_MEMBER_ROLES = [
   ...new Set([...TEAM_ROLES, "InternalTeam", "InspectionClerk"]),
 ];
 
+// Brokerage-level staff (BrokerageAccounts / BrokerageUser) — they belong to
+// the brokerage itself, not to one of its teams. Matched by `team`, with a
+// fallback for older accounts that only have createdBy = the Brokerage Admin.
+function loadBrokerageStaff(brokerage) {
+  const scopes = [{ team: brokerage._id }];
+  if (brokerage.admin?._id) {
+    scopes.push({
+      createdBy: brokerage.admin._id,
+      $or: [{ team: null }, { team: { $exists: false } }],
+    });
+  }
+  return User.find({ role: { $in: BROKERAGE_STAFF_ROLES }, $or: scopes })
+    .select("preferredName email role isActive createdAt")
+    .sort({ preferredName: 1 })
+    .lean();
+}
+
 async function loadBrokerageStructure(brokerageId) {
   const brokerage = await Team.findOne({
     _id: brokerageId,
@@ -383,14 +410,17 @@ async function loadBrokerageStructure(brokerageId) {
     .lean();
   if (!brokerage) return null;
 
-  const expansions = await Team.find({
-    teamType: "expansion",
-    parentBrokerage: brokerage._id,
-  })
-    .select("businessLegalName companyCity status admin createdAt")
-    .populate("admin", "preferredName email isActive role")
-    .sort({ businessLegalName: 1 })
-    .lean();
+  const [expansions, staff] = await Promise.all([
+    Team.find({
+      teamType: "expansion",
+      parentBrokerage: brokerage._id,
+    })
+      .select("businessLegalName companyCity status admin createdAt")
+      .populate("admin", "preferredName email isActive role")
+      .sort({ businessLegalName: 1 })
+      .lean(),
+    loadBrokerageStaff(brokerage),
+  ]);
 
   const teamIds = expansions.map((t) => t._id);
   const adminIds = expansions.map((t) => t.admin?._id).filter(Boolean);
@@ -424,6 +454,7 @@ async function loadBrokerageStructure(brokerageId) {
 
   return {
     brokerage,
+    staff,
     expansions: expansions.map((t) => ({
       ...t,
       members: membersByTeam.get(String(t._id)) || [],
@@ -458,5 +489,244 @@ exports.getMyBrokerageStructure = async (req, res) => {
   } catch (err) {
     console.error("getMyBrokerageStructure failed:", err);
     return sendError(res, "Failed to load your teams", 500);
+  }
+};
+
+// ── Edit Brokerage / Team ─────────────────────────────────────────────────
+// Master Admin   → any brokerage or team.
+// BrokerageAdmin → only the teams under their own (active) brokerage.
+// Locked after create: teamType, parentBrokerage, uniqueIdNumber and the
+// admin user (changing those affects roles/hierarchy — separate flows).
+const EDIT_NOT_FOUND = "Brokerage or team not found";
+
+// Explicit banking sub-paths: the encrypted account number is never read here
+const EDIT_SELECT = [
+  "teamType",
+  "parentBrokerage",
+  "businessLegalName",
+  "uniqueIdNumber",
+  "companyPhone",
+  "alternatePhone",
+  "companyAddress",
+  "companyCity",
+  "postalCode",
+  "gstDetails",
+  "timeZone",
+  "packageType",
+  "anniversaryDate",
+  "yearEndAudit",
+  "banking.bankId",
+  "banking.bankName",
+  "banking.institutionNumber",
+  "banking.transit",
+  "banking.accountNumberLast4",
+  "banking.billingFirstName",
+  "banking.billingLastName",
+  "banking.billingAddress",
+  "banking.billingEmail",
+  "admin",
+  "status",
+  "updatedAt",
+].join(" ");
+
+// Returns the Mongo filter this user may edit, or null.
+// Out-of-scope ids get the same 404 as missing ones (no information leak).
+async function editScopeFilter(user, id) {
+  if (!mongoose.isValidObjectId(id)) return null;
+  if (user.role === "Admin") return { _id: id };
+
+  if (user.role === "BrokerageAdmin") {
+    const brokerage = await findActiveBrokerageOf(user);
+    if (!brokerage) return null;
+    return { _id: id, teamType: "expansion", parentBrokerage: brokerage._id };
+  }
+  return null;
+}
+
+const isoDay = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+
+// Whitelisted shape sent to the edit form — never spread the raw document
+function toEditDTO(team) {
+  const b = team.banking;
+  const parent = team.parentBrokerage;
+  const admin = team.admin;
+  return {
+    _id: team._id,
+    teamType: team.teamType,
+    label: TEAM_TYPE_CONFIG[team.teamType]?.label || "Team",
+    parentBrokerage: parent?._id
+      ? { _id: parent._id, businessLegalName: parent.businessLegalName }
+      : null,
+    businessLegalName: team.businessLegalName || "",
+    uniqueIdNumber: team.uniqueIdNumber || "",
+    companyPhone: team.companyPhone || "",
+    alternatePhone: team.alternatePhone || "",
+    companyAddress: team.companyAddress || "",
+    companyCity: team.companyCity || "",
+    postalCode: team.postalCode || "",
+    gstDetails: team.gstDetails || "",
+    timeZone: team.timeZone || "MST",
+    packageType: team.packageType || "",
+    anniversaryDate: isoDay(team.anniversaryDate),
+    yearEndAudit: team.yearEndAudit
+      ? { month: team.yearEndAudit.month, day: team.yearEndAudit.day }
+      : null,
+    banking: b?.bankId
+      ? {
+          bankId: b.bankId,
+          bankName: b.bankName || "",
+          institutionNumber: b.institutionNumber || "",
+          transit: b.transit || "",
+          accountNumberLast4: b.accountNumberLast4 || "",
+          billingFirstName: b.billingFirstName || "",
+          billingLastName: b.billingLastName || "",
+          billingAddress: b.billingAddress || "",
+          billingEmail: b.billingEmail || "",
+        }
+      : null,
+    admin: admin?._id
+      ? {
+          _id: admin._id,
+          preferredName: admin.preferredName || "",
+          email: admin.email || "",
+          emailSignature: admin.emailSignature || "",
+          inviteAccepted: Boolean(admin.inviteAcceptedAt),
+        }
+      : null,
+    status: team.status,
+    updatedAt: team.updatedAt,
+  };
+}
+
+async function loadTeamForEdit(filter) {
+  const team = await Team.findOne(filter)
+    .select(EDIT_SELECT)
+    .populate("parentBrokerage", "businessLegalName")
+    .populate("admin", "preferredName email emailSignature inviteAcceptedAt")
+    .lean();
+  return team ? toEditDTO(team) : null;
+}
+
+// Banking on edit:
+//   null                         → every bank field was cleared → remove banking
+//   new account number entered   → full validation, replace (same as create)
+//   bank changed, no account     → error (account rules depend on the bank)
+//   same bank, no account number → keep the stored encrypted account,
+//                                  update transit + billing only
+async function resolveBankingUpdate(input, team) {
+  if (input == null) return { mode: "clear", errors: [] };
+
+  const stored = team.banking;
+  const sameBank =
+    stored?.bankId && String(stored.bankId) === String(input.bankId || "");
+  const newAccount = str(input.accountNumber, 30);
+
+  if (newAccount || !sameBank) {
+    const result = await validateBankDetails(input, { optional: true });
+    return { mode: "replace", errors: result.errors, value: result.value };
+  }
+
+  const errors = [];
+  const value = {
+    transit: str(input.transit, 5),
+    billingFirstName: str(input.billingFirstName, 80),
+    billingLastName: str(input.billingLastName, 80),
+    billingAddress: str(input.billingAddress, 250),
+    billingEmail: str(input.billingEmail, 254).toLowerCase(),
+  };
+  if (!/^\d{5}$/.test(value.transit))
+    errors.push("Transit number must be exactly 5 digits");
+  if (!value.billingFirstName) errors.push("Billing first name is required");
+  if (!value.billingLastName) errors.push("Billing last name is required");
+  if (value.billingEmail && !EMAIL.test(value.billingEmail))
+    errors.push("Billing email is invalid");
+  return { mode: "keep-account", errors, value };
+}
+
+function applyBankingUpdate(team, banking, userId) {
+  if (banking.mode === "clear") {
+    if (team.banking) team.banking = null;
+    return;
+  }
+  if (banking.mode === "replace") {
+    team.banking = {
+      ...banking.value,
+      updatedAt: new Date(),
+      updatedBy: userId,
+    };
+    return;
+  }
+  // keep-account: set only these paths, so the encrypted account is untouched
+  Object.entries(banking.value).forEach(([key, val]) =>
+    team.set(`banking.${key}`, val),
+  );
+  if (team.isModified("banking")) {
+    team.set("banking.updatedAt", new Date());
+    team.set("banking.updatedBy", userId);
+  }
+}
+
+// GET /api/teams/:id  (Master Admin, Brokerage Admin) — prefill the edit form
+exports.getTeamForEdit = async (req, res) => {
+  try {
+    const filter = await editScopeFilter(req.user, req.params.id);
+    const team = filter && (await loadTeamForEdit(filter));
+    if (!team) return sendError(res, EDIT_NOT_FOUND, 404);
+    return sendSuccess(res, `${team.label} details fetched`, { team });
+  } catch (err) {
+    console.error("getTeamForEdit failed:", err);
+    return sendError(res, "Failed to load details", 500);
+  }
+};
+
+// PATCH /api/teams/:id  (Master Admin, Brokerage Admin)
+exports.updateTeam = async (req, res) => {
+  try {
+    const filter = await editScopeFilter(req.user, req.params.id);
+    const team = filter && (await Team.findOne(filter));
+    if (!team) return sendError(res, EDIT_NOT_FOUND, 404);
+
+    const label = TEAM_TYPE_CONFIG[team.teamType]?.label || "Team";
+    const body = req.body || {};
+
+    // Optimistic concurrency: don't overwrite a newer save by someone else
+    if (
+      body.updatedAt &&
+      team.updatedAt &&
+      new Date(body.updatedAt).getTime() !== team.updatedAt.getTime()
+    ) {
+      return sendError(
+        res,
+        `This ${label.toLowerCase()} was changed by someone else. Reload the page to see the latest details.`,
+        409,
+      );
+    }
+
+    // teamType never comes from the client on edit
+    const { errors, data } = parseBusinessInfo(body, team.teamType);
+    const banking = await resolveBankingUpdate(body.banking, team);
+    errors.push(...banking.errors);
+    if (errors.length) return sendError(res, errors.join(", "), 400);
+
+    team.set({ ...data, anniversaryDate: data.anniversaryDate || null });
+    applyBankingUpdate(team, banking, req.user._id);
+
+    const changed = team.isModified();
+    if (changed) await team.save();
+    // Audit: call the same audit-log helper used in utils/lpm.js here
+    // (action "TEAM_UPDATED", entity team._id, performer req.user._id).
+
+    const updated = await loadTeamForEdit({ _id: team._id });
+    return sendSuccess(
+      res,
+      changed ? `${label} updated` : "No changes to save",
+      { team: updated },
+    );
+  } catch (err) {
+    if (err?.name === "ValidationError") {
+      return sendError(res, err.message, 400);
+    }
+    console.error("updateTeam failed:", err);
+    return sendError(res, "Failed to update details", 500);
   }
 };

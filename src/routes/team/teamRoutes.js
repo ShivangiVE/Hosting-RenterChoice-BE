@@ -8,6 +8,8 @@ const {
   resendTeamAdminInvite,
   getBrokerageStructure,
   getMyBrokerageStructure,
+  getTeamForEdit,
+  updateTeam,
 } = require("../../controllers/team/teamController");
 
 router.use(protect);
@@ -38,5 +40,9 @@ router.post(
   authorize("Admin", "BrokerageAdmin"),
   resendTeamAdminInvite,
 );
+
+
+router.get("/:id", authorize("Admin", "BrokerageAdmin"), getTeamForEdit);
+router.patch("/:id", authorize("Admin", "BrokerageAdmin"), updateTeam);
 
 module.exports = router;
