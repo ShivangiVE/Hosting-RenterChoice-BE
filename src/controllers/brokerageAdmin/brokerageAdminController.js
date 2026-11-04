@@ -10,6 +10,23 @@ const {
 
 const CREATABLE_BROKERAGE_STAFF_ROLES = BROKERAGE_STAFF_ROLES;
 
+// ── Brokerage staff scope (BrokerageAccounts / BrokerageUser) ──────────────
+// Staff belong to the brokerage (user.team), so they stay manageable even if
+// the Brokerage Admin changes. createdBy is the fallback for older accounts.
+const brokerageStaffFilter = (brokerageAdmin) => ({
+  role: { $in: CREATABLE_BROKERAGE_STAFF_ROLES },
+  $or: [
+    ...(brokerageAdmin.team ? [{ team: brokerageAdmin.team }] : []),
+    { createdBy: brokerageAdmin._id },
+  ],
+});
+
+const isMyBrokerageStaff = (target, brokerageAdmin) =>
+  CREATABLE_BROKERAGE_STAFF_ROLES.includes(target.role) &&
+  ((brokerageAdmin.team &&
+    String(target.team || "") === String(brokerageAdmin.team)) ||
+    String(target.createdBy || "") === String(brokerageAdmin._id));
+
 const myOfficeAdminsFilter = (brokerageAdminId) => ({
   role: "OfficeAdmin",
   $or: [{ createdBy: brokerageAdminId }, { managedBy: brokerageAdminId }],
@@ -64,6 +81,12 @@ exports.createBrokerageStaff = async (req, res) => {
     });
     if (error) return sendError(res, error, status);
 
+    // Link the staff member to the brokerage itself. If this ever fails, the
+    // createdBy fallback in brokerageStaffFilter still finds them.
+    if (req.user.team) {
+      await User.updateOne({ _id: user._id }, { $set: { team: req.user.team } });
+    }
+
     return sendSuccess(
       res,
       `${role} created successfully`,
@@ -101,10 +124,10 @@ exports.getMyOfficeAdmins = async (req, res) => {
 // BrokerageAdmin lists their own BrokerageAccounts / BrokerageUser staff
 exports.getMyBrokerageStaff = async (req, res) => {
   try {
-    const staff = await User.find({
-      role: { $in: CREATABLE_BROKERAGE_STAFF_ROLES },
-      createdBy: req.user._id,
-    }).select("preferredName email role isActive createdAt");
+    const staff = await User.find(brokerageStaffFilter(req.user))
+      .select("preferredName email role isActive createdAt")
+      .sort({ preferredName: 1 })
+      .lean();
 
     return sendSuccess(res, "Brokerage staff retrieved", { staff });
   } catch (err) {
@@ -129,7 +152,7 @@ exports.getOfficeAdminTeam = async (req, res) => {
     const teamMembers = await User.find({
       createdBy: officeAdminId,
       role: { $in: TEAM_ROLES },
-    }).select("preferredName email role isActive createdAt");
+    }).select("preferredName email role isActive isLPM createdAt");
 
     return sendSuccess(res, "Team members retrieved", { teamMembers });
   } catch (err) {
@@ -150,7 +173,7 @@ exports.getMyTeamsGrouped = async (req, res) => {
         const team = await User.find({
           createdBy: admin._id,
           role: { $in: TEAM_ROLES },
-        }).select("preferredName email role isActive");
+        }).select("preferredName email role isActive isLPM");
 
         return {
           officeAdmin: {
@@ -214,6 +237,10 @@ exports.toggleUserStatus = (req, res) =>
           targetUser.managedBy?.toString() === me
         );
 
+      // Can toggle their own brokerage staff (Accounts / User)
+      if (CREATABLE_BROKERAGE_STAFF_ROLES.includes(targetUser.role))
+        return isMyBrokerageStaff(targetUser, performer);
+
       // Can toggle team members under their OfficeAdmins
       if (TEAM_ROLES.includes(targetUser.role)) {
         const officeAdmin = await User.findOne({
@@ -231,8 +258,7 @@ exports.toggleUserStatus = (req, res) =>
 exports.toggleBrokerageStaffStatus = (req, res) =>
   toggleUserStatus(req, res, {
     scopeCheck: async (targetUser, performer) =>
-      CREATABLE_BROKERAGE_STAFF_ROLES.includes(targetUser.role) &&
-      targetUser.createdBy?.toString() === performer._id.toString(),
+      isMyBrokerageStaff(targetUser, performer),
   });
 
 // BrokerageAdmin deletes an OfficeAdmin they own
@@ -258,8 +284,7 @@ exports.deleteBrokerageStaff = async (req, res) => {
   try {
     const target = await User.findOne({
       _id: req.params.id,
-      role: { $in: CREATABLE_BROKERAGE_STAFF_ROLES },
-      createdBy: req.user._id,
+      ...brokerageStaffFilter(req.user),
     });
 
     if (!target) return sendError(res, "Brokerage staff not found", 404);

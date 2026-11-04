@@ -13,6 +13,7 @@ const {
 } = require("../../utils/createUserAccount");
 const SupportContact = require("../../models/SupportContact");
 const supportContactService = require("../../services/supportContactService");
+const { resolveLpmFlag, setLpmStatus } = require("../../utils/lpm");
 
 const INTERNAL_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
 const IMPERSONATABLE_ROLES = ["OfficeAdmin", "BrokerageAdmin"];
@@ -74,7 +75,7 @@ exports.createOfficeAdmin = async (req, res) => {
   }
 };
 
-// Admin creates Internal Users too
+// Admin creates Internal Users too (LPM Yes/No, default No)
 exports.createInternalUser = async (req, res) => {
   try {
     const { role } = req.body;
@@ -82,13 +83,20 @@ exports.createInternalUser = async (req, res) => {
       return sendError(res, "Invalid internal role", 400);
     }
 
+    const lpm = resolveLpmFlag(req.body.isLPM, role);
+    if (lpm.error) return sendError(res, lpm.error, 400);
+
     const { user, error, status } = await createUserAccount(req.body, { role });
     if (error) return sendError(res, error, status);
+
+    if (lpm.value === true) {
+      await setLpmStatus({ user, isLPM: true, performer: req.user, req });
+    }
 
     return sendSuccess(
       res,
       "Internal user created successfully",
-      toCreatedUser(user),
+      { ...toCreatedUser(user), isLPM: lpm.value === true },
       201,
     );
   } catch (err) {
