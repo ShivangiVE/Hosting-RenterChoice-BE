@@ -19,13 +19,24 @@ const TEAM_TYPE_CONFIG = {
 };
 const NOT_READY_TEAM_TYPES = ["subscribe"];
 
-// Form time-zone codes → IANA zone stored on the admin user
-// (client is Canada-based: Calgary/Lethbridge = Mountain time)
+// Form time-zone codes → IANA zone stored on the admin user.
+// BC, Alberta and Manitoba are on permanent daylight time since Nov 1, 2026;
+// the IANA zones stay the same (the tz database carries the new rules).
 const TIME_ZONE_TO_IANA = {
-  PDT: "America/Vancouver",
-  MST: "America/Edmonton",
-  CST: "America/Winnipeg",
-  EDT: "America/Toronto",
+  PCT: "America/Vancouver", // British Columbia
+  ABT: "America/Edmonton", // Alberta
+  MBT: "America/Winnipeg", // Manitoba
+  ET: "America/Toronto", // Ontario – Eastern (EST/EDT)
+  CT: "America/Winnipeg", // Ontario – Northwestern (tz data follows Manitoba)
+};
+const DEFAULT_TIME_ZONE = "ABT";
+
+// Old codes still in some records → new codes
+const LEGACY_TIME_ZONE_MAP = { PDT: "PCT", MST: "ABT", CST: "MBT", EDT: "ET" };
+
+const normalizeTimeZone = (code) => {
+  const upper = String(code || "").toUpperCase();
+  return LEGACY_TIME_ZONE_MAP[upper] || upper;
 };
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -108,20 +119,42 @@ async function resolveCreateScope(user, body) {
   return { error: "Not allowed to create teams", status: 403 };
 }
 
-// ── Business + subscription fields (shared by create and edit) ────────────
+// Directors: accepts an array or a comma-separated string → clean, unique list
+const MAX_DIRECTORS = 20;
+function parseDirectors(input) {
+  const raw = Array.isArray(input)
+    ? input
+    : typeof input === "string"
+      ? input.split(",")
+      : [];
+  const seen = new Set();
+  return raw
+    .map((name) => str(name, 120))
+    .filter((name) => {
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_DIRECTORS);
+}
+
+// ── Business + subscription fields
 // Only these fields are read from the client. Anything else in the body
 // (uniqueIdNumber, status, admin, createdBy, …) is ignored.
 function parseBusinessInfo(body, teamType) {
   const errors = [];
   const data = {
     businessLegalName: str(body.businessLegalName, 150),
+    registeredTradeName: str(body.registeredTradeName, 150),
+    registeredDirectors: parseDirectors(body.registeredDirectors),
     companyPhone: str(body.companyPhone, 20),
     alternatePhone: str(body.alternatePhone, 20),
     companyAddress: str(body.companyAddress, 250),
     companyCity: str(body.companyCity, 120),
     postalCode: str(body.postalCode, 10),
     gstDetails: str(body.gstDetails, 50),
-    timeZone: str(body.timeZone, 5).toUpperCase() || "MST",
+    timeZone: normalizeTimeZone(str(body.timeZone, 5)) || DEFAULT_TIME_ZONE,
     packageType: str(body.packageType, 50),
     anniversaryDate: str(body.anniversaryDate, 10),
   };
@@ -134,6 +167,10 @@ function parseBusinessInfo(body, teamType) {
   data.yearEndAudit = yearEndAudit.value;
 
   if (!data.businessLegalName) errors.push("Business Legal Name is required");
+  if (!data.registeredTradeName)
+    errors.push("Registered Trade Name is required");
+  if (!data.registeredDirectors.length)
+    errors.push("At least one Registered Director is required");
   if (!data.companyPhone) errors.push("Company Phone Number is required");
   else if (!PHONE.test(data.companyPhone))
     errors.push("Company Phone Number is invalid");
@@ -226,7 +263,7 @@ exports.createTeam = async (req, res) => {
           ? { ...banking.value, updatedAt: new Date(), updatedBy: req.user._id }
           : null,
         anniversaryDate: data.anniversaryDate || null,
-       
+
         createdBy: req.user._id,
       });
       user = new User({
@@ -435,7 +472,7 @@ async function loadBrokerageStructure(brokerageId) {
       },
     ],
   })
-  .select("preferredName email role isActive isLPM createdBy")
+    .select("preferredName email role isActive isLPM createdBy")
     .sort({ preferredName: 1 })
     .lean();
 
@@ -505,6 +542,8 @@ const EDIT_SELECT = [
   "parentBrokerage",
   "businessLegalName",
   "uniqueIdNumber",
+  "registeredTradeName",
+  "registeredDirectors",
   "companyPhone",
   "alternatePhone",
   "companyAddress",
@@ -559,13 +598,15 @@ function toEditDTO(team) {
       : null,
     businessLegalName: team.businessLegalName || "",
     uniqueIdNumber: team.uniqueIdNumber || "",
+    registeredTradeName: team.registeredTradeName || "",
+    registeredDirectors: team.registeredDirectors || [],
     companyPhone: team.companyPhone || "",
     alternatePhone: team.alternatePhone || "",
     companyAddress: team.companyAddress || "",
     companyCity: team.companyCity || "",
     postalCode: team.postalCode || "",
     gstDetails: team.gstDetails || "",
-    timeZone: team.timeZone || "MST",
+    timeZone: normalizeTimeZone(team.timeZone) || DEFAULT_TIME_ZONE,
     packageType: team.packageType || "",
     anniversaryDate: isoDay(team.anniversaryDate),
     yearEndAudit: team.yearEndAudit
