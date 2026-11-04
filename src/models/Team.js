@@ -29,7 +29,8 @@ const bankingSchema = new mongoose.Schema(
   },
   { _id: false },
 );
-const TIME_ZONES = ["PDT", "MST", "CST", "EDT"];
+const TIME_ZONES = ["PCT", "ABT", "MBT", "ET", "CT"];
+const LEGACY_TIME_ZONES = ["PDT", "MST", "CST", "EDT"];
 
 const teamSchema = new mongoose.Schema(
   {
@@ -54,13 +55,19 @@ const teamSchema = new mongoose.Schema(
       uppercase: true,
       immutable: true,
     },
+    registeredTradeName: { type: String, trim: true, default: "" },
+    registeredDirectors: { type: [{ type: String, trim: true }], default: [] },
     companyPhone: { type: String, trim: true },
     alternatePhone: { type: String, trim: true },
     companyAddress: { type: String, trim: true },
     companyCity: { type: String, trim: true },
     postalCode: { type: String, trim: true, uppercase: true },
     gstDetails: { type: String, trim: true },
-    timeZone: { type: String, enum: TIME_ZONES, default: "MST" },
+    timeZone: {
+      type: String,
+      enum: [...TIME_ZONES, ...LEGACY_TIME_ZONES],
+      default: "ABT",
+    },
 
     // ── Team info ── (package values are still TBD by the client → optional)
     packageType: { type: String, trim: true, default: "" },
