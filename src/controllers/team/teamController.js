@@ -167,10 +167,7 @@ function parseBusinessInfo(body, teamType) {
   data.yearEndAudit = yearEndAudit.value;
 
   if (!data.businessLegalName) errors.push("Business Legal Name is required");
-  if (!data.registeredTradeName)
-    errors.push("Registered Trade Name is required");
-  if (!data.registeredDirectors.length)
-    errors.push("At least one Registered Director is required");
+  // Registered Trade Name and Registered Directors are optional
   if (!data.companyPhone) errors.push("Company Phone Number is required");
   else if (!PHONE.test(data.companyPhone))
     errors.push("Company Phone Number is invalid");
