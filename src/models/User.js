@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const { TEAM_ROLES } = require("../constants/roles");
 
 const userSchema = new mongoose.Schema(
   {
@@ -127,6 +128,14 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
+    isLPM: { type: Boolean, default: false },
+    lpmUpdatedAt: { type: Date, default: null },
+    lpmUpdatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
     // One-time "set your password" invite (only a SHA-256 hash is stored)
     inviteTokenHash: { type: String, index: true, select: false },
     inviteExpires: { type: Date, select: false },
@@ -146,6 +155,12 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Only internal team members can be LPMs (enforced on every save)
+userSchema.pre("validate", function (next) {
+  if (this.isLPM && !TEAM_ROLES.includes(this.role)) this.isLPM = false;
+  next();
+});
+
 // Hash password before save
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
@@ -160,5 +175,11 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 };
 
 userSchema.index({ createdBy: 1, role: 1, createdAt: -1 });
+
+// Fast "LPMs in this team" lookups (index only holds LPM users)
+userSchema.index(
+  { createdBy: 1, isLPM: 1 },
+  { partialFilterExpression: { isLPM: true } },
+);
 
 module.exports = mongoose.model("User", userSchema);
