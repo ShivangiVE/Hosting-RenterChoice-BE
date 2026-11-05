@@ -1,14 +1,17 @@
 const EXTERNAL_PROFILE_ROLES = ["Owner", "Tenant", "Vendor", "InspectionClerk"];
 
 const PROFILE_SELECT =
-  "email role preferredName technicianName firstName lastName fullName alternateEmail profileImage";
+  "email role preferredName technicianName firstName lastName fullName alternateEmail phone profileImage";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// 7–15 digits; may include + ( ) - and spaces (same rule as the frontend)
+const PHONE_RE = /^(?=(?:\D*\d){7,15}\D*$)[+()\-\s\d]{7,20}$/;
 
 const LIMITS = {
   preferredName: 60,
   fullName: 120,
   alternateEmail: 120,
+  phone: 20,
 };
 
 const str = (v) => (v === undefined || v === null ? "" : String(v).trim());
@@ -23,6 +26,7 @@ function toProfileDTO(u) {
     technicianName: u.technicianName || "",
     fullName: u.fullName || [u.firstName, u.lastName].filter(Boolean).join(" "),
     alternateEmail: u.alternateEmail || "",
+    phone: u.phone || "",
     profileImage: u.profileImage || "",
   };
 }
@@ -58,6 +62,14 @@ function validateProfileUpdate(body = {}, user) {
     if (v && v === user.email)
       errors.push("Alternate email must be different from your login email");
     set.alternateEmail = v;
+  }
+
+  // Optional — an empty value clears the number
+  if (body.phone !== undefined) {
+    const v = str(body.phone);
+    checkLength(v, "phone", "Phone Number");
+    if (v && !PHONE_RE.test(v)) errors.push("Enter a valid phone number");
+    set.phone = v;
   }
 
   return { set, errors };

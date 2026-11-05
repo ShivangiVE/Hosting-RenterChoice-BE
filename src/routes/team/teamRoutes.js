@@ -10,6 +10,7 @@ const {
   getMyBrokerageStructure,
   getTeamForEdit,
   updateTeam,
+  setTeamStatus,
 } = require("../../controllers/team/teamController");
 
 router.use(protect);
@@ -41,6 +42,11 @@ router.post(
   resendTeamAdminInvite,
 );
 
+router.patch(
+  "/:id/status",
+  authorize("Admin", "BrokerageAdmin"),
+  setTeamStatus,
+);
 
 router.get("/:id", authorize("Admin", "BrokerageAdmin"), getTeamForEdit);
 router.patch("/:id", authorize("Admin", "BrokerageAdmin"), updateTeam);
