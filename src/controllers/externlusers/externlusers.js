@@ -5,7 +5,9 @@ const supportContactService = require("../../services/supportContactService");
 const AuditService = require("../../services/auditService");
 const profileService = require("../../services/profileService");
 const Building = require("../../models/Building");
-const { notifyOwnerLinkedPortfolio } = require("../../services/portfolioNotificationService");
+const {
+  notifyOwnerLinkedPortfolio,
+} = require("../../services/portfolioNotificationService");
 
 // Get all vendors
 exports.getVendors = async (req, res) => {
@@ -51,7 +53,6 @@ const REPAIR_OPTION_LABELS = {
   preferred_vendor_list: "Owner's preferred vendors",
   renters_choice_vendors: "Renter's Choice vendors",
 };
-
 
 const OWNER_PORTFOLIO_SELECT =
   "portfolioName portfolioAccountNumber formData.managementStartDate formData.repairsMaintenance createdBy";
@@ -251,6 +252,7 @@ exports.updateMyProfile = async (req, res) => {
       "technicianName",
       "fullName",
       "alternateEmail",
+      "phone",
     ]
       .filter((f) => before[f] !== after[f])
       .map((f) => ({ field: f, oldValue: before[f], newValue: after[f] }));

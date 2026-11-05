@@ -99,6 +99,21 @@ const teamSchema = new mongoose.Schema(
       default: "Active",
       index: true,
     },
+
+    deactivatedVia: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Team",
+      default: null,
+      index: true,
+    },
+    statusChangedAt: { type: Date, default: null },
+    statusChangedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    statusReason: { type: String, trim: true, default: "" },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -10,6 +10,9 @@ const { sendTeamAdminInviteEmail } = require("../../services/emailService");
 const { TEAM_ROLES, BROKERAGE_STAFF_ROLES } = require("../../constants/roles");
 const { generateTeamUniqueId } = require("../../utils/generateTeamUniqueId");
 const { validateBankDetails } = require("../../utils/bankDetails");
+const bcrypt = require("bcryptjs");
+const AuditService = require("../../services/auditService");
+const UserStatusLog = require("../../models/UserStatusLog");
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 // Franchise = Brokerage, Expansion = Team/Office (client, Oct 26 call).
@@ -343,11 +346,14 @@ exports.createTeam = async (req, res) => {
 
 exports.getBrokerages = async (req, res) => {
   try {
-    const brokerages = await Team.find({
+    const includeInactive =
+      req.query.includeInactive === "true" && req.user?.role === "Admin";
+    const filter = {
       teamType: "franchise",
-      status: "Active",
-    })
-      .select("businessLegalName uniqueIdNumber companyCity")
+      ...(includeInactive ? {} : { status: "Active" }),
+    };
+    const brokerages = await Team.find(filter)
+      .select("businessLegalName uniqueIdNumber companyCity status")
       .sort({ businessLegalName: 1 })
       .lean();
     return sendSuccess(res, "Brokerages fetched", { brokerages });
@@ -766,5 +772,261 @@ exports.updateTeam = async (req, res) => {
     }
     console.error("updateTeam failed:", err);
     return sendError(res, "Failed to update details", 500);
+  }
+};
+
+// ── Activate / Deactivate Brokerage or Team ───────────────────────────────
+// Master Admin   → any brokerage or team.
+// BrokerageAdmin → only teams under their own brokerage
+const NO_TEAM = [{ team: null }, { team: { $exists: false } }];
+
+// Same check as deactivating a user: the performer re-enters their password
+async function verifyPerformerPassword(userId, password) {
+  if (typeof password !== "string" || !password) return false;
+  const me = await User.findById(userId).select("+password");
+  if (!me?.password) return false;
+  return bcrypt.compare(password, me.password);
+}
+
+// Every user who belongs to these teams: the team admins, users linked by `team`,
+// and older accounts created by those admins without a `team` (same rules as
+// loadBrokerageStructure). Never Master Admins, never the performer.
+async function findCascadeUsers(teams, performerId, session) {
+  const teamIds = teams.map((t) => t._id);
+  const adminIds = teams.map((t) => t.admin).filter(Boolean);
+  const base = { role: { $ne: "Admin" }, _id: { $ne: performerId } };
+
+  const direct = await User.find({
+    ...base,
+    $or: [
+      { _id: { $in: adminIds } },
+      { team: { $in: teamIds } },
+      { createdBy: { $in: adminIds }, $or: NO_TEAM },
+    ],
+  })
+    .select("_id role isActive")
+    .session(session)
+    .lean();
+
+  // Older Office Admins (created by the Brokerage Admin, no `team`) → their members too
+  const adminSet = new Set(adminIds.map(String));
+  const legacyAdminIds = direct
+    .filter((u) => u.role === "OfficeAdmin" && !adminSet.has(String(u._id)))
+    .map((u) => u._id);
+  const legacy = legacyAdminIds.length
+    ? await User.find({
+        ...base,
+        createdBy: { $in: legacyAdminIds },
+        $or: NO_TEAM,
+      })
+        .select("_id role isActive")
+        .session(session)
+        .lean()
+    : [];
+
+  const unique = new Map([...direct, ...legacy].map((u) => [String(u._id), u]));
+  return [...unique.values()];
+}
+
+const statusMeta = (performerId, reason, now) => ({
+  statusChangedAt: now,
+  statusChangedBy: performerId,
+  statusReason: reason,
+});
+
+async function deactivateCascade(root, performerId, reason, now, session) {
+  // Brokerage → its ACTIVE teams go down with it (already-deactivated ones keep their own marker)
+  const children =
+    root.teamType === "franchise"
+      ? await Team.find({
+          teamType: "expansion",
+          parentBrokerage: root._id,
+          status: "Active",
+        })
+          .select("_id admin")
+          .session(session)
+          .lean()
+      : [];
+
+  const users = await findCascadeUsers(
+    [root, ...children],
+    performerId,
+    session,
+  );
+  const userIds = users.filter((u) => u.isActive !== false).map((u) => u._id);
+  const childIds = children.map((c) => c._id);
+  const meta = statusMeta(performerId, reason, now);
+
+  // updateOne/updateMany skip the Team pre-validate hook (no parent checks needed here)
+  await Team.updateOne(
+    { _id: root._id },
+    { $set: { status: "Deactivated", deactivatedVia: null, ...meta } },
+    { session },
+  );
+  if (childIds.length) {
+    await Team.updateMany(
+      { _id: { $in: childIds } },
+      { $set: { status: "Deactivated", deactivatedVia: root._id, ...meta } },
+      { session },
+    );
+  }
+  if (userIds.length) {
+    await User.updateMany(
+      { _id: { $in: userIds } },
+      {
+        $set: { isActive: false, deactivatedVia: root._id },
+        // Also apply here whatever utils/toggleUserStatus.js does to end sessions,
+        // e.g. $inc: { tokenVersion: 1 } or clearing refresh tokens.
+      },
+      { session },
+    );
+  }
+  return { teamIds: childIds, userIds };
+}
+
+async function reactivateCascade(root, performerId, reason, now, session) {
+  // Only what THIS deactivation switched off comes back
+  const [children, users] = await Promise.all([
+    root.teamType === "franchise"
+      ? Team.find({ deactivatedVia: root._id })
+          .select("_id")
+          .session(session)
+          .lean()
+      : [],
+    User.find({ deactivatedVia: root._id })
+      .select("_id")
+      .session(session)
+      .lean(),
+  ]);
+  const childIds = children.map((c) => c._id);
+  const userIds = users.map((u) => u._id);
+  const meta = statusMeta(performerId, reason, now);
+
+  await Team.updateOne(
+    { _id: root._id },
+    { $set: { status: "Active", deactivatedVia: null, ...meta } },
+    { session },
+  );
+  if (childIds.length) {
+    await Team.updateMany(
+      { _id: { $in: childIds } },
+      { $set: { status: "Active", deactivatedVia: null, ...meta } },
+      { session },
+    );
+  }
+  if (userIds.length) {
+    await User.updateMany(
+      { _id: { $in: userIds } },
+      { $set: { isActive: true, deactivatedVia: null } },
+      { session },
+    );
+  }
+  return { teamIds: childIds, userIds };
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// PATCH /api/teams/:id/status   body: { isActive: boolean, password, reason? }
+exports.setTeamStatus = async (req, res) => {
+  const { isActive, password, reason } = req.body || {};
+  if (typeof isActive !== "boolean") {
+    return sendError(res, "isActive must be true or false", 400);
+  }
+
+  try {
+    // 400, not 401: a 401 would trigger the frontend's auto-logout
+    if (!(await verifyPerformerPassword(req.user._id, password))) {
+      return sendError(res, "Incorrect password", 400);
+    }
+
+    const filter = await editScopeFilter(req.user, req.params.id);
+    const team =
+      filter &&
+      (await Team.findOne(filter)
+        .select("teamType status admin parentBrokerage businessLegalName")
+        .lean());
+    if (!team) return sendError(res, EDIT_NOT_FOUND, 404);
+
+    // Only Master Admin may change a brokerage (editScopeFilter already enforces
+    // this for BrokerageAdmin; kept explicit for safety)
+    if (team.teamType === "franchise" && req.user.role !== "Admin") {
+      return sendError(res, EDIT_NOT_FOUND, 404);
+    }
+
+    const label = TEAM_TYPE_CONFIG[team.teamType]?.label || "Team";
+    const targetStatus = isActive ? "Active" : "Deactivated";
+    if (team.status === targetStatus) {
+      return sendError(
+        res,
+        `This ${label.toLowerCase()} is already ${isActive ? "active" : "deactivated"}`,
+        409,
+      );
+    }
+
+    // A team can't be active under a deactivated brokerage
+    if (isActive && team.teamType === "expansion") {
+      const parent = await Team.findById(team.parentBrokerage)
+        .select("status")
+        .lean();
+      if (parent?.status !== "Active") {
+        return sendError(res, "Activate the brokerage first", 409);
+      }
+    }
+
+    const note = str(reason, 500);
+    const now = new Date();
+    const session = await mongoose.startSession();
+    let summary;
+    try {
+      await session.withTransaction(async () => {
+        summary = isActive
+          ? await reactivateCascade(team, req.user._id, note, now, session)
+          : await deactivateCascade(team, req.user._id, note, now, session);
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    // Logs after commit — never fail the request because of logging.
+    // Field names below must match your UserStatusLog schema.
+    if (summary.userIds.length) {
+      UserStatusLog.insertMany(
+        summary.userIds.map((id) => ({
+          targetUser: id,
+          performedBy: req.user._id,
+          action: isActive ? "activated" : "deactivated",
+          reason: `${label} "${team.businessLegalName}" ${isActive ? "activated" : "deactivated"}${note ? `: ${note}` : ""}`,
+        })),
+      ).catch((e) => console.error("Cascade status log failed:", e));
+    }
+    AuditService.logActivity({
+      entityType: "team",
+      entityId: team._id,
+      action: isActive ? "activated" : "deactivated",
+      actionDetails: `${label} ${team.businessLegalName} ${isActive ? "activated" : "deactivated"} (${plural(summary.teamIds.length, "team")}, ${plural(summary.userIds.length, "user")})`,
+      performedBy: req.user._id,
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+    }).catch((e) => console.error("Team status audit failed:", e));
+
+    const extra = [
+      summary.teamIds.length && plural(summary.teamIds.length, "team"),
+      summary.userIds.length && plural(summary.userIds.length, "user"),
+    ]
+      .filter(Boolean)
+      .join(" and ");
+
+    return sendSuccess(
+      res,
+      `${label} ${isActive ? "activated" : "deactivated"}${extra ? `. ${extra} ${isActive ? "activated" : "deactivated"} with it.` : "."}`,
+      {
+        status: targetStatus,
+        teamsAffected: summary.teamIds.length,
+        usersAffected: summary.userIds.length,
+      },
+    );
+  } catch (err) {
+    console.error("setTeamStatus failed:", err);
+    return sendError(res, "Failed to update status", 500);
   }
 };
