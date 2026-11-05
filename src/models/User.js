@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema(
     legalName: { type: String, trim: true },
     fullName: { type: String, trim: true },
     alternateEmail: { type: String, trim: true, lowercase: true, default: "" },
+    phone: { type: String, trim: true, maxlength: 20, default: "" },
     replyToEmail: { type: String, trim: true, lowercase: true },
     alertEmail: { type: String, trim: true, lowercase: true },
     timeZone: { type: String, trim: true, default: "America/New_York" },
@@ -93,6 +94,15 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+      index: true,
+    },
+
+    // Brokerage/Team whose deactivation switched this user off (null = not cascaded).
+    // Reactivating that brokerage/team re-activates only these users.
+    deactivatedVia: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Team",
+      default: null,
       index: true,
     },
 
