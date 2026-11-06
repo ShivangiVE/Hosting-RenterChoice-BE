@@ -97,6 +97,17 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
+    // "invited" = account created by staff, password not set yet (owner must
+    // finish signup from the invite email). Default "active" keeps every
+    // existing user working without a migration.
+    accountStatus: {
+      type: String,
+      enum: ["invited", "active"],
+      default: "active",
+      index: true,
+    },
+    ownerInviteSentAt: { type: Date, default: null },
+
     // Brokerage/Team whose deactivation switched this user off (null = not cascaded).
     // Reactivating that brokerage/team re-activates only these users.
     deactivatedVia: {
@@ -154,8 +165,14 @@ const userSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // who created this user
     managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     // resetPasswordToken: { type: String },
-    resetPasswordOTP: { type: String }, // 4-digit code
+    // External reset (Owner / Vendor / Tenant): HMAC of the code, never the code itself
+    resetPasswordOTP: { type: String, select: false },
+    resetPasswordOTPAttempts: { type: Number, default: 0 },
     resetPasswordExpires: { type: Date }, // OTP expiration time
+
+    // Internal "reset via email link" — only the SHA-256 hash is stored
+    // resetPasswordToken: { type: String, select: false, index: true },
+    // resetPasswordTokenExpires: { type: Date, default: null },
 
     // Portfolio-deactivation "notify team admin" throttling (Owner login
     // flow): max 3 sends total, 3-day gap required between each.

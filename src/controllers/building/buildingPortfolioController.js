@@ -11,6 +11,18 @@ const {
   invalidateSessionsForOwnersWithNoActivePortfolio,
 } = require("../../utils/portfolioAccess/invalidateOwnerSessions");
 const resolveTeamUserIds = require("../../utils/resolveTeamUserIds");
+const {
+  notifyOwnersAttachedToPortfolio,
+  sendOwnerInvite,
+} = require("../../services/ownerInviteService");
+
+// Fire-and-forget: an email problem must never fail a committed save
+const notifyAttachedOwners = (portfolioId, ownerIds) => {
+  if (!ownerIds?.length) return;
+  notifyOwnersAttachedToPortfolio({ portfolioId, ownerIds }).catch((e) =>
+    console.error("Owner attach notification failed:", e),
+  );
+};
 const { sendSuccess, sendError } = require("../../utils/response");
 
 const validateAgainstTemplate = (template, formData) => {
@@ -1019,6 +1031,8 @@ exports.createPortfolio = async (req, res) => {
       createdBy: req.user._id,
     });
 
+    notifyAttachedOwners(portfolio._id, validOwners);
+
     // Populate owners for response
     await portfolio.populate(
       "owners",
@@ -1050,7 +1064,10 @@ exports.getPortfolioDetails = async (req, res) => {
     const { id } = req.params;
     const portfolio = await Portfolio.findById(id)
       .populate("createdBy", "preferredName email")
-      .populate("owners", "preferredName firstName lastName email phoneNumber");
+      .populate(
+        "owners",
+        "preferredName firstName lastName email phone phoneNumber accountStatus",
+      );
 
     if (!portfolio) return sendError(res, "Portfolio not found", 404);
 
@@ -1311,6 +1328,8 @@ exports.updatePortfolio = async (req, res) => {
     const errors = validateAgainstTemplate(template, portfolioData);
     if (errors.length) return sendError(res, errors.join(", "), 400);
 
+    const ownersBefore = new Set(portfolio.owners.map(String));
+
     // Validate and update owners if provided
     if (ownerIds && Array.isArray(ownerIds)) {
       const owners = await User.find({ _id: { $in: ownerIds }, role: "Owner" });
@@ -1334,6 +1353,11 @@ exports.updatePortfolio = async (req, res) => {
     portfolio.formData = { ...portfolio.formData, ...portfolioData };
 
     await portfolio.save();
+
+    notifyAttachedOwners(
+      portfolio._id,
+      portfolio.owners.filter((o) => !ownersBefore.has(String(o))),
+    );
 
     // Populate owners for response
     await portfolio.populate(
@@ -1939,7 +1963,12 @@ exports.addOwnersToPortfolio = async (req, res) => {
       portfolioId,
       { $addToSet: { owners: { $each: newIds } } },
       { new: true },
-    ).populate("owners", "preferredName firstName lastName email phoneNumber");
+    ).populate(
+      "owners",
+      "preferredName firstName lastName email phone phoneNumber accountStatus",
+    );
+
+    notifyAttachedOwners(portfolio._id, newIds);
 
     if (newIds.length) {
       try {
@@ -1961,12 +1990,89 @@ exports.addOwnersToPortfolio = async (req, res) => {
     return sendSuccess(
       res,
       newIds.length
-        ? "Owners added to portfolio"
+        ? "Owners added. They'll receive an email to set up or access their Owner Portal."
         : "Selected owners are already attached",
       { portfolio: updated, addedCount: newIds.length },
     );
   } catch (err) {
     return sendError(res, err.message || "Failed to add owners", 500);
+  }
+};
+
+// Resend owner portal invitation (new link; the previous one stops working)
+const RESEND_COOLDOWN_MS = 2 * 60 * 1000;
+
+exports.resendOwnerInvite = async (req, res) => {
+  try {
+    const { portfolioId, ownerId } = req.params;
+    if (
+      !mongoose.isValidObjectId(portfolioId) ||
+      !mongoose.isValidObjectId(ownerId)
+    ) {
+      return sendError(res, "Invalid id", 400);
+    }
+
+    const portfolio = await Portfolio.findOne({
+      _id: portfolioId,
+      owners: ownerId,
+    })
+      .select(
+        "status portfolioName portfolioAbbreviation portfolioAccountNumber",
+      )
+      .lean();
+    if (!portfolio) {
+      return sendError(res, "This owner is not attached to the portfolio", 404);
+    }
+    if (portfolio.status === "Deactivated") {
+      return sendError(
+        res,
+        "Reactivate the portfolio before sending invitations.",
+        400,
+      );
+    }
+
+    const owner = await User.findOne({ _id: ownerId, role: "Owner" })
+      .select("email preferredName accountStatus isActive ownerInviteSentAt")
+      .lean();
+    if (!owner) return sendError(res, "Owner not found", 404);
+    if (!owner.isActive) {
+      return sendError(res, "This owner's account is deactivated.", 400);
+    }
+    if (owner.accountStatus !== "invited") {
+      return sendError(
+        res,
+        "This owner has already set up their account.",
+        409,
+      );
+    }
+    if (
+      owner.ownerInviteSentAt &&
+      Date.now() - new Date(owner.ownerInviteSentAt).getTime() <
+        RESEND_COOLDOWN_MS
+    ) {
+      return sendError(
+        res,
+        "An invitation was just sent. Please wait a couple of minutes.",
+        429,
+      );
+    }
+
+    await sendOwnerInvite({ owner, portfolio }); // awaited so a send failure is reported
+
+    AuditService.logActivity({
+      entityType: "portfolio",
+      entityId: portfolio._id,
+      action: "updated",
+      actionDetails: `Owner invitation re-sent to ${owner.email} for ${portfolio.portfolioAbbreviation}`,
+      changes: [],
+      performedBy: req.user._id,
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+    }).catch((e) => console.error("Resend invite audit failed:", e));
+
+    return sendSuccess(res, `Invitation re-sent to ${owner.email}`);
+  } catch (err) {
+    return sendError(res, "Failed to resend invitation", 500);
   }
 };
 

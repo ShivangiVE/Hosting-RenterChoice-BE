@@ -15,6 +15,7 @@ const {
   verifyCompanyAccount,
   verifyPortfolioAccount,
   notifyTeamAdminOfDeactivatedPortfolio,
+  verifyOwnerInvite,
 } = require("../../controllers/externlusers/authController");
 const {
   registerValidator,
@@ -63,7 +64,24 @@ router.get(
   accountVerifyLimiter,
   verifyPortfolioAccount,
 );
-router.post("/login", loginValidator, validate, login);
+
+// Token goes in the body (not the URL) so it never lands in access logs
+router.post("/owner-invite/verify", accountVerifyLimiter, verifyOwnerInvite);
+
+// Counts only failed logins, so normal users are never blocked
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: false,
+    message: "Too many failed login attempts. Please try again in 15 minutes.",
+  },
+});
+
+router.post("/login", loginLimiter, loginValidator, validate, login);
 
 // Mobile-specific login alias ──
 router.post(
@@ -72,6 +90,7 @@ router.post(
     req.body.platform = "mobile";
     next();
   },
+  loginLimiter,
   loginValidator,
   validate,
   login,
@@ -95,10 +114,33 @@ router.post(
   notifyTeamAdminOfDeactivatedPortfolio,
 );
 
-// Forgot / Reset
-router.post("/forgot", forgotPassword);
-router.post("/verify-otp", verifyOtp);
-router.post("/reset", resetPassword);
+// Forgot / Reset — shared by ALL users (internal + external), rate-limited per IP
+// (on top of 3 wrong attempts per code)
+const forgotLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: false,
+    message: "Too many requests. Please try again later.",
+  },
+});
+
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: false,
+    message: "Too many attempts. Please try again later.",
+  },
+});
+
+router.post("/forgot", forgotLimiter, forgotPassword);
+router.post("/verify-otp", otpLimiter, verifyOtp);
+router.post("/reset", otpLimiter, resetPassword);
 
 // Protected routes
 router.put("/profile", protect, updateProfile);
