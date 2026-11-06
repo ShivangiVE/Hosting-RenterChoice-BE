@@ -26,6 +26,7 @@ const {
   updatePortfolioStatus,
   updatePortfolioSummary,
   getPortfolioStats,
+  resendOwnerInvite,
 } = require("../../controllers/building/buildingPortfolioController");
 const { ALLOWED_INTERNAL_ROLES } = require("../../constants/roles");
 const {
@@ -185,6 +186,13 @@ router.post(
   protect,
   authorize(...ALLOWED_INTERNAL_ROLES),
   addOwnersToPortfolio,
+);
+
+router.post(
+  "/portfolio/:portfolioId/owners/:ownerId/resend-invite",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  resendOwnerInvite,
 );
 
 router.delete(
