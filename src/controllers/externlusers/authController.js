@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
 const User = require("../../models/User");
-const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const { hashInviteToken } = require("../../services/ownerInviteService");
 const Portfolio = require("../../models/Portfolio");
 const {
   verifyPortfolioNotifyToken,
@@ -9,13 +10,16 @@ const {
 } = require("../../utils/portfolioAccess/notifyToken");
 
 const {
-  sendForgotPasswordEmail,
   sendForgotPasswordOTPEmail,
   sendPortfolioDeactivatedNotice,
+  sendPasswordChangedEmail,
 } = require("../../services/emailService");
 const { sendError, sendSuccess } = require("../../utils/response");
 const { uploadFile, deleteFile } = require("../../utils/storageService");
 const Company = require("../../models/ContactCards/Company");
+
+const INVITE_INVALID_MSG =
+  "This invitation link is invalid or has already been used. Please ask your property manager to resend it.";
 
 const normalizeEmail = (e) =>
   String(e || "")
@@ -61,8 +65,88 @@ async function linkOrCreateOwnerContact(user, session) {
   );
 }
 
+// Owner pre-created by staff → finish signup (invite token + portfolio number)
+async function claimInvitedOwner(
+  res,
+  { user, portfolioDoc, inviteToken, password, preferredName, accountNumber },
+) {
+  if (!inviteToken) {
+    return sendError(
+      res,
+      "We've already emailed an invitation to this address. Please use the link in that email to finish setting up your account.",
+      403,
+      { code: "INVITE_REQUIRED" },
+    );
+  }
+
+  const tokenHash = hashInviteToken(inviteToken);
+  if (!user.inviteTokenHash || user.inviteTokenHash !== tokenHash) {
+    return sendError(res, INVITE_INVALID_MSG, 400, { code: "INVITE_INVALID" });
+  }
+
+  const isOwnerOfPortfolio = await Portfolio.exists({
+    _id: portfolioDoc._id,
+    owners: user._id,
+  });
+  if (!isOwnerOfPortfolio) {
+    return sendError(
+      res,
+      "This portfolio number doesn't match your invitation. Please check the number in your email.",
+      400,
+      { code: "PORTFOLIO_MISMATCH" },
+    );
+  }
+
+  // One atomic, single-use update (two parallel submits can't both succeed)
+  const passwordHash = await bcrypt.hash(password, await bcrypt.genSalt(10));
+  const claimed = await User.findOneAndUpdate(
+    { _id: user._id, accountStatus: "invited", inviteTokenHash: tokenHash },
+    {
+      $set: {
+        password: passwordHash,
+        accountStatus: "active",
+        inviteAcceptedAt: new Date(),
+        accountNumber: cleanAccountNumber(accountNumber),
+        ...(preferredName?.trim() && { preferredName: preferredName.trim() }),
+      },
+      $unset: { inviteTokenHash: 1, inviteExpires: 1 },
+      $inc: { externalWebSessionVersion: 1 },
+    },
+    { new: true, runValidators: true },
+  );
+  if (!claimed) {
+    return sendError(res, INVITE_INVALID_MSG, 400, { code: "INVITE_INVALID" });
+  }
+
+  try {
+    await linkOrCreateOwnerContact(claimed, null);
+  } catch (e) {
+    console.error("Owner contact link failed:", e);
+  }
+
+  const token = generateToken({
+    user: claimed,
+    platform: "web",
+    portal: "external",
+  });
+
+  return sendSuccess(res, "Your account is set up", {
+    _id: claimed._id,
+    accountNumber: claimed.accountNumber,
+    preferredName: claimed.preferredName,
+    email: claimed.email,
+    role: claimed.role,
+    portfolio: { portfolioName: portfolioDoc.portfolioName },
+    token,
+  });
+}
+
 // Allowed roles
 const EXTERNAL_ROLES = ["Vendor", "Owner", "Tenant"];
+
+// Forgot/reset by OTP is shared by every portal (internal staff use the same screens)
+const { INTERNAL_ROLES } = require("../../constants/roles");
+const PASSWORD_RESET_ROLES = [...EXTERNAL_ROLES, ...INTERNAL_ROLES];
 
 const generateToken = require("../../utils/generateToken");
 const assertOwnerPortfolioActive = require("../../utils/portfolioAccess/assertOwnerPortfolioActive");
@@ -72,8 +156,79 @@ const {
 } = require("../../utils/portfolioAccess/notifyThrottle");
 const Contact = require("../../models/ContactCards/Contact");
 
-// Generate 4-digit OTP
-const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
+// ── Password reset OTP ──
+const OTP_LENGTH = 4;
+const OTP_TTL_MS = 10 * 60 * 1000; // matches "expires in 10 minutes" in the email
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const OTP_MAX_ATTEMPTS = 3;
+const MIN_PASSWORD_LENGTH = 8;
+const ACCOUNT_NOT_FOUND_MSG =
+  "We couldn't find an active account with that email address.";
+const OTP_SENT_MSG = "We've sent a 4-digit code to your email.";
+const OTP_INVALID_MSG = "Invalid or expired code. Please request a new one.";
+
+// Cryptographically secure, zero-padded (e.g. "0427")
+const generateOTP = () =>
+  crypto
+    .randomInt(0, 10 ** OTP_LENGTH)
+    .toString()
+    .padStart(OTP_LENGTH, "0");
+
+// Keyed hash: a leaked DB can't be brute-forced back into codes
+const hashOTP = (otp) =>
+  crypto
+    .createHmac("sha256", process.env.OTP_HASH_SECRET || process.env.JWT_SECRET)
+    .update(String(otp))
+    .digest("hex");
+
+const safeEqual = (a, b) => {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+// Shared by verify-otp and reset: checks expiry + attempts, counts failures
+async function checkResetOtp(email, otp) {
+  const code = String(otp || "").trim();
+  if (
+    !normalizeEmail(email) ||
+    !new RegExp(`^\\d{${OTP_LENGTH}}$`).test(code)
+  ) {
+    return { ok: false, message: OTP_INVALID_MSG };
+  }
+
+  const user = await User.findOne({
+    email: normalizeEmail(email),
+    role: { $in: PASSWORD_RESET_ROLES },
+    isActive: true,
+  }).select("+resetPasswordOTP");
+
+  if (
+    !user ||
+    !user.resetPasswordOTP ||
+    !user.resetPasswordExpires ||
+    user.resetPasswordExpires < Date.now()
+  ) {
+    return { ok: false, message: OTP_INVALID_MSG };
+  }
+
+  if ((user.resetPasswordOTPAttempts || 0) >= OTP_MAX_ATTEMPTS) {
+    return {
+      ok: false,
+      message: "Too many incorrect attempts. Please request a new code.",
+    };
+  }
+
+  if (!safeEqual(user.resetPasswordOTP, hashOTP(code))) {
+    await User.updateOne(
+      { _id: user._id },
+      { $inc: { resetPasswordOTPAttempts: 1 } },
+    );
+    return { ok: false, message: OTP_INVALID_MSG };
+  }
+
+  return { ok: true, user };
+}
 
 const ALLOWED_PLATFORMS = ["web", "mobile"];
 
@@ -87,6 +242,7 @@ exports.register = async (req, res, next) => {
       technicianName,
       password,
       role,
+      inviteToken,
     } = req.body;
     const email = normalizeEmail(req.body.email);
 
@@ -126,7 +282,55 @@ exports.register = async (req, res, next) => {
       }
     }
 
-    if (await User.exists({ email })) {
+    // Invite link → the invited account decides the email (it can't be swapped)
+    if (role === "Owner" && inviteToken) {
+      const invitedUser = await User.findOne({
+        inviteTokenHash: hashInviteToken(inviteToken),
+        role: "Owner",
+        accountStatus: "invited",
+      }).select("+inviteTokenHash role accountStatus email");
+
+      if (!invitedUser) {
+        return sendError(res, INVITE_INVALID_MSG, 400, {
+          code: "INVITE_INVALID",
+        });
+      }
+      if (invitedUser.email !== email) {
+        return sendError(
+          res,
+          "Please sign up with the email address this invitation was sent to.",
+          400,
+          { code: "INVITE_EMAIL_MISMATCH" },
+        );
+      }
+      return claimInvitedOwner(res, {
+        user: invitedUser,
+        portfolioDoc,
+        inviteToken,
+        password,
+        preferredName,
+        accountNumber,
+      });
+    }
+
+    const existingUser = await User.findOne({ email }).select(
+      "+inviteTokenHash role accountStatus",
+    );
+    if (existingUser) {
+      if (
+        role === "Owner" &&
+        existingUser.role === "Owner" &&
+        existingUser.accountStatus === "invited"
+      ) {
+        return claimInvitedOwner(res, {
+          user: existingUser,
+          portfolioDoc,
+          inviteToken,
+          password,
+          preferredName,
+          accountNumber,
+        });
+      }
       return sendError(res, "Email already registered", 409);
     }
 
@@ -242,6 +446,40 @@ exports.verifyPortfolioAccount = async (req, res) => {
   }
 };
 
+// Verify owner invite link (signup page prefill) — public, rate-limited
+exports.verifyOwnerInvite = async (req, res) => {
+  try {
+    const token = String(req.body?.token || "");
+    if (!/^[a-f0-9]{64}$/.test(token)) {
+      return sendError(res, INVITE_INVALID_MSG, 400, {
+        code: "INVITE_INVALID",
+      });
+    }
+
+    const user = await User.findOne({
+      inviteTokenHash: hashInviteToken(token),
+      role: "Owner",
+      accountStatus: "invited",
+      isActive: true,
+    })
+      .select("email preferredName")
+      .lean();
+    if (!user) {
+      return sendError(res, INVITE_INVALID_MSG, 400, {
+        code: "INVITE_INVALID",
+      });
+    }
+
+    // Portfolio number is NOT returned — the owner must type it to verify
+    return sendSuccess(res, "Invitation is valid", {
+      email: user.email,
+      preferredName: user.preferredName || "",
+    });
+  } catch (err) {
+    return sendError(res, "Verification failed", 500);
+  }
+};
+
 // Login (strict role-based)
 exports.login = async (req, res, next) => {
   try {
@@ -285,6 +523,24 @@ exports.login = async (req, res, next) => {
     }
 
     const isMatch = await user.matchPassword(password);
+
+    if (user.accountStatus === "invited") {
+      if (!isMatch) {
+        return sendError(
+          res,
+          "Please finish setting up your account using the invitation link we emailed you.",
+          403,
+          { code: "INVITE_PENDING" },
+        );
+      }
+      // Password matches → they already set it (e.g. older Forgot Password flow)
+      user.accountStatus = "active";
+      user.inviteAcceptedAt = new Date();
+      user.inviteTokenHash = undefined;
+      user.inviteExpires = undefined;
+      await user.save();
+    }
+
     if (!isMatch) {
       return sendError(res, "Invalid credentials", 401);
     }
@@ -496,10 +752,16 @@ exports.changePassword = async (req, res, next) => {
     const userId = req.user.id;
     const { currentPassword, newPassword } = req.body;
 
-    if (!currentPassword || !newPassword) {
-      return sendError(res, "Current and new passwords are required", 400);
+    if (
+      !currentPassword ||
+      String(newPassword || "").length < MIN_PASSWORD_LENGTH
+    ) {
+      return sendError(
+        res,
+        `Current password and a new password of at least ${MIN_PASSWORD_LENGTH} characters are required`,
+        400,
+      );
     }
-
     const user = await User.findById(userId);
     if (!user) {
       return sendError(res, "User not found", 404);
@@ -517,100 +779,143 @@ exports.changePassword = async (req, res, next) => {
 
     await user.save();
 
+    sendPasswordChangedEmail({
+      to: user.email,
+      name: user.preferredName,
+    }).catch((e) =>
+      console.error("Password changed notice failed:", e.message),
+    );
+
     return sendSuccess(res, "Password updated successfully");
   } catch (err) {
     next(err);
   }
 };
 
-// Forgot Password with OTP
-exports.forgotPassword = async (req, res, next) => {
+// Forgot Password — sends a 4-digit code to an active account
+exports.forgotPassword = async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!email) return sendError(res, "Email is required", 400);
+
   try {
-    const { email } = req.body;
+    const user = await User.findOne({
+      email,
+      role: { $in: PASSWORD_RESET_ROLES },
+      isActive: true,
+    }).select("email resetPasswordExpires");
 
-    if (!email) {
-      return sendError(res, "Email is required", 400);
-    }
+    // Not registered, or deactivated → tell the user (same message for both)
+    if (!user) return sendError(res, ACCOUNT_NOT_FOUND_MSG, 404);
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      return sendError(res, "No account found with this email", 404);
+    // Cooldown: a code was sent under a minute ago → don't send another
+    const lastIssuedAt = user.resetPasswordExpires
+      ? new Date(user.resetPasswordExpires).getTime() - OTP_TTL_MS
+      : 0;
+    if (Date.now() - lastIssuedAt < OTP_RESEND_COOLDOWN_MS) {
+      return sendSuccess(
+        res,
+        "We've already sent a code to your email. Please check your inbox.",
+      );
     }
 
     const otp = generateOTP();
-    user.resetPasswordOTP = otp;
-    user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
-    await user.save();
+    await User.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          resetPasswordOTP: hashOTP(otp),
+          resetPasswordExpires: new Date(Date.now() + OTP_TTL_MS),
+          resetPasswordOTPAttempts: 0,
+        },
+      },
+    );
 
-    await sendForgotPasswordOTPEmail(user.email, otp);
+    try {
+      await sendForgotPasswordOTPEmail(user.email, otp);
+    } catch (mailErr) {
+      // Email failed → clear the code so the user can retry straight away
+      await User.updateOne(
+        { _id: user._id },
+        { $unset: { resetPasswordOTP: 1, resetPasswordExpires: 1 } },
+      );
+      console.error("Forgot password email failed:", mailErr.message);
+      return sendError(
+        res,
+        "We couldn't send the email right now. Please try again in a moment.",
+        502,
+      );
+    }
 
-    return sendSuccess(res, "OTP has been sent to your email");
+    return sendSuccess(res, OTP_SENT_MSG);
   } catch (err) {
-    return sendError(res, "Failed to process forgot password request", 500);
+    console.error("Forgot password failed:", err.message);
+    return sendError(
+      res,
+      "Failed to process your request. Please try again.",
+      500,
+    );
   }
 };
 
-// Verify OTP Only (without resetting password)
+// Verify OTP only (doesn't use it up)
 exports.verifyOtp = async (req, res, next) => {
   try {
-    const { email, otp } = req.body;
-
-    if (!email || !otp) {
-      return sendError(res, "Email and OTP are required", 400);
-    }
-
-    const user = await User.findOne({ email });
-    if (!user) {
-      return sendError(res, "User not found", 404);
-    }
-
-    if (user.resetPasswordOTP !== otp) {
-      return sendError(res, "Invalid OTP", 400);
-    }
-
-    if (user.resetPasswordExpires < Date.now()) {
-      return sendError(res, "OTP has expired", 400);
-    }
-
+    const result = await checkResetOtp(req.body?.email, req.body?.otp);
+    if (!result.ok) return sendError(res, result.message, 400);
     return sendSuccess(res, "OTP verified successfully");
   } catch (err) {
     next(err);
   }
 };
 
-// Reset Password
+// Reset Password (OTP is single-use)
 exports.resetPassword = async (req, res, next) => {
   try {
-    const { email, otp, password } = req.body;
-
-    if (!email || !otp || !password) {
-      return sendError(res, "Email, OTP, and new password are required", 400);
+    const password = String(req.body?.password || "");
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return sendError(
+        res,
+        `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+        400,
+      );
     }
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      return sendError(res, "User not found", 404);
-    }
+    const result = await checkResetOtp(req.body?.email, req.body?.otp);
+    if (!result.ok) return sendError(res, result.message, 400);
 
-    if (user.resetPasswordOTP !== otp) {
-      return sendError(res, "Invalid OTP", 400);
-    }
+    const { user } = result;
+    user.password = password; // hashed by the pre-save hook
 
-    if (user.resetPasswordExpires < Date.now()) {
-      return sendError(res, "OTP has expired", 400);
-    }
-
-    user.password = password;
-
+    // Log out every existing session
     user.internalWebSessionVersion += 1;
     user.externalWebSessionVersion += 1;
 
+    // Invited owner proved email ownership → activate
+    if (user.accountStatus === "invited") {
+      user.accountStatus = "active";
+      user.inviteAcceptedAt = new Date();
+      user.inviteTokenHash = undefined;
+      user.inviteExpires = undefined;
+    }
+
+    // Single-use
     user.resetPasswordOTP = undefined;
     user.resetPasswordExpires = undefined;
+    user.resetPasswordOTPAttempts = 0;
 
     await user.save();
 
-    return sendSuccess(res, "Password reset successfully");
+    sendPasswordChangedEmail({
+      to: user.email,
+      name: user.preferredName,
+    }).catch((e) =>
+      console.error("Password changed notice failed:", e.message),
+    );
+
+    return sendSuccess(
+      res,
+      "Password reset successfully. Please log in with your new password.",
+    );
   } catch (err) {
     next(err);
   }
