@@ -89,6 +89,9 @@ const {
   // getServiceAgreementAppointment,
   getServiceAgreementAppointments,
 } = require("../../controllers/workOrder/serviceAgreementAppointmentController");
+const {
+  getOwnerRepairs,
+} = require("../../controllers/Owner/ownerRepairsController");
 
 const router = express.Router();
 
@@ -122,6 +125,9 @@ router.get(
   authorize("Vendor"),
   getVendorEntities,
 );
+
+// Owner Portal: combined Work Orders + Service Agreements
+router.get("/owner/repairs", protect, authorize("Owner"), getOwnerRepairs);
 
 // Get Work Orders by Building
 router.get(

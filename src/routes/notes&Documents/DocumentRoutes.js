@@ -15,6 +15,8 @@ const {
   getDocumentsByEntity,
   vendorUploadDocumentsForEntity,
   getDocumentViewUrl,
+  getOwnerDocuments,
+  setDocumentOwnerVisibility,
 } = require("../../controllers/notes&Documents/DocumentController");
 const { TEAM_ROLES } = require("../../constants/roles");
 
@@ -50,6 +52,17 @@ router.post(
 
 // Get all documents
 router.get("/", protect, authorize(...ALLOWED_ROLES), getDocuments);
+
+// Owner Portal: published documents 
+router.get("/owner", protect, authorize("Owner"), getOwnerDocuments);
+
+// Internal: publish / unpublish to Owner Portal
+router.patch(
+  "/:id/owner-visibility",
+  protect,
+  authorize(...ALLOWED_ROLES),
+  setDocumentOwnerVisibility,
+);
 
 // Get documents by building
 router.get(
@@ -101,7 +114,7 @@ router.delete(
 router.get(
   "/:id/view-url",
   protect,
-  authorize(...ALLOWED_ROLES, "Vendor"),
+  authorize(...ALLOWED_ROLES, "Vendor", "Owner"),
   getDocumentViewUrl,
 );
 
@@ -109,7 +122,7 @@ router.get(
 router.get(
   "/:id/download",
   protect,
-  authorize(...ALLOWED_ROLES, "Vendor"),
+  authorize(...ALLOWED_ROLES, "Vendor", "Owner"),
   downloadDocument,
 );
 
