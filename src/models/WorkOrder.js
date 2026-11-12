@@ -173,6 +173,8 @@ const workOrderSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+workOrderSchema.index({ building: 1, status: 1, createdAt: -1 });
+
 workOrderSchema.pre("save", function (next) {
   if (this.status === "closed" && !this.invoiceUploaded) {
     return next(new Error("Cannot close work order without uploading invoice"));

@@ -154,5 +154,6 @@ const serviceAgreementSchema = new mongoose.Schema(
 );
 
 serviceAgreementSchema.index({ recurringGroupId: 1, cycleNumber: 1 });
+serviceAgreementSchema.index({ building: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("ServiceAgreement", serviceAgreementSchema);

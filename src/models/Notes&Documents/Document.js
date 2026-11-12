@@ -70,6 +70,15 @@ const documentSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
+    // Owner Portal: owners of the linked portfolio/building can see this
+    publishedToOwner: { type: Boolean, default: false },
+    publishedToOwnerAt: { type: Date, default: null },
+    publishedToOwnerBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -86,5 +95,7 @@ documentSchema.index({ sourceType: 1, sourceId: 1, createdAt: -1 });
 documentSchema.index({ uploadedBy: 1 });
 documentSchema.index({ createdAt: -1 });
 documentSchema.index({ fileType: 1 });
+documentSchema.index({ publishedToOwner: 1, portfolio: 1, createdAt: -1 });
+documentSchema.index({ publishedToOwner: 1, building: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Document", documentSchema);
