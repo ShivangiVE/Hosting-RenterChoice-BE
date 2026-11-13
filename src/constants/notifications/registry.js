@@ -2,6 +2,7 @@ const modules = [
   require("./core"),
   require("./workOrder"),
   require("./portfolio"),
+  require("./ownerRequest"),
 ];
 
 const NOTIFICATION_TYPES = {};
