@@ -1334,3 +1334,177 @@ exports.getOwnerDocuments = async (req, res) => {
     return sendError(res, "Failed to fetch documents", 500);
   }
 };
+
+// ========================= Owner Portal: upload =========================
+const OWNER_UPLOAD_CATEGORY = "Provided by Owner"; // rename here if the client wants another label
+const OWNER_ALLOWED_TYPES = ["pdf", "image", "video", "word", "excel"];
+const MAX_OWNER_FILE_NAME = 200;
+const MAX_OWNER_DESCRIPTION = 500;
+
+const removeTempFiles = (files = []) =>
+  files.forEach((f) => {
+    try {
+      if (f?.path && fs.existsSync(f.path)) fs.unlinkSync(f.path);
+    } catch {}
+  });
+
+const cleanText = (v, max) =>
+  typeof v === "string" ? v.trim().slice(0, max) : "";
+
+// Find-or-create; safe if two uploads create it at the same moment
+const getOwnerUploadCategoryId = async () => {
+  const find = () =>
+    NoteCategory.findOne({ name: OWNER_UPLOAD_CATEGORY }).select("_id").lean();
+
+  const existing = await find();
+  if (existing) return existing._id;
+  try {
+    const created = await NoteCategory.create({ name: OWNER_UPLOAD_CATEGORY });
+    return created._id;
+  } catch (err) {
+    if (err.code === 11000) return (await find())._id; // created by a parallel request
+    throw err;
+  }
+};
+
+// Owner: upload documents / images / videos — each file to one of their portfolios
+exports.ownerUploadDocuments = async (req, res) => {
+  const files = req.files || [];
+  const storedUrls = [];
+
+  try {
+    if (!files.length) {
+      return sendError(res, "Please select at least one file", 400);
+    }
+
+    // Only the owner's ACTIVE portfolios
+    const ownerPortfolios = await Portfolio.find({
+      owners: req.user._id,
+      status: { $ne: "Deactivated" },
+    })
+      .select("_id portfolioName")
+      .lean();
+
+    if (!ownerPortfolios.length) {
+      removeTempFiles(files);
+      return sendError(res, "You are not linked to any active portfolio", 403);
+    }
+
+    // Documents, images and videos only
+    const blocked = files.find(
+      (f) => !OWNER_ALLOWED_TYPES.includes(getFileType(f.mimetype)),
+    );
+    if (blocked) {
+      removeTempFiles(files);
+      return sendError(
+        res,
+        `"${blocked.originalname}" isn't supported. Please upload documents, images or videos.`,
+        400,
+      );
+    }
+
+    let meta = [];
+    try {
+      meta = JSON.parse(req.body?.documents || "[]");
+    } catch {
+      meta = [];
+    }
+    if (!Array.isArray(meta)) meta = [];
+
+    // Each file's portfolio must be one of the owner's (one portfolio → used by default)
+    const portfolioById = new Map(
+      ownerPortfolios.map((p) => [String(p._id), p]),
+    );
+    const fallback =
+      ownerPortfolios.length === 1 ? String(ownerPortfolios[0]._id) : "";
+    const targets = files.map((_, i) =>
+      portfolioById.get(String(meta[i]?.portfolio || fallback)),
+    );
+
+    const missing = targets.findIndex((t) => !t);
+    if (missing !== -1) {
+      removeTempFiles(files);
+      return meta[missing]?.portfolio
+        ? sendError(res, "You can only upload to your own portfolios", 403)
+        : sendError(
+            res,
+            `Please select a portfolio for "${files[missing].originalname}"`,
+            400,
+          );
+    }
+
+    const categoryId = await getOwnerUploadCategoryId();
+
+    // Store every file first; if anything fails, the catch removes them all
+    for (const file of files) {
+      storedUrls.push(await uploadFile(file, "uploads/documents"));
+    }
+
+    const now = new Date();
+    const docs = await Document.insertMany(
+      files.map((file, i) => ({
+        fileName:
+          cleanText(meta[i]?.fileName, MAX_OWNER_FILE_NAME) ||
+          file.originalname,
+        originalFileName: file.originalname,
+        description: cleanText(meta[i]?.description, MAX_OWNER_DESCRIPTION),
+        category: categoryId, // server decides — never sent by the owner
+        fileType: getFileType(file.mimetype),
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        fileUrl: storedUrls[i],
+        portfolio: targets[i]._id, // shows in that Portfolio → Notes & Docs
+        building: null,
+        uploadedBy: req.user._id,
+        publishedToOwner: true,
+        publishedToOwnerAt: now,
+        publishedToOwnerBy: req.user._id,
+      })),
+    );
+
+    // One audit entry per portfolio
+    const namesByPortfolio = new Map();
+    docs.forEach((d) => {
+      const key = String(d.portfolio);
+      namesByPortfolio.set(key, [
+        ...(namesByPortfolio.get(key) || []),
+        d.fileName,
+      ]);
+    });
+    namesByPortfolio.forEach((names, portfolioId) => {
+      AuditService.logActivity({
+        entityType: "portfolio",
+        entityId: portfolioId,
+        action: "updated",
+        actionDetails: `Owner uploaded ${names.length} document(s): ${names.join(", ")}`,
+        performedBy: req.user._id,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      }).catch((e) => console.error("Owner upload audit failed:", e));
+    });
+
+    const message =
+      namesByPortfolio.size === 1
+        ? `${docs.length} document(s) uploaded to ${targets[0].portfolioName}`
+        : `${docs.length} documents uploaded to ${namesByPortfolio.size} portfolios`;
+
+    return sendSuccess(
+      res,
+      message,
+      { documents: docs.map((d) => ({ _id: d._id, fileName: d.fileName })) },
+      201,
+    );
+  } catch (err) {
+    console.error("Error uploading owner documents:", err);
+    removeTempFiles(files);
+    storedUrls.forEach((url) =>
+      Promise.resolve()
+        .then(() => deleteFile(url))
+        .catch(() => {}),
+    );
+    if (err.name === "ValidationError") {
+      return sendError(res, "One or more files couldn't be saved", 400);
+    }
+    return sendError(res, "Failed to upload documents", 500);
+  }
+};
