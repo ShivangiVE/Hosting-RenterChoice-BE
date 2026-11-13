@@ -17,6 +17,7 @@ const {
   getDocumentViewUrl,
   getOwnerDocuments,
   setDocumentOwnerVisibility,
+  ownerUploadDocuments,
 } = require("../../controllers/notes&Documents/DocumentController");
 const { TEAM_ROLES } = require("../../constants/roles");
 
@@ -53,8 +54,16 @@ router.post(
 // Get all documents
 router.get("/", protect, authorize(...ALLOWED_ROLES), getDocuments);
 
-// Owner Portal: published documents 
 router.get("/owner", protect, authorize("Owner"), getOwnerDocuments);
+
+// Owner Portal: upload to one of the owner's portfolios
+router.post(
+  "/owner/upload",
+  protect,
+  authorize("Owner"),
+  documentUpload.array("files", 10),
+  ownerUploadDocuments,
+);
 
 // Internal: publish / unpublish to Owner Portal
 router.patch(
