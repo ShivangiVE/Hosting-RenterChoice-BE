@@ -169,6 +169,42 @@ const workOrderSchema = new mongoose.Schema(
     reopenComments: String,
     reopenedAt: Date,
     reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+
+    // Who raised it; owner requests must be approved before going further
+    source: {
+      type: String,
+      enum: ["internal", "owner"],
+      default: "internal",
+      index: true,
+    },
+    reviewStatus: {
+      type: String,
+      enum: [
+        "not_required",
+        "pending_review",
+        "approved",
+        "rejected",
+        "cancelled",
+      ],
+      default: "not_required",
+      index: true,
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    reviewedAt: { type: Date, default: null },
+    reviewNotes: { type: String, trim: true, maxlength: 1000 },
+
+    // Owner cancelled their own request
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    cancelReason: { type: String, trim: true, maxlength: 500 },
   },
   { timestamps: true },
 );

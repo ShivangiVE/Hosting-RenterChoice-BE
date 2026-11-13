@@ -74,6 +74,7 @@ const {
 const {
   WORK_ORDER_ROLES,
   WORK_ORDER_AND_VENDOR_ROLES,
+  OWNER_REQUEST_REVIEWER_ROLES,
 } = require("../../constants/roles");
 const {
   createInvoiceDraft,
@@ -91,6 +92,12 @@ const {
 } = require("../../controllers/workOrder/serviceAgreementAppointmentController");
 const {
   getOwnerRepairs,
+  getOwnerRepairFormOptions,
+  createOwnerWorkOrder,
+  reviewOwnerRequest,
+  getOwnerRepairDetails,
+  updateOwnerWorkOrder,
+  cancelOwnerWorkOrder,
 } = require("../../controllers/Owner/ownerRepairsController");
 
 const router = express.Router();
@@ -128,6 +135,50 @@ router.get(
 
 // Owner Portal: combined Work Orders + Service Agreements
 router.get("/owner/repairs", protect, authorize("Owner"), getOwnerRepairs);
+
+router.get(
+  "/owner/repairs/form-options",
+  protect,
+  authorize("Owner"),
+  getOwnerRepairFormOptions,
+);
+
+router.get(
+  "/owner/repairs/:kind/:id",
+  protect,
+  authorize("Owner"),
+  getOwnerRepairDetails,
+);
+
+router.post(
+  "/owner/work-orders",
+  protect,
+  authorize("Owner"),
+  upload.workOrderUpload.single("file"),
+  createOwnerWorkOrder,
+);
+
+router.patch(
+  "/owner/work-orders/:id",
+  protect,
+  authorize("Owner"),
+  upload.workOrderUpload.single("file"),
+  updateOwnerWorkOrder,
+);
+router.patch(
+  "/owner/work-orders/:id/cancel",
+  protect,
+  authorize("Owner"),
+  cancelOwnerWorkOrder,
+);
+
+// Internal Team: approve / reject an owner request
+router.patch(
+  "/work-orders/:id/review",
+  protect,
+  authorize(...OWNER_REQUEST_REVIEWER_ROLES),
+  reviewOwnerRequest,
+);
 
 // Get Work Orders by Building
 router.get(
