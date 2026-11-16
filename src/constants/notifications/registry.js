@@ -3,6 +3,7 @@ const modules = [
   require("./workOrder"),
   require("./portfolio"),
   require("./ownerRequest"),
+  require("./paymentInfo"),
 ];
 
 const NOTIFICATION_TYPES = {};

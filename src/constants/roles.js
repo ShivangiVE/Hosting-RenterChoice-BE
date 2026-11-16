@@ -55,6 +55,9 @@ const INTERNAL_TEAM_ROLES = [INTERNAL_TEAM];
 // Other roles are paused for now — switch to "RepairsTeam" here when they return.
 const OWNER_REQUEST_REVIEWER_ROLES = ["OfficeAdmin", "InternalTeam"];
 
+// Who can approve a vendor's company payment info change
+const PAYMENT_INFO_REVIEWER_ROLES = ["Admin", "OfficeAdmin", "InternalTeam"];
+
 module.exports = {
   INTERNAL_TEAM,
   INTERNAL_TEAM_ROLES,
@@ -68,4 +71,5 @@ module.exports = {
   WORK_ORDER_AND_VENDOR_ROLES,
   ALL_ROLES,
   OWNER_REQUEST_REVIEWER_ROLES,
+  PAYMENT_INFO_REVIEWER_ROLES,
 };
