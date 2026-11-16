@@ -57,7 +57,14 @@ const companySchema = new mongoose.Schema(
         billingAddress: String,
         billingEmail: String,
         updatedAt: Date,
-        updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // who entered it
+        approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        approvedAt: Date,
+        source: { type: String, enum: ["internal", "vendor"] },
+        changeRequest: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "PaymentInfoChangeRequest",
+        },
       },
     },
 

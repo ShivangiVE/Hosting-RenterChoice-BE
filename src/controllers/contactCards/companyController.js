@@ -14,68 +14,7 @@ const {
 const WorkOrder = require("../../models/WorkOrder");
 const ServiceAgreement = require("../../models/ServiceAgreement");
 const AuditService = require("../../services/auditService");
-
-// ---------- E-Pay validation ----------
-const EPAY_VALIDATION = {
-  transit: /^\d{5}$/,
-};
-
-async function validateEpayPayload(body) {
-  const errors = [];
-  const {
-    bankId,
-    transit,
-    accountNumber,
-    confirmAccountNumber,
-    // accountType,
-    billingFirstName,
-    billingLastName,
-    billingEmail,
-  } = body;
-
-  let bank = null;
-  if (!bankId) {
-    errors.push("Bank selection is required.");
-  } else {
-    bank = await Bank.findOne({ _id: bankId, isActive: true });
-    if (!bank) {
-      errors.push("Selected bank is invalid or no longer available.");
-    }
-  }
-
-  if (!transit || !EPAY_VALIDATION.transit.test(transit)) {
-    errors.push("Transit number must be exactly 5 digits.");
-  }
-
-  if (bank) {
-    if (!accountNumber || !/^\d+$/.test(accountNumber)) {
-      errors.push("Account number must contain digits only.");
-    } else if (
-      accountNumber.length < bank.accountNumberMin ||
-      accountNumber.length > bank.accountNumberMax
-    ) {
-      errors.push(
-        `Account number must be between ${bank.accountNumberMin} and ${bank.accountNumberMax} digits for ${bank.name}.`,
-      );
-    }
-  }
-
-  if (accountNumber !== confirmAccountNumber) {
-    errors.push("Account number and confirmation do not match.");
-  }
-
-  // if (!accountType || !["checking", "savings"].includes(accountType)) {
-  //   errors.push("Account type is required.");
-  // }
-
-  if (!billingFirstName?.trim()) errors.push("Billing first name is required.");
-  if (!billingLastName?.trim()) errors.push("Billing last name is required.");
-  if (billingEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(billingEmail)) {
-    errors.push("Billing email is invalid.");
-  }
-
-  return { errors, bank };
-}
+const { validateEpayPayload } = require("../../utils/epayPayload");
 
 // Create Company
 exports.createCompany = async (req, res) => {
@@ -614,6 +553,10 @@ exports.updateCompanyPaymentInfo = async (req, res) => {
       billingEmail,
       updatedAt: new Date(),
       updatedBy: req.user?._id,
+      source: "internal",
+      approvedBy: null, // a direct internal edit needs no approval
+      approvedAt: null,
+      changeRequest: null,
     };
 
     await company.save();
