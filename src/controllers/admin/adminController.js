@@ -5,7 +5,7 @@ const AuditService = require("../../services/auditService");
 const { sendSuccess, sendError } = require("../../utils/response");
 const generateToken = require("../../utils/generateToken");
 const { toggleUserStatus } = require("../../utils/toggleUserStatus");
-const { TEAM_ROLES } = require("../../constants/roles");
+const { TEAM_ROLES, BROKERAGE_ROLES } = require("../../constants/roles");
 const UserStatusLog = require("../../models/UserStatusLog");
 const {
   createUserAccount,
@@ -14,6 +14,7 @@ const {
 const SupportContact = require("../../models/SupportContact");
 const supportContactService = require("../../services/supportContactService");
 const { resolveLpmFlag, setLpmStatus } = require("../../utils/lpm");
+const { buildTeamUserProfileHandlers } = require("../../utils/teamUserProfile");
 
 const INTERNAL_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
 const IMPERSONATABLE_ROLES = ["OfficeAdmin", "BrokerageAdmin"];
@@ -403,3 +404,19 @@ exports.updateSupportContact = async (req, res) => {
     );
   }
 };
+
+// ─── Edit team user (Brokerage Locations): name + LPM ─────────────────────
+// Master Admin can edit every brokerage/team user, but never another Admin
+const EDITABLE_TEAM_USER_ROLES = [
+  ...BROKERAGE_ROLES,
+  "OfficeAdmin",
+  ...TEAM_ROLES,
+];
+
+const teamUserProfile = buildTeamUserProfileHandlers({
+  canEditName: true,
+  scopeCheck: async (target) => EDITABLE_TEAM_USER_ROLES.includes(target.role),
+});
+
+exports.getTeamUserProfile = teamUserProfile.getProfile;
+exports.updateTeamUserProfile = teamUserProfile.updateProfile;

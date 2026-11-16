@@ -198,6 +198,22 @@ const buildServiceAgreementFilter = async (query, baseFilter = {}) => {
   return filter;
 };
 
+// Open = status "open", not marked Completed by the vendor, and not an
+// owner request still waiting for approval.
+const NOT_OPEN_DYNAMIC_STATUSES = ["Completed"];
+
+const buildOpenWorkOrderMatch = async () => {
+  const notOpenStatusIds = await WODynamicStatus.find({
+    name: { $in: NOT_OPEN_DYNAMIC_STATUSES },
+  }).distinct("_id");
+
+  return {
+    status: "open",
+    dynamicStatus: { $nin: notOpenStatusIds },
+    reviewStatus: { $ne: "pending_review" },
+  };
+};
+
 const buildVendorWorkOrderMatch = async (vendorId, query) => {
   const {
     tab,
@@ -434,4 +450,5 @@ module.exports = {
   buildServiceAgreementFilter,
   buildVendorWorkOrderMatch,
   buildVendorServiceAgreementMatch,
+  buildOpenWorkOrderMatch,
 };

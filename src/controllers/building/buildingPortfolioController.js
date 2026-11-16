@@ -24,6 +24,7 @@ const notifyAttachedOwners = (portfolioId, ownerIds) => {
   );
 };
 const { sendSuccess, sendError } = require("../../utils/response");
+const { buildOpenWorkOrderMatch } = require("../workOrder/workOrderQueryBuilder");
 
 const validateAgainstTemplate = (template, formData) => {
   const errors = [];
@@ -255,9 +256,9 @@ exports.getBuildingDetails = async (req, res) => {
         }),
       ]);
 
-    if (!buildingTemplate) {
-      return sendError(res, "Building form template not found", 404);
-    }
+    // if (!buildingTemplate) {
+    //   return sendError(res, "Building form template not found", 404);
+    // }
 
     let units = [];
     if (building.isMultiUnit) {
@@ -281,7 +282,7 @@ exports.getBuildingDetails = async (req, res) => {
         marketingData: building.marketingData || {},
       },
       units,
-      template: buildingTemplate,
+      template: buildingTemplate || null,
       inspectionTemplate: inspectionTemplate || null,
       marketingTemplate: marketingTemplate || null,
     });
@@ -1592,9 +1593,20 @@ exports.getBuildingsByPortfolio = async (req, res) => {
   }
 };
 
-// ── Portfolio landing cards ─────────────────────────────────────────────────
-// Open = primary status "open" AND not marked Completed by the vendor.
-const NOT_OPEN_DYNAMIC_STATUSES = ["Completed"];
+// ── Portfolio / Building landing cards ──────────────────────────────────────
+// Open = primary status "open", not marked Completed by the vendor,
+// and not an owner request still waiting for approval (no work yet).
+// One definition for every "Open work orders" card (shared rule)
+const buildOpenWorkOrderFilter = async (buildingIds) => ({
+  building: { $in: buildingIds },
+  ...(await buildOpenWorkOrderMatch()),
+});
+
+// "1,700.50", "$1700", 1700 → 1700.5 (anything invalid → 0)
+const toAmount = (v) => {
+  const n = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+};
 
 exports.getPortfolioStats = async (req, res) => {
   try {
@@ -1617,18 +1629,11 @@ exports.getPortfolioStats = async (req, res) => {
         }).distinct("_id")
       : [];
 
-    let openWorkOrders = 0;
-    if (buildingIds.length) {
-      const notOpenStatusIds = await WODynamicStatus.find({
-        name: { $in: NOT_OPEN_DYNAMIC_STATUSES },
-      }).distinct("_id");
-
-      openWorkOrders = await WorkOrder.countDocuments({
-        building: { $in: buildingIds },
-        status: "open",
-        dynamicStatus: { $nin: notOpenStatusIds },
-      });
-    }
+    const openWorkOrders = buildingIds.length
+      ? await WorkOrder.countDocuments(
+          await buildOpenWorkOrderFilter(buildingIds),
+        )
+      : 0;
 
     return sendSuccess(res, "Portfolio stats fetched", {
       openWorkOrders,
@@ -1644,6 +1649,57 @@ exports.getPortfolioStats = async (req, res) => {
       err.message || "Failed to fetch portfolio stats",
       500,
     );
+  }
+};
+
+// GET building landing cards
+exports.getBuildingStats = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return sendError(res, "Invalid building id", 400);
+    }
+
+    const building = await Building.findById(id)
+      .select("isMultiUnit parentBuilding formData.monthlyRent")
+      .lean();
+    if (!building) return sendError(res, "Building not found", 404);
+
+    // A multi-unit building's numbers include its units
+    const units =
+      building.isMultiUnit && !building.parentBuilding
+        ? await Building.find({ parentBuilding: building._id })
+            .select("_id formData.monthlyRent")
+            .lean()
+        : [];
+
+    const buildingIds = [building._id, ...units.map((u) => u._id)];
+
+    const openWorkOrders = await WorkOrder.countDocuments(
+      await buildOpenWorkOrderFilter(buildingIds),
+    );
+
+    // Rent: multi-unit → total of the units' rents; otherwise its own rent
+    const unitRentTotal = units.reduce(
+      (sum, u) => sum + toAmount(u.formData?.monthlyRent),
+      0,
+    );
+    const rentBasis = unitRentTotal > 0 ? "units" : "building";
+    const currentRent =
+      rentBasis === "units"
+        ? unitRentTotal
+        : toAmount(building.formData?.monthlyRent);
+
+    return sendSuccess(res, "Building stats fetched", {
+      openWorkOrders,
+      currentRent: Math.round(currentRent * 100) / 100,
+      rentBasis, // "units" | "building"
+      unitCount: units.length,
+      // Not built yet: static 0 until the prospects module exists
+      totalProspects: 0,
+    });
+  } catch (err) {
+    return sendError(res, err.message || "Failed to fetch building stats", 500);
   }
 };
 
