@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const { TEAM_ROLES } = require("../constants/roles");
+const { TEAM_ROLES, LPM_ELIGIBLE_ROLES } = require("../constants/roles");
 
 const userSchema = new mongoose.Schema(
   {
@@ -182,12 +182,11 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// Only internal team members can be LPMs (enforced on every save)
+// Only Team Admins + internal team members can be LPMs (enforced on every save)
 userSchema.pre("validate", function (next) {
-  if (this.isLPM && !TEAM_ROLES.includes(this.role)) this.isLPM = false;
+  if (this.isLPM && !LPM_ELIGIBLE_ROLES.includes(this.role)) this.isLPM = false;
   next();
 });
-
 // Hash password before save
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();

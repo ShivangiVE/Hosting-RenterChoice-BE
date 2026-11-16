@@ -10,6 +10,7 @@ const resolveCompanyVendorIds = require("../../utils/resolveCompanyVendorIds");
 const {
   buildWorkOrderFilter,
   buildServiceAgreementFilter,
+  buildOpenWorkOrderMatch,
 } = require("../workOrder/workOrderQueryBuilder");
 const WorkOrder = require("../../models/WorkOrder");
 const ServiceAgreement = require("../../models/ServiceAgreement");
@@ -282,30 +283,67 @@ exports.getCompanyServiceAgreements = async (req, res) => {
   }
 };
 
+// Company Details cards: open work orders / service agreements that this
+// company's vendors have accepted.
 exports.getCompanyOverview = async (req, res) => {
   try {
     const { id } = req.params;
-    const vendorIds = await resolveCompanyVendorIds(id);
-    const vendorFilter = { vendor: { $in: vendorIds } };
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
 
-    const [openWorkOrders, closedWorkOrders, activeServiceAgreements] =
+    const companyExists = await Company.exists({ _id: id });
+    if (!companyExists) return sendError(res, "Company not found", 404);
+
+    // Accepted jobs stay with the company even if that vendor was removed later
+    const [vendorIds, openWorkOrderMatch, vendorCount] = await Promise.all([
+      resolveCompanyVendorIds(id, { includeInactive: true }),
+      buildOpenWorkOrderMatch(),
+      User.countDocuments({ company: id, role: "Vendor", isActive: true }),
+    ]);
+
+    if (!vendorIds.length) {
+      return sendSuccess(res, "Company overview fetched", {
+        vendorCount,
+        openWorkOrders: 0,
+        openServiceAgreements: 0,
+        closedWorkOrders: 0,
+        activeServiceAgreements: 0,
+      });
+    }
+
+    const acceptedByCompanyVendor = {
+      vendor: { $in: vendorIds },
+      vendorResponse: "accepted",
+    };
+
+    const [openWorkOrders, openServiceAgreements, closedWorkOrders] =
       await Promise.all([
-        WorkOrder.countDocuments({ ...vendorFilter, status: "open" }),
-        WorkOrder.countDocuments({ ...vendorFilter, status: "closed" }),
+        WorkOrder.countDocuments({
+          ...openWorkOrderMatch,
+          ...acceptedByCompanyVendor,
+        }),
         ServiceAgreement.countDocuments({
-          ...vendorFilter,
-          status: { $ne: "closed" },
+          ...acceptedByCompanyVendor,
+          status: "open",
+        }),
+        WorkOrder.countDocuments({
+          vendor: { $in: vendorIds },
+          status: "closed",
         }),
       ]);
 
     return sendSuccess(res, "Company overview fetched", {
-      vendorCount: vendorIds.length,
+      vendorCount,
       openWorkOrders,
+      openServiceAgreements,
       closedWorkOrders,
-      activeServiceAgreements,
+      // Kept for older callers — same value as openServiceAgreements
+      activeServiceAgreements: openServiceAgreements,
     });
   } catch (err) {
-    return sendError(res, err.message, 500);
+    console.error("getCompanyOverview error:", err);
+    return sendError(res, "Failed to fetch company overview", 500);
   }
 };
 

@@ -15,6 +15,8 @@ const {
   getMyBrokerageStaff,
   toggleBrokerageStaffStatus,
   deleteBrokerageStaff,
+  getTeamUserProfile,
+  updateTeamUserProfile,
 } = require("../../controllers/brokerageAdmin/brokerageAdminController");
 
 // All routes: authenticated + BrokerageAdmin only
@@ -28,6 +30,9 @@ router.get("/office-admins/:officeAdminId/team", getOfficeAdminTeam);
 router.get("/teams", getMyTeamsGrouped);
 router.post("/impersonate/:officeAdminId", impersonateOfficeAdmin);
 router.patch("/users/:userId/toggle-status", toggleUserStatus);
+// Edit team user: LPM only (name changes are Master Admin only)
+router.get("/users/:id/profile", getTeamUserProfile);
+router.patch("/users/:id/profile", updateTeamUserProfile);
 router.patch("/brokerage-staff/:id/toggle-status", toggleBrokerageStaffStatus);
 router.delete("/office-admins/:id", deleteOfficeAdmin);
 router.delete("/brokerage-staff/:id", deleteBrokerageStaff);

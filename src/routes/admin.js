@@ -17,6 +17,8 @@ const {
   getUserStatusLogs,
   getLoginAsTargets,
   updateSupportContact,
+  getTeamUserProfile,
+  updateTeamUserProfile,
 } = require("../controllers/admin/adminController");
 
 // All routes protected AND only for Admin
@@ -51,6 +53,9 @@ router.get("/teams-by-office-admin", getTeamsGroupedByOfficeAdmin);
 router.post("/impersonate/:officeAdminId", impersonateOfficeAdmin);
 
 router.patch("/users/:userId/toggle-status", toggleUserStatus);
+// Edit team user (Brokerage Locations): name + LPM
+router.get("/users/:id/profile", getTeamUserProfile);
+router.patch("/users/:id/profile", updateTeamUserProfile);
 
 router.get("/users/:userId/status-logs", getUserStatusLogs);
 
