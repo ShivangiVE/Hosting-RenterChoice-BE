@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const { TEAM_ROLES } = require("../constants/roles");
+const { TEAM_ROLES, LPM_ELIGIBLE_ROLES } = require("../constants/roles");
 
 const userSchema = new mongoose.Schema(
   {
@@ -25,6 +25,7 @@ const userSchema = new mongoose.Schema(
     legalName: { type: String, trim: true },
     fullName: { type: String, trim: true },
     alternateEmail: { type: String, trim: true, lowercase: true, default: "" },
+    phone: { type: String, trim: true, maxlength: 20, default: "" },
     replyToEmail: { type: String, trim: true, lowercase: true },
     alertEmail: { type: String, trim: true, lowercase: true },
     timeZone: { type: String, trim: true, default: "America/New_York" },
@@ -96,6 +97,26 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
+    // "invited" = account created by staff, password not set yet (owner must
+    // finish signup from the invite email). Default "active" keeps every
+    // existing user working without a migration.
+    accountStatus: {
+      type: String,
+      enum: ["invited", "active"],
+      default: "active",
+      index: true,
+    },
+    ownerInviteSentAt: { type: Date, default: null },
+
+    // Brokerage/Team whose deactivation switched this user off (null = not cascaded).
+    // Reactivating that brokerage/team re-activates only these users.
+    deactivatedVia: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Team",
+      default: null,
+      index: true,
+    },
+
     internalWebSessionVersion: {
       type: Number,
       default: 1,
@@ -144,8 +165,14 @@ const userSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // who created this user
     managedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     // resetPasswordToken: { type: String },
-    resetPasswordOTP: { type: String }, // 4-digit code
+    // External reset (Owner / Vendor / Tenant): HMAC of the code, never the code itself
+    resetPasswordOTP: { type: String, select: false },
+    resetPasswordOTPAttempts: { type: Number, default: 0 },
     resetPasswordExpires: { type: Date }, // OTP expiration time
+
+    // Internal "reset via email link" — only the SHA-256 hash is stored
+    // resetPasswordToken: { type: String, select: false, index: true },
+    // resetPasswordTokenExpires: { type: Date, default: null },
 
     // Portfolio-deactivation "notify team admin" throttling (Owner login
     // flow): max 3 sends total, 3-day gap required between each.
@@ -155,12 +182,11 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// Only internal team members can be LPMs (enforced on every save)
+// Only Team Admins + internal team members can be LPMs (enforced on every save)
 userSchema.pre("validate", function (next) {
-  if (this.isLPM && !TEAM_ROLES.includes(this.role)) this.isLPM = false;
+  if (this.isLPM && !LPM_ELIGIBLE_ROLES.includes(this.role)) this.isLPM = false;
   next();
 });
-
 // Hash password before save
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();

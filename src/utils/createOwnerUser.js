@@ -4,8 +4,12 @@ const User = require("../models/User");
 /**
  * Creates the Owner login (User) behind an Owner contact.
  *
- * - Random, never-shown password: staff never know it. The owner sets their
- *   own via "Forgot Password" on the Owner login (existing OTP flow).
+ * - Random, never-shown password: staff never know it. The account starts as
+ *   accountStatus "invited"; the owner sets their own password from the invite
+ *   email sent when they're attached to a portfolio (ownerInviteService).
+ *   "Forgot Password" also activates it (proves email ownership).
+ * - Sends NO email itself — an owner card created from Contacts has no
+ *   portfolio yet, so the invite goes out only on portfolio attach.
  * - Runs inside the caller's transaction (session) so the contact and the
  *   user are created together or not at all.
  * - Caller is responsible for the duplicate-email check before calling.
@@ -31,8 +35,9 @@ async function createOwnerUser(contact, actor, session) {
         firstName: firstName || String(contact.preferredName).trim(),
         lastName: rest.join(" ") || undefined,
         contactInfo: contact.phones?.mobile?.trim() || undefined,
-        // Unusable until the owner resets it (hashed by the User pre-save hook)
+        // Unusable until the owner claims the invite (hashed by the User pre-save hook)
         password: crypto.randomBytes(32).toString("hex"),
+        accountStatus: "invited",
         createdBy: actor?._id,
       },
     ],

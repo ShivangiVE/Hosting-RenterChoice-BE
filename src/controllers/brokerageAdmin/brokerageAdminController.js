@@ -7,6 +7,7 @@ const {
   createUserAccount,
   toCreatedUser,
 } = require("../../utils/createUserAccount");
+const { buildTeamUserProfileHandlers } = require("../../utils/teamUserProfile");
 
 const CREATABLE_BROKERAGE_STAFF_ROLES = BROKERAGE_STAFF_ROLES;
 
@@ -31,7 +32,6 @@ const myOfficeAdminsFilter = (brokerageAdminId) => ({
   role: "OfficeAdmin",
   $or: [{ createdBy: brokerageAdminId }, { managedBy: brokerageAdminId }],
 });
-
 
 const withTeamName = (admin) => ({
   _id: admin._id,
@@ -84,7 +84,10 @@ exports.createBrokerageStaff = async (req, res) => {
     // Link the staff member to the brokerage itself. If this ever fails, the
     // createdBy fallback in brokerageStaffFilter still finds them.
     if (req.user.team) {
-      await User.updateOne({ _id: user._id }, { $set: { team: req.user.team } });
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { team: req.user.team } },
+      );
     }
 
     return sendSuccess(
@@ -223,36 +226,44 @@ exports.impersonateOfficeAdmin = async (req, res) => {
   }
 };
 
+// Users this Brokerage Admin manages — one rule for status toggle + profile edit
+const isManagedByBrokerageAdmin = async (targetUser, performer) => {
+  const me = performer._id.toString();
+
+  // Their OfficeAdmins (created by them or managed by them)
+  if (targetUser.role === "OfficeAdmin")
+    return (
+      targetUser.createdBy?.toString() === me ||
+      targetUser.managedBy?.toString() === me
+    );
+
+  // Their own brokerage staff (Accounts / User)
+  if (CREATABLE_BROKERAGE_STAFF_ROLES.includes(targetUser.role))
+    return isMyBrokerageStaff(targetUser, performer);
+
+  // Team members under their OfficeAdmins
+  if (TEAM_ROLES.includes(targetUser.role)) {
+    const officeAdmin = await User.findOne({
+      _id: targetUser.createdBy,
+      ...myOfficeAdminsFilter(performer._id),
+    });
+    return !!officeAdmin;
+  }
+
+  return false;
+};
+
 // Activating and Deactivating the user.
 exports.toggleUserStatus = (req, res) =>
-  toggleUserStatus(req, res, {
-    scopeCheck: async (targetUser, performer) => {
-      // Can toggle OfficeAdmins they created
-      const me = performer._id.toString();
+  toggleUserStatus(req, res, { scopeCheck: isManagedByBrokerageAdmin });
 
-      // Can toggle their OfficeAdmins (created by them or managed by them)
-      if (targetUser.role === "OfficeAdmin")
-        return (
-          targetUser.createdBy?.toString() === me ||
-          targetUser.managedBy?.toString() === me
-        );
-
-      // Can toggle their own brokerage staff (Accounts / User)
-      if (CREATABLE_BROKERAGE_STAFF_ROLES.includes(targetUser.role))
-        return isMyBrokerageStaff(targetUser, performer);
-
-      // Can toggle team members under their OfficeAdmins
-      if (TEAM_ROLES.includes(targetUser.role)) {
-        const officeAdmin = await User.findOne({
-          _id: targetUser.createdBy,
-          ...myOfficeAdminsFilter(performer._id),
-        });
-        return !!officeAdmin;
-      }
-
-      return false;
-    },
-  });
+// Edit team user: Brokerage Admin can change LPM only (names = Master Admin)
+const teamUserProfile = buildTeamUserProfileHandlers({
+  canEditName: false,
+  scopeCheck: isManagedByBrokerageAdmin,
+});
+exports.getTeamUserProfile = teamUserProfile.getProfile;
+exports.updateTeamUserProfile = teamUserProfile.updateProfile;
 
 // BrokerageAdmin toggles active/inactive for their own staff
 exports.toggleBrokerageStaffStatus = (req, res) =>

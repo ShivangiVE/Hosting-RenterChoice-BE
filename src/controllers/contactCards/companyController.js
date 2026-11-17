@@ -10,72 +10,12 @@ const resolveCompanyVendorIds = require("../../utils/resolveCompanyVendorIds");
 const {
   buildWorkOrderFilter,
   buildServiceAgreementFilter,
+  buildOpenWorkOrderMatch,
 } = require("../workOrder/workOrderQueryBuilder");
 const WorkOrder = require("../../models/WorkOrder");
 const ServiceAgreement = require("../../models/ServiceAgreement");
 const AuditService = require("../../services/auditService");
-
-// ---------- E-Pay validation ----------
-const EPAY_VALIDATION = {
-  transit: /^\d{5}$/,
-};
-
-async function validateEpayPayload(body) {
-  const errors = [];
-  const {
-    bankId,
-    transit,
-    accountNumber,
-    confirmAccountNumber,
-    // accountType,
-    billingFirstName,
-    billingLastName,
-    billingEmail,
-  } = body;
-
-  let bank = null;
-  if (!bankId) {
-    errors.push("Bank selection is required.");
-  } else {
-    bank = await Bank.findOne({ _id: bankId, isActive: true });
-    if (!bank) {
-      errors.push("Selected bank is invalid or no longer available.");
-    }
-  }
-
-  if (!transit || !EPAY_VALIDATION.transit.test(transit)) {
-    errors.push("Transit number must be exactly 5 digits.");
-  }
-
-  if (bank) {
-    if (!accountNumber || !/^\d+$/.test(accountNumber)) {
-      errors.push("Account number must contain digits only.");
-    } else if (
-      accountNumber.length < bank.accountNumberMin ||
-      accountNumber.length > bank.accountNumberMax
-    ) {
-      errors.push(
-        `Account number must be between ${bank.accountNumberMin} and ${bank.accountNumberMax} digits for ${bank.name}.`,
-      );
-    }
-  }
-
-  if (accountNumber !== confirmAccountNumber) {
-    errors.push("Account number and confirmation do not match.");
-  }
-
-  // if (!accountType || !["checking", "savings"].includes(accountType)) {
-  //   errors.push("Account type is required.");
-  // }
-
-  if (!billingFirstName?.trim()) errors.push("Billing first name is required.");
-  if (!billingLastName?.trim()) errors.push("Billing last name is required.");
-  if (billingEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(billingEmail)) {
-    errors.push("Billing email is invalid.");
-  }
-
-  return { errors, bank };
-}
+const { validateEpayPayload } = require("../../utils/epayPayload");
 
 // Create Company
 exports.createCompany = async (req, res) => {
@@ -343,30 +283,67 @@ exports.getCompanyServiceAgreements = async (req, res) => {
   }
 };
 
+// Company Details cards: open work orders / service agreements that this
+// company's vendors have accepted.
 exports.getCompanyOverview = async (req, res) => {
   try {
     const { id } = req.params;
-    const vendorIds = await resolveCompanyVendorIds(id);
-    const vendorFilter = { vendor: { $in: vendorIds } };
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, "Invalid company id", 400);
+    }
 
-    const [openWorkOrders, closedWorkOrders, activeServiceAgreements] =
+    const companyExists = await Company.exists({ _id: id });
+    if (!companyExists) return sendError(res, "Company not found", 404);
+
+    // Accepted jobs stay with the company even if that vendor was removed later
+    const [vendorIds, openWorkOrderMatch, vendorCount] = await Promise.all([
+      resolveCompanyVendorIds(id, { includeInactive: true }),
+      buildOpenWorkOrderMatch(),
+      User.countDocuments({ company: id, role: "Vendor", isActive: true }),
+    ]);
+
+    if (!vendorIds.length) {
+      return sendSuccess(res, "Company overview fetched", {
+        vendorCount,
+        openWorkOrders: 0,
+        openServiceAgreements: 0,
+        closedWorkOrders: 0,
+        activeServiceAgreements: 0,
+      });
+    }
+
+    const acceptedByCompanyVendor = {
+      vendor: { $in: vendorIds },
+      vendorResponse: "accepted",
+    };
+
+    const [openWorkOrders, openServiceAgreements, closedWorkOrders] =
       await Promise.all([
-        WorkOrder.countDocuments({ ...vendorFilter, status: "open" }),
-        WorkOrder.countDocuments({ ...vendorFilter, status: "closed" }),
+        WorkOrder.countDocuments({
+          ...openWorkOrderMatch,
+          ...acceptedByCompanyVendor,
+        }),
         ServiceAgreement.countDocuments({
-          ...vendorFilter,
-          status: { $ne: "closed" },
+          ...acceptedByCompanyVendor,
+          status: "open",
+        }),
+        WorkOrder.countDocuments({
+          vendor: { $in: vendorIds },
+          status: "closed",
         }),
       ]);
 
     return sendSuccess(res, "Company overview fetched", {
-      vendorCount: vendorIds.length,
+      vendorCount,
       openWorkOrders,
+      openServiceAgreements,
       closedWorkOrders,
-      activeServiceAgreements,
+      // Kept for older callers — same value as openServiceAgreements
+      activeServiceAgreements: openServiceAgreements,
     });
   } catch (err) {
-    return sendError(res, err.message, 500);
+    console.error("getCompanyOverview error:", err);
+    return sendError(res, "Failed to fetch company overview", 500);
   }
 };
 
@@ -614,6 +591,10 @@ exports.updateCompanyPaymentInfo = async (req, res) => {
       billingEmail,
       updatedAt: new Date(),
       updatedBy: req.user?._id,
+      source: "internal",
+      approvedBy: null, // a direct internal edit needs no approval
+      approvedAt: null,
+      changeRequest: null,
     };
 
     await company.save();

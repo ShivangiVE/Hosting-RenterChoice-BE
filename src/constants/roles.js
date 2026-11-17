@@ -51,6 +51,16 @@ const ALL_ROLES = [...INTERNAL_ROLES, "Vendor", "Owner", "Tenant"];
 
 const INTERNAL_TEAM_ROLES = [INTERNAL_TEAM];
 
+// Who can approve / reject owner repair requests.
+// Other roles are paused for now — switch to "RepairsTeam" here when they return.
+const OWNER_REQUEST_REVIEWER_ROLES = ["OfficeAdmin", "InternalTeam"];
+
+// Who can approve a vendor's company payment info change
+const PAYMENT_INFO_REVIEWER_ROLES = ["Admin", "OfficeAdmin", "InternalTeam"];
+
+// Who can be a Licensed Property Manager: Team Admins + internal team users
+const LPM_ELIGIBLE_ROLES = ["OfficeAdmin", ...TEAM_ROLES];
+
 module.exports = {
   INTERNAL_TEAM,
   INTERNAL_TEAM_ROLES,
@@ -63,4 +73,7 @@ module.exports = {
   WORK_ORDER_ROLES,
   WORK_ORDER_AND_VENDOR_ROLES,
   ALL_ROLES,
+  OWNER_REQUEST_REVIEWER_ROLES,
+  PAYMENT_INFO_REVIEWER_ROLES,
+  LPM_ELIGIBLE_ROLES,
 };
