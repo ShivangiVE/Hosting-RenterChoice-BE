@@ -12,6 +12,11 @@ const WODynamicStatus = require("../../models/WODynamicStatus");
 const WorkOrder = require("../../models/WorkOrder");
 const Counter = require("../../utils/Counter");
 const { findDynamicStatus } = require("../../utils/dynamicStatus");
+const {
+  getNextSequence,
+  PENDING_NUMBER,
+  createWithSequence,
+} = require("../../utils/sequence");
 const { TYPE_MAP, normalize } = require("../../utils/inspectionType");
 const { escapeRegex, toSearchRegex } = require("../../utils/stringUtils");
 const { sendSuccess, sendError } = require("../../utils/response");
@@ -57,15 +62,10 @@ const {
   scheduleKeyReturnReminder,
 } = require("../../services/workOrderReminderService");
 
-// Helper function to get next sequence number
-const getNextSequence = async (sequenceName) => {
-  const counter = await Counter.findByIdAndUpdate(
-    sequenceName,
-    { $inc: { sequence_value: 1 } },
-    { new: true, upsert: true },
-  );
-  return counter.sequence_value;
-};
+/** First Mongoose validation message, for a clean 400 response. */
+const firstValidationMessage = (err) =>
+  Object.values(err?.errors || {})[0]?.message ||
+  "Please fill in all required fields.";
 
 const resolveCategoryName = async (categoryValue) => {
   if (!categoryValue) return categoryValue;
@@ -267,9 +267,15 @@ exports.getWorkOrders = async (req, res) => {
     let filter = {};
 
     if (allowedUserIds !== null) {
+      // Owner requests belong to the team that manages the building
+      const teamBuildingIds = await Building.find({
+        createdBy: { $in: allowedUserIds },
+      }).distinct("_id");
+
       filter.$or = [
         { createdBy: { $in: allowedUserIds } }, // created by team
         { assignedTo: { $in: allowedUserIds } }, // assigned to team
+        { source: "owner", building: { $in: teamBuildingIds } }, // owner requests on team buildings
       ];
     }
 
@@ -304,6 +310,15 @@ exports.getWorkOrders = async (req, res) => {
 
     // Category filter
     if (category && category !== "All") filter.category = category;
+
+    // Owner requests waiting for approval
+    if (
+      ["pending_review", "approved", "rejected", "cancelled"].includes(
+        req.query.reviewStatus,
+      )
+    ) {
+      filter.reviewStatus = req.query.reviewStatus;
+    }
 
     if (company && company !== "All") {
       const companyScope = await buildCompanyScopeFilter(company);
@@ -1088,6 +1103,25 @@ exports.updateWorkOrder = async (req, res) => {
         updateData.dynamicStatus,
       );
       if (!statusExists) return sendError(res, "Invalid dynamic status", 400);
+    }
+
+    // Review fields only change through the review endpoint
+    delete updateData.source;
+    delete updateData.reviewStatus;
+    delete updateData.reviewedBy;
+    delete updateData.reviewedAt;
+    delete updateData.reviewNotes;
+
+    // Owner requests must be approved before a vendor is assigned
+    if (
+      workOrder.reviewStatus === "pending_review" &&
+      (updateData.vendor || updateData.company)
+    ) {
+      return sendError(
+        res,
+        "Approve this owner request before assigning a vendor.",
+        409,
+      );
     }
 
     const incomingCompany = updateData.company;
@@ -2723,6 +2757,15 @@ exports.reassignWorkOrder = async (req, res) => {
     if (!workOrder) return sendError(res, "Work order not found", 404);
     if (workOrder.status === "closed") {
       return sendError(res, "Cannot reassign a closed work order", 400);
+    }
+
+    // Owner requests must be approved before any vendor is assigned
+    if (workOrder.reviewStatus === "pending_review") {
+      return sendError(
+        res,
+        "Approve this owner request before assigning a vendor.",
+        409,
+      );
     }
 
     const defaultStatus = await WODynamicStatus.findOne({ isDefault: true });

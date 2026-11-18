@@ -26,6 +26,8 @@ const {
   updatePortfolioStatus,
   updatePortfolioSummary,
   getPortfolioStats,
+  resendOwnerInvite,
+  getBuildingStats,
 } = require("../../controllers/building/buildingPortfolioController");
 const { ALLOWED_INTERNAL_ROLES } = require("../../constants/roles");
 const {
@@ -179,12 +181,21 @@ router.get(
 
 router.get("/portfolio/:id/stats", protect, getPortfolioStats);
 
+router.get("/buildings/:id/stats", protect, getBuildingStats);
+
 // ========================= Portfolio Owners =========================
 router.post(
   "/portfolio/:portfolioId/owners",
   protect,
   authorize(...ALLOWED_INTERNAL_ROLES),
   addOwnersToPortfolio,
+);
+
+router.post(
+  "/portfolio/:portfolioId/owners/:ownerId/resend-invite",
+  protect,
+  authorize(...ALLOWED_INTERNAL_ROLES),
+  resendOwnerInvite,
 );
 
 router.delete(

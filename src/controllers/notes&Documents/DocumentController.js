@@ -22,6 +22,11 @@ const {
   NOTE_SOURCE_TYPES,
 } = require("../../utils/noteSourceTypes");
 const { resolveCompanyId } = require("../../utils/companyScope");
+const AuditService = require("../../services/auditService");
+const {
+  ownerCanAccessDocument,
+  getOwnerDocumentScope,
+} = require("../../utils/ownerDocumentScope");
 
 // Upload multiple documents
 exports.uploadDocuments = async (req, res) => {
@@ -984,6 +989,14 @@ exports.getDocumentViewUrl = async (req, res) => {
       }
     }
 
+    // Owners: only published documents inside their own portfolios/buildings
+    if (
+      req.user.role === "Owner" &&
+      !(await ownerCanAccessDocument(document, req.user._id))
+    ) {
+      return sendError(res, "Document not found", 404);
+    }
+
     const url = await getFileViewUrl(document.fileUrl);
 
     return sendSuccess(res, "Document view URL generated", {
@@ -1020,6 +1033,13 @@ exports.downloadDocument = async (req, res) => {
       }
     }
 
+    if (
+      req.user.role === "Owner" &&
+      !(await ownerCanAccessDocument(document, req.user._id))
+    ) {
+      return sendError(res, "Document not found", 404);
+    }
+
     if (!fileExists(document.fileUrl)) {
       return sendError(res, "File not found on server", 404);
     }
@@ -1047,5 +1067,444 @@ exports.downloadDocument = async (req, res) => {
   } catch (err) {
     console.error("Error downloading document:", err);
     return sendError(res, err.message || "Failed to download document", 500);
+  }
+};
+
+// ========================= Owner Portal =========================
+const OWNER_DOC_FIELDS =
+  "fileName description fileType mimeType fileSize category building portfolio createdAt publishedToOwnerAt";
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const buildingLabel = (b) =>
+  [
+    b.formData?.address || b.buildingAbbreviation || "Address not set",
+    b.unitNumber ? `Unit ${b.unitNumber}` : null,
+  ]
+    .filter(Boolean)
+    .join(" - ");
+
+// Internal: publish / unpublish a document to the Owner Portal
+exports.setDocumentOwnerVisibility = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { published } = req.body || {};
+
+    if (!mongoose.isValidObjectId(id)) {
+      return sendError(res, "Invalid document id", 400);
+    }
+    if (typeof published !== "boolean") {
+      return sendError(res, "published must be true or false", 400);
+    }
+
+    const doc = await Document.findById(id)
+      .select("fileName portfolio building publishedToOwner")
+      .lean();
+    if (!doc) return sendError(res, "Document not found", 404);
+
+    if (published && !doc.portfolio && !doc.building) {
+      return sendError(
+        res,
+        "Only documents attached to a portfolio or building can be published to owners",
+        400,
+      );
+    }
+
+    // Atomic + idempotent: only flips if it isn't already in that state
+    const updated = await Document.findOneAndUpdate(
+      { _id: id, publishedToOwner: published ? { $ne: true } : true },
+      {
+        $set: published
+          ? {
+              publishedToOwner: true,
+              publishedToOwnerAt: new Date(),
+              publishedToOwnerBy: req.user._id,
+            }
+          : {
+              publishedToOwner: false,
+              publishedToOwnerAt: null,
+              publishedToOwnerBy: null,
+            },
+      },
+      { new: true },
+    )
+      .select("fileName portfolio building publishedToOwner publishedToOwnerAt")
+      .lean();
+
+    if (!updated) {
+      return sendSuccess(res, "No change needed", {
+        document: { _id: doc._id, publishedToOwner: published },
+      });
+    }
+
+    // Shows in the portfolio/building Audit Summary; never fails the request
+    const auditTarget = updated.portfolio
+      ? { entityType: "portfolio", entityId: updated.portfolio }
+      : updated.building
+        ? { entityType: "building", entityId: updated.building }
+        : null;
+    if (auditTarget) {
+      AuditService.logActivity({
+        ...auditTarget,
+        action: "updated",
+        actionDetails: `Document "${updated.fileName}" ${
+          published ? "published to" : "removed from"
+        } Owner Portal`,
+        changes: [
+          {
+            field: "publishedToOwner",
+            oldValue: !published,
+            newValue: published,
+          },
+        ],
+        performedBy: req.user._id,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      }).catch((e) => console.error("Owner publish audit failed:", e));
+    }
+
+    return sendSuccess(
+      res,
+      published
+        ? "Document published to Owner Portal"
+        : "Document removed from Owner Portal",
+      { document: updated },
+    );
+  } catch (err) {
+    console.error("Error updating owner visibility:", err);
+    return sendError(res, "Failed to update Owner Portal visibility", 500);
+  }
+};
+
+// Owner: published documents for the owner's portfolios, buildings and units
+exports.getOwnerDocuments = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit, 10) || 10, 1),
+      100,
+    );
+    const { portfolioId, buildingId, category, startDate, endDate, search } =
+      req.query;
+
+    // Whitelisted sorting (default: newest first)
+    const SORT_FIELDS = {
+      fileName: "fileName",
+      uploadDate: "createdAt",
+      createdAt: "createdAt",
+    };
+    const sortField = SORT_FIELDS[req.query.sortBy] || "createdAt";
+    const sortDir = req.query.sortBy
+      ? req.query.sortOrder === "desc"
+        ? -1
+        : 1
+      : -1;
+
+    const { portfolios, portfolioIds, buildingIds, buildings } =
+      await getOwnerDocumentScope(req.user._id);
+
+    if (!portfolioIds.length) {
+      return sendSuccess(res, "Documents fetched successfully", {
+        documents: [],
+        total: 0,
+        page,
+        pages: 0,
+        portfolios: [],
+        buildings: [],
+        categories: [],
+      });
+    }
+
+    const scope = {
+      publishedToOwner: true,
+      $or: [
+        { portfolio: { $in: portfolioIds } },
+        { building: { $in: buildingIds } },
+      ],
+    };
+    const filter = { ...scope };
+
+    // Portfolio filter: only one of the owner's own portfolios
+    if (portfolioId && portfolioId !== "All") {
+      const pid = String(portfolioId);
+      const inScope = portfolioIds.some((id) => String(id) === pid);
+      const pBuildingIds = buildings
+        .filter((b) => String(b.ownerPortfolioId) === pid)
+        .map((b) => b._id);
+      filter.$or = inScope
+        ? [{ portfolio: pid }, { building: { $in: pBuildingIds } }]
+        : [{ _id: null }]; // not theirs → nothing
+    }
+
+    // Building filter can only narrow, never widen, the owner's scope
+    if (buildingId && buildingId !== "All") {
+      const selected = buildings
+        .filter(
+          (b) =>
+            String(b._id) === String(buildingId) ||
+            String(b.parentBuilding) === String(buildingId),
+        )
+        .map((b) => b._id);
+      delete filter.$or;
+      filter.building = { $in: selected };
+    }
+
+    if (category && category !== "All") {
+      if (!mongoose.isValidObjectId(category)) {
+        return sendError(res, "Invalid category", 400);
+      }
+      filter.category = category;
+    }
+
+    if (startDate || endDate) {
+      const range = {};
+      const from = startDate ? new Date(startDate) : null;
+      const to = endDate ? new Date(endDate) : null;
+      if (from && !isNaN(from)) range.$gte = from;
+      if (to && !isNaN(to)) {
+        to.setHours(23, 59, 59, 999);
+        range.$lte = to;
+      }
+      if (Object.keys(range).length) filter.createdAt = range;
+    }
+
+    const term = typeof search === "string" ? search.trim().slice(0, 100) : "";
+    if (term) {
+      const rx = new RegExp(escapeRegex(term), "i");
+      filter.$and = [{ $or: [{ fileName: rx }, { description: rx }] }];
+    }
+
+    const [documents, total, categoryIds] = await Promise.all([
+      Document.find(filter)
+        .select(OWNER_DOC_FIELDS) // fileUrl / uploader are never sent to owners
+        .populate("category", "name")
+        .populate(
+          "building",
+          "buildingAbbreviation unitNumber formData.address",
+        )
+        .populate("portfolio", "portfolioName portfolioAbbreviation")
+        .collation({ locale: "en", strength: 2 }) // case-insensitive name sort
+        .sort({ [sortField]: sortDir, _id: sortDir }) // _id = stable paging
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Document.countDocuments(filter),
+      Document.distinct("category", scope),
+    ]);
+
+    const categories = categoryIds.length
+      ? await NoteCategory.find({ _id: { $in: categoryIds } })
+          .select("name")
+          .sort({ name: 1 })
+          .lean()
+      : [];
+
+    // Building-only documents still need their portfolio for the filter
+    const buildingPortfolio = new Map(
+      buildings.map((b) => [String(b._id), b.ownerPortfolioId]),
+    );
+    const byLabel = (a, b) => a.label.localeCompare(b.label);
+
+    return sendSuccess(res, "Documents fetched successfully", {
+      documents: documents.map((d) => ({
+        ...d,
+        portfolioId:
+          d.portfolio?._id ||
+          buildingPortfolio.get(String(d.building?._id)) ||
+          null,
+      })),
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      portfolios: portfolios
+        .map((p) => ({
+          _id: p._id,
+          label: p.portfolioName || p.portfolioAbbreviation || "Portfolio",
+        }))
+        .sort(byLabel),
+      buildings: buildings
+        .map((b) => ({
+          _id: b._id,
+          label: buildingLabel(b),
+          portfolioId: b.ownerPortfolioId,
+        }))
+        .sort(byLabel),
+      categories,
+    });
+  } catch (err) {
+    console.error("Error fetching owner documents:", err);
+    return sendError(res, "Failed to fetch documents", 500);
+  }
+};
+
+// ========================= Owner Portal: upload =========================
+const OWNER_UPLOAD_CATEGORY = "Provided by Owner"; // rename here if the client wants another label
+const OWNER_ALLOWED_TYPES = ["pdf", "image", "video", "word", "excel"];
+const MAX_OWNER_FILE_NAME = 200;
+const MAX_OWNER_DESCRIPTION = 500;
+
+const removeTempFiles = (files = []) =>
+  files.forEach((f) => {
+    try {
+      if (f?.path && fs.existsSync(f.path)) fs.unlinkSync(f.path);
+    } catch {}
+  });
+
+const cleanText = (v, max) =>
+  typeof v === "string" ? v.trim().slice(0, max) : "";
+
+// Find-or-create; safe if two uploads create it at the same moment
+const getOwnerUploadCategoryId = async () => {
+  const find = () =>
+    NoteCategory.findOne({ name: OWNER_UPLOAD_CATEGORY }).select("_id").lean();
+
+  const existing = await find();
+  if (existing) return existing._id;
+  try {
+    const created = await NoteCategory.create({ name: OWNER_UPLOAD_CATEGORY });
+    return created._id;
+  } catch (err) {
+    if (err.code === 11000) return (await find())._id; // created by a parallel request
+    throw err;
+  }
+};
+
+// Owner: upload documents / images / videos — each file to one of their portfolios
+exports.ownerUploadDocuments = async (req, res) => {
+  const files = req.files || [];
+  const storedUrls = [];
+
+  try {
+    if (!files.length) {
+      return sendError(res, "Please select at least one file", 400);
+    }
+
+    // Only the owner's ACTIVE portfolios
+    const ownerPortfolios = await Portfolio.find({
+      owners: req.user._id,
+      status: { $ne: "Deactivated" },
+    })
+      .select("_id portfolioName")
+      .lean();
+
+    if (!ownerPortfolios.length) {
+      removeTempFiles(files);
+      return sendError(res, "You are not linked to any active portfolio", 403);
+    }
+
+    // Documents, images and videos only
+    const blocked = files.find(
+      (f) => !OWNER_ALLOWED_TYPES.includes(getFileType(f.mimetype)),
+    );
+    if (blocked) {
+      removeTempFiles(files);
+      return sendError(
+        res,
+        `"${blocked.originalname}" isn't supported. Please upload documents, images or videos.`,
+        400,
+      );
+    }
+
+    let meta = [];
+    try {
+      meta = JSON.parse(req.body?.documents || "[]");
+    } catch {
+      meta = [];
+    }
+    if (!Array.isArray(meta)) meta = [];
+
+    // Each file's portfolio must be one of the owner's (one portfolio → used by default)
+    const portfolioById = new Map(
+      ownerPortfolios.map((p) => [String(p._id), p]),
+    );
+    const fallback =
+      ownerPortfolios.length === 1 ? String(ownerPortfolios[0]._id) : "";
+    const targets = files.map((_, i) =>
+      portfolioById.get(String(meta[i]?.portfolio || fallback)),
+    );
+
+    const missing = targets.findIndex((t) => !t);
+    if (missing !== -1) {
+      removeTempFiles(files);
+      return meta[missing]?.portfolio
+        ? sendError(res, "You can only upload to your own portfolios", 403)
+        : sendError(
+            res,
+            `Please select a portfolio for "${files[missing].originalname}"`,
+            400,
+          );
+    }
+
+    const categoryId = await getOwnerUploadCategoryId();
+
+    // Store every file first; if anything fails, the catch removes them all
+    for (const file of files) {
+      storedUrls.push(await uploadFile(file, "uploads/documents"));
+    }
+
+    const now = new Date();
+    const docs = await Document.insertMany(
+      files.map((file, i) => ({
+        fileName:
+          cleanText(meta[i]?.fileName, MAX_OWNER_FILE_NAME) ||
+          file.originalname,
+        originalFileName: file.originalname,
+        description: cleanText(meta[i]?.description, MAX_OWNER_DESCRIPTION),
+        category: categoryId, // server decides — never sent by the owner
+        fileType: getFileType(file.mimetype),
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        fileUrl: storedUrls[i],
+        portfolio: targets[i]._id, // shows in that Portfolio → Notes & Docs
+        building: null,
+        uploadedBy: req.user._id,
+        publishedToOwner: true,
+        publishedToOwnerAt: now,
+        publishedToOwnerBy: req.user._id,
+      })),
+    );
+
+    // One audit entry per portfolio
+    const namesByPortfolio = new Map();
+    docs.forEach((d) => {
+      const key = String(d.portfolio);
+      namesByPortfolio.set(key, [
+        ...(namesByPortfolio.get(key) || []),
+        d.fileName,
+      ]);
+    });
+    namesByPortfolio.forEach((names, portfolioId) => {
+      AuditService.logActivity({
+        entityType: "portfolio",
+        entityId: portfolioId,
+        action: "updated",
+        actionDetails: `Owner uploaded ${names.length} document(s): ${names.join(", ")}`,
+        performedBy: req.user._id,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      }).catch((e) => console.error("Owner upload audit failed:", e));
+    });
+
+    const message =
+      namesByPortfolio.size === 1
+        ? `${docs.length} document(s) uploaded to ${targets[0].portfolioName}`
+        : `${docs.length} documents uploaded to ${namesByPortfolio.size} portfolios`;
+
+    return sendSuccess(
+      res,
+      message,
+      { documents: docs.map((d) => ({ _id: d._id, fileName: d.fileName })) },
+      201,
+    );
+  } catch (err) {
+    console.error("Error uploading owner documents:", err);
+    removeTempFiles(files);
+    storedUrls.forEach((url) =>
+      Promise.resolve()
+        .then(() => deleteFile(url))
+        .catch(() => {}),
+    );
+    if (err.name === "ValidationError") {
+      return sendError(res, "One or more files couldn't be saved", 400);
+    }
+    return sendError(res, "Failed to upload documents", 500);
   }
 };

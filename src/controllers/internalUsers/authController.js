@@ -6,6 +6,10 @@ const { INTERNAL_ROLES } = require("../../constants/roles");
 
 // Generate JWT
 const generateToken = require("../../utils/generateToken");
+const { sendPasswordChangedEmail } = require("../../services/emailService");
+
+// Used by changePassword (forgot/reset is the shared OTP flow in /api/auth)
+const MIN_PASSWORD_LENGTH = 8;
 
 // Login
 exports.loginInternal = async (req, res, next) => {
@@ -99,6 +103,17 @@ exports.changePassword = async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
 
+    if (
+      !currentPassword ||
+      String(newPassword || "").length < MIN_PASSWORD_LENGTH
+    ) {
+      return sendError(
+        res,
+        `Current password and a new password of at least ${MIN_PASSWORD_LENGTH} characters are required`,
+        400,
+      );
+    }
+
     const user = await User.findById(req.user.id).select("+password");
     if (!user) {
       return sendError(res, "User not found", 404);
@@ -115,6 +130,13 @@ exports.changePassword = async (req, res, next) => {
     user.externalWebSessionVersion += 1;
 
     await user.save();
+
+    sendPasswordChangedEmail({
+      to: user.email,
+      name: user.preferredName,
+    }).catch((e) =>
+      console.error("Password changed notice failed:", e.message),
+    );
 
     return sendSuccess(res, "Password updated successfully");
   } catch (err) {
@@ -172,65 +194,65 @@ exports.updateProfile = async (req, res, next) => {
 };
 
 // Forgot Password
-exports.forgotPassword = async (req, res, next) => {
-  try {
-    const { email } = req.body;
-    const user = await User.findOne({ email });
+// exports.forgotPassword = async (req, res, next) => {
+//   try {
+//     const { email } = req.body;
+//     const user = await User.findOne({ email });
 
-    if (!user || !INTERNAL_ROLES.includes(user.role)) {
-      return sendError(res, "No internal account found with that email", 404);
-    }
+//     if (!user || !INTERNAL_ROLES.includes(user.role)) {
+//       return sendError(res, "No internal account found with that email", 404);
+//     }
 
-    const resetToken = crypto.randomBytes(20).toString("hex");
-    const hashedToken = crypto
-      .createHash("sha256")
-      .update(resetToken)
-      .digest("hex");
+//     const resetToken = crypto.randomBytes(20).toString("hex");
+//     const hashedToken = crypto
+//       .createHash("sha256")
+//       .update(resetToken)
+//       .digest("hex");
 
-    user.resetPasswordToken = hashedToken;
-    user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+//     user.resetPasswordToken = hashedToken;
+//     user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
 
-    await user.save();
+//     await user.save();
 
-    const appUrl = (process.env.CLIENT_APP_URL || process.env.CORS_ORIGIN || "")
-      .split(",")[0]
-      .trim();
-    const resetUrl = `${appUrl}/reset?token=${resetToken}`;
+//     const appUrl = (process.env.CLIENT_APP_URL || process.env.CORS_ORIGIN || "")
+//       .split(",")[0]
+//       .trim();
+//     const resetUrl = `${appUrl}/reset?token=${resetToken}`;
 
-    return sendSuccess(res, "Reset link generated", { resetUrl });
-  } catch (err) {
-    next(err);
-  }
-};
+//     return sendSuccess(res, "Reset link generated", { resetUrl });
+//   } catch (err) {
+//     next(err);
+//   }
+// };
 
 // Reset Password (from token)
-exports.resetPassword = async (req, res, next) => {
-  try {
-    const { token, password } = req.body;
+// exports.resetPassword = async (req, res, next) => {
+//   try {
+//     const { token, password } = req.body;
 
-    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+//     const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
-    const user = await User.findOne({
-      resetPasswordToken: hashedToken,
-      resetPasswordExpires: { $gt: Date.now() },
-    });
+//     const user = await User.findOne({
+//       resetPasswordToken: hashedToken,
+//       resetPasswordExpires: { $gt: Date.now() },
+//     });
 
-    if (!user || !INTERNAL_ROLES.includes(user.role)) {
-      return sendError(res, "Invalid or expired reset token", 400);
-    }
+//     if (!user || !INTERNAL_ROLES.includes(user.role)) {
+//       return sendError(res, "Invalid or expired reset token", 400);
+//     }
 
-    user.password = password;
+//     user.password = password;
 
-    user.internalWebSessionVersion += 1;
-    user.externalWebSessionVersion += 1;
+//     user.internalWebSessionVersion += 1;
+//     user.externalWebSessionVersion += 1;
 
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
+//     user.resetPasswordToken = undefined;
+//     user.resetPasswordExpires = undefined;
 
-    await user.save();
+//     await user.save();
 
-    return sendSuccess(res, "Password has been reset successfully");
-  } catch (err) {
-    next(err);
-  }
-};
+//     return sendSuccess(res, "Password has been reset successfully");
+//   } catch (err) {
+//     next(err);
+//   }
+// };
